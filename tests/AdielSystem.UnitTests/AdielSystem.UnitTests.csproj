@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <ProjectReference Include="../../src/api/AdielSystem.Application/AdielSystem.Application.csproj" />
+    <ProjectReference Include="../../src/api/AdielSystem.Domain/AdielSystem.Domain.csproj" />
+  </ItemGroup>
+</Project>
+

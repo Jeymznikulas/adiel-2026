@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/api/AdielSystem.Api/AdielSystem.Api.csproj" />
+    <Project Path="src/api/AdielSystem.Application/AdielSystem.Application.csproj" />
+    <Project Path="src/api/AdielSystem.Domain/AdielSystem.Domain.csproj" />
+    <Project Path="src/api/AdielSystem.Infrastructure/AdielSystem.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AdielSystem.IntegrationTests/AdielSystem.IntegrationTests.csproj" />
+    <Project Path="tests/AdielSystem.UnitTests/AdielSystem.UnitTests.csproj" />
+  </Folder>
+</Solution>
+

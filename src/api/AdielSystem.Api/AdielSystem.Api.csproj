@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>adiel-system-api-development</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AdielSystem.Application/AdielSystem.Application.csproj" />
+    <ProjectReference Include="../AdielSystem.Infrastructure/AdielSystem.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
