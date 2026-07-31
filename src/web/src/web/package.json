@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@adiel-system/web": "file:../.."
+  }
+}

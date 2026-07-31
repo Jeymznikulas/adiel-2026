@@ -1,8 +1,8 @@
 export function BrandMark() {
   return (
-    <a href="/" className="inline-flex" aria-label="Adiel Construction Supplies home">
+    <a href="/" className="inline-flex rounded-xl transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-blue" aria-label="Adiel Construction Supplies home">
       <img
-        className="h-20 w-auto object-contain sm:h-24"
+        className="h-14 w-auto object-contain sm:h-16"
         src="/images/adiel-logo.png"
         alt="Adiel Construction Supplies"
         width="1280"

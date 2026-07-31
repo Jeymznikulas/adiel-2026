@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: Inter, "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --font-sans: Manrope, "Segoe UI", sans-serif;
   --color-brand-blue: #00144c;
   --color-brand-orange: #fd4d00;
 }
@@ -21,6 +21,7 @@
     margin: 0;
     min-width: 320px;
     min-height: 100svh;
+    font-family: Manrope, "Segoe UI", sans-serif;
   }
 
   ::selection {
@@ -31,6 +32,34 @@
   button,
   a {
     -webkit-tap-highlight-color: transparent;
+  }
+
+  button {
+    font: inherit;
+  }
+}
+
+@keyframes content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes view-swap {
+  from {
+    opacity: 0.25;
+    filter: blur(2px);
+    transform: translateY(8px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
   }
 }
 
