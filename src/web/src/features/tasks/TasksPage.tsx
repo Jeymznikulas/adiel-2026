@@ -1,5 +1,8 @@
-import type { FormEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
+import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 
 type TaskStatus = 'To do' | 'In progress' | 'Completed'
 type TaskPriority = 'Low' | 'Medium' | 'High'
@@ -29,6 +32,18 @@ const statusGroups = [
   { status: 'In progress' as const, accent: 'bg-amber-500', border: 'border-l-amber-500', soft: 'bg-amber-50', text: 'text-amber-700' },
   { status: 'Completed' as const, accent: 'bg-emerald-500', border: 'border-l-emerald-500', soft: 'bg-emerald-50', text: 'text-emerald-700' },
 ]
+const statusOptions = [
+  { value: 'To do' as const, dotClassName: 'bg-sky-500', toneClassName: 'border-sky-100 bg-sky-50 text-sky-700' },
+  { value: 'In progress' as const, dotClassName: 'bg-amber-500', toneClassName: 'border-amber-100 bg-amber-50 text-amber-700' },
+  { value: 'Completed' as const, dotClassName: 'bg-emerald-500', toneClassName: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
+]
+const priorityOptions = [
+  { value: 'Low' as const, dotClassName: 'bg-sky-500', toneClassName: 'border-sky-100 bg-sky-50 text-sky-700' },
+  { value: 'Medium' as const, dotClassName: 'bg-amber-500', toneClassName: 'border-amber-100 bg-amber-50 text-amber-700' },
+  { value: 'High' as const, dotClassName: 'bg-red-500', toneClassName: 'border-red-100 bg-red-50 text-red-600' },
+]
+const priorityFilterOptions = [{ value: 'All' as const }, ...priorityOptions]
+const dueDateOptions: { value: DueDateFilter }[] = ['All', 'Overdue', 'Due today', 'Upcoming', 'No due date'].map((value) => ({ value: value as DueDateFilter }))
 
 const initialTasks: Task[] = [
   { id: 1, title: 'Review material requirements', description: 'Confirm quantities needed for upcoming site deliveries.', status: 'To do', priority: 'High', assignedTo: 'Alex Morgan', assignedBy: 'Operations', createdAt: '2026-07-31', dueDate: '2026-08-03' },
@@ -73,6 +88,126 @@ function dueDateClass(task: Task) {
   return 'text-slate-600'
 }
 
+function StatusDropdown({ task, onChange }: { task: Task; onChange: (status: TaskStatus) => void }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0, opensAbove: false })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const selectedOption = statusOptions.find((option) => option.value === task.status) ?? statusOptions[0]!
+  const menuId = `task-status-menu-${task.id}`
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
+    })
+    const closeMenu = () => setIsOpen(false)
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu()
+    }
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      closeMenu()
+      triggerRef.current?.focus()
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('resize', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('resize', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [isOpen])
+
+  function toggleMenu() {
+    if (isOpen) {
+      setIsOpen(false)
+      return
+    }
+
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const width = Math.max(rect.width, 156)
+    const menuHeight = 132
+    const opensAbove = window.innerHeight - rect.bottom < menuHeight + 12 && rect.top > menuHeight + 12
+    setMenuPosition({
+      top: opensAbove ? rect.top - menuHeight - 6 : rect.bottom + 6,
+      left: Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8),
+      width,
+      opensAbove,
+    })
+    setIsOpen(true)
+  }
+
+  function handleOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    const options = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])
+    const currentIndex = options.indexOf(event.currentTarget)
+    const offset = event.key === 'ArrowDown' ? 1 : -1
+    options[(currentIndex + offset + options.length) % options.length]?.focus()
+  }
+
+  return (
+    <>
+      <button
+        className={`inline-flex h-9 w-full items-center gap-2 rounded-lg border px-2.5 text-left text-[11px] font-bold uppercase tracking-wide outline-none transition-all duration-200 hover:brightness-[0.98] focus-visible:ring-2 focus-visible:ring-brand-blue/20 ${selectedOption.toneClassName}`}
+        type="button"
+        ref={triggerRef}
+        onClick={toggleMenu}
+        aria-label={`Status for ${task.title}`}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={menuId}
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${selectedOption.dotClassName}`} aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">{task.status}</span>
+        <svg className={`size-3 shrink-0 transition-transform duration-200 ease-out ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {isOpen ? createPortal(
+        <div
+          className="fixed z-[70] rounded-xl border border-slate-200/80 bg-white/95 p-1.5 shadow-[0_18px_45px_-16px_rgba(0,20,76,0.32)] backdrop-blur-xl animate-[status-menu-enter_160ms_cubic-bezier(0.22,1,0.36,1)]"
+          id={menuId}
+          ref={menuRef}
+          role="listbox"
+          aria-label={`Choose status for ${task.title}`}
+          style={{ top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, transformOrigin: menuPosition.opensAbove ? 'bottom right' : 'top right' }}
+        >
+          {statusOptions.map((option) => {
+            const isSelected = option.value === task.status
+            return (
+              <button
+                className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-xs font-semibold outline-none transition-colors duration-150 focus-visible:bg-slate-100 ${isSelected ? option.toneClassName : 'text-slate-600 hover:bg-slate-50 hover:text-brand-blue'}`}
+                type="button"
+                key={option.value}
+                role="option"
+                aria-selected={isSelected}
+                onKeyDown={handleOptionKeyDown}
+                onClick={() => {
+                  onChange(option.value)
+                  setIsOpen(false)
+                }}
+              >
+                <span className={`size-2 rounded-full ${option.dotClassName}`} aria-hidden="true" />
+                <span className="flex-1">{option.value}</span>
+                <svg className={`size-3.5 text-emerald-600 transition-all duration-150 ${isSelected ? 'scale-100 opacity-100' : 'scale-75 opacity-0'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
+              </button>
+            )
+          })}
+        </div>,
+        document.body,
+      ) : null}
+    </>
+  )
+}
+
 function dateKey(date: Date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -87,11 +222,17 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
   })
   const todayKey = dateKey(new Date())
   const monthLabel = new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(visibleMonth)
+  const visibleMonthKey = `${visibleMonth.getFullYear()}-${String(visibleMonth.getMonth() + 1).padStart(2, '0')}`
+  const scheduledThisMonth = tasks.filter((task) => task.dueDate.startsWith(visibleMonthKey)).length
+  const today = new Date()
+  const isViewingCurrentMonth = visibleMonth.getFullYear() === today.getFullYear() && visibleMonth.getMonth() === today.getMonth()
   const calendarDays = useMemo(() => {
     const year = visibleMonth.getFullYear()
     const month = visibleMonth.getMonth()
     const firstWeekday = new Date(year, month, 1).getDay()
-    return Array.from({ length: 42 }, (_, index) => {
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const cellCount = Math.ceil((firstWeekday + daysInMonth) / 7) * 7
+    return Array.from({ length: cellCount }, (_, index) => {
       const date = new Date(year, month, index - firstWeekday + 1)
       return { date, key: dateKey(date), isCurrentMonth: date.getMonth() === month }
     })
@@ -108,34 +249,50 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
 
   return (
     <div className="animate-[view-swap_340ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]">
-      <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Monthly schedule</p><h3 className="mt-1 text-xl font-bold tracking-[-0.03em] text-brand-blue">{monthLabel}</h3></div>
-        <div className="flex items-center gap-2">
-          <button className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50" type="button" onClick={goToToday}>Today</button>
-          <div className="flex overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <button className="grid size-9 place-items-center text-slate-500 transition hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => changeMonth(-1)} aria-label="Previous month"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
-            <button className="grid size-9 place-items-center border-l border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => changeMonth(1)} aria-label="Next month"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></button>
+      <div className="flex flex-col gap-4 border-b border-slate-100 bg-[linear-gradient(120deg,rgba(0,20,76,0.035),rgba(253,77,0,0.025),transparent_65%)] px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="flex items-center gap-3.5">
+          <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-[linear-gradient(145deg,#092968,#00113f)] text-white shadow-[0_10px_24px_-12px_rgba(0,20,76,0.7)]">
+            <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" /><path d="M8 13h3v3H8z" /></svg>
+          </span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Monthly schedule</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2.5">
+              <h3 className="text-xl font-extrabold tracking-[-0.035em] text-brand-blue" key={monthLabel} aria-live="polite">{monthLabel}</h3>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/80 bg-white/80 px-2.5 py-1 text-[10px] font-bold text-slate-500 shadow-sm"><span className="size-1.5 rounded-full bg-brand-orange" />{scheduledThisMonth} scheduled</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button className={`h-10 rounded-xl border px-3.5 text-xs font-bold transition-all duration-200 ${isViewingCurrentMonth ? 'border-brand-blue/10 bg-brand-blue/[0.05] text-brand-blue' : 'border-slate-200 bg-white text-slate-600 shadow-sm hover:-translate-y-0.5 hover:border-slate-300 hover:text-brand-blue'}`} type="button" onClick={goToToday} aria-current={isViewingCurrentMonth ? 'date' : undefined}>Today</button>
+          <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <button className="group grid size-10 place-items-center text-slate-400 transition-colors duration-200 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => changeMonth(-1)} aria-label="Previous month"><svg className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
+            <button className="group grid size-10 place-items-center border-l border-slate-200 text-slate-400 transition-colors duration-200 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => changeMonth(1)} aria-label="Next month"><svg className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></button>
           </div>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <div className="min-w-[900px]">
-          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/70">
-            {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day) => <div className="px-3 py-3 text-center text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500" key={day}>{day}</div>)}
+      <div className="overflow-x-auto bg-slate-50/35 p-3 sm:p-4">
+        <div className="min-w-[920px] overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_14px_35px_-28px_rgba(0,20,76,0.35)]" key={visibleMonthKey}>
+          <div className="grid grid-cols-7 border-b border-slate-200 bg-[linear-gradient(180deg,#fbfcfe,#f7f9fc)]">
+            {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => <div className={`px-3 py-3.5 text-left text-[10px] font-extrabold uppercase tracking-[0.14em] ${index === 0 || index === 6 ? 'text-slate-400' : 'text-slate-500'}`} key={day}>{day}</div>)}
           </div>
-          <div className="grid grid-cols-7">
+          <div className="grid grid-cols-7 animate-[calendar-month-enter_240ms_cubic-bezier(0.22,1,0.36,1)]">
             {calendarDays.map((day) => {
               const dayTasks = tasks.filter((task) => task.dueDate === day.key)
               const isToday = day.key === todayKey
+              const isWeekend = day.date.getDay() === 0 || day.date.getDay() === 6
               return (
-                <div className={`min-h-36 border-b border-r border-slate-100 p-2.5 ${day.isCurrentMonth ? 'bg-white' : 'bg-slate-50/50'}`} key={day.key}>
-                  <div className={`grid size-7 place-items-center rounded-lg text-xs font-bold ${isToday ? 'bg-brand-blue text-white shadow-sm' : day.isCurrentMonth ? 'text-slate-600' : 'text-slate-300'}`}>{day.date.getDate()}</div>
-                  <div className="mt-2 space-y-1.5">
+                <div className={`group/day min-h-40 border-b border-r border-slate-100 p-3 transition-colors duration-200 ${isToday ? 'bg-orange-50/35' : day.isCurrentMonth ? isWeekend ? 'bg-slate-50/30 hover:bg-slate-50/60' : 'bg-white hover:bg-slate-50/35' : 'bg-slate-50/65'}`} key={day.key}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className={`grid size-7 place-items-center rounded-lg text-xs font-extrabold transition-all duration-200 ${isToday ? 'bg-brand-blue text-white shadow-[0_6px_14px_-7px_rgba(0,20,76,0.8)]' : day.isCurrentMonth ? 'text-slate-600 group-hover/day:bg-white group-hover/day:shadow-sm' : 'text-slate-300'}`}>{day.date.getDate()}</div>
+                    {dayTasks.length ? <span className={`text-[9px] font-bold uppercase tracking-wide ${day.isCurrentMonth ? 'text-slate-300' : 'text-slate-200'}`}>{dayTasks.length} {dayTasks.length === 1 ? 'task' : 'tasks'}</span> : null}
+                  </div>
+                  <div className="mt-2.5 space-y-1.5">
                     {dayTasks.slice(0, 3).map((task) => {
-                      const style = task.status === 'Completed' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : task.status === 'In progress' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-sky-200 bg-sky-50 text-sky-800'
-                      return <button className={`block w-full rounded-lg border px-2 py-1.5 text-left transition hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-blue ${style}`} type="button" key={task.id} title={`${task.title} — ${task.assignedTo}`} onClick={() => onTaskSelect(task)}><span className="block truncate text-[11px] font-bold">{task.title}</span><span className="mt-0.5 block truncate text-[10px] opacity-70">{task.assignedTo}</span></button>
+                      const style = task.status === 'Completed' ? 'border-emerald-200 border-l-emerald-400 bg-emerald-50/75 text-emerald-800 hover:bg-emerald-50' : task.status === 'In progress' ? 'border-amber-200 border-l-amber-400 bg-amber-50/75 text-amber-800 hover:bg-amber-50' : 'border-sky-200 border-l-sky-400 bg-sky-50/75 text-sky-800 hover:bg-sky-50'
+                      const dot = task.status === 'Completed' ? 'bg-emerald-500' : task.status === 'In progress' ? 'bg-amber-500' : 'bg-sky-500'
+                      return <button className={`block w-full rounded-lg border border-l-[3px] px-2.5 py-2 text-left shadow-[0_5px_14px_-12px_rgba(15,23,42,0.45)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_18px_-12px_rgba(15,23,42,0.45)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-blue ${style}`} type="button" key={task.id} title={`${task.title} · ${task.assignedTo}`} onClick={() => onTaskSelect(task)}><span className="flex items-center gap-1.5"><span className={`size-1.5 shrink-0 rounded-full ${dot}`} /><span className="truncate text-[11px] font-extrabold">{task.title}</span></span><span className="mt-1.5 flex items-center justify-between gap-2 text-[9px] font-semibold opacity-65"><span className="truncate">{task.assignedTo}</span><span className="shrink-0 uppercase tracking-wide">{task.priority}</span></span></button>
                     })}
-                    {dayTasks.length > 3 ? <p className="px-1 text-[11px] font-bold text-slate-400">+{dayTasks.length - 3} more</p> : null}
+                    {dayTasks.length > 3 ? <p className="rounded-lg bg-slate-100/80 px-2 py-1.5 text-center text-[10px] font-bold text-slate-400">+{dayTasks.length - 3} more tasks</p> : null}
                   </div>
                 </div>
               )
@@ -143,8 +300,12 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
           </div>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-4 border-t border-slate-100 px-5 py-3 text-xs font-semibold text-slate-500">
-        {statusGroups.map((group) => <span className="flex items-center gap-2" key={group.status}><span className={`size-2 rounded-full ${group.accent}`} />{group.status}</span>)}
+      <div className="flex flex-col gap-2.5 border-t border-slate-100 bg-white px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-semibold text-slate-500">
+          <span className="font-bold uppercase tracking-[0.12em] text-slate-300">Status</span>
+          {statusGroups.map((group) => <span className="flex items-center gap-2" key={group.status}><span className={`size-2 rounded-full ring-4 ring-slate-50 ${group.accent}`} />{group.status}</span>)}
+        </div>
+        <p className="text-[10px] font-medium text-slate-400">Select a task to view its details</p>
       </div>
     </div>
   )
@@ -172,11 +333,19 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     window.localStorage.setItem(storageKey, JSON.stringify(tasks))
   }, [tasks])
 
-  const summary = useMemo(() => ({
-    total: tasks.length,
-    inProgress: tasks.filter((task) => task.status === 'In progress').length,
-    completed: tasks.filter((task) => task.status === 'Completed').length,
-  }), [tasks])
+  const summary = useMemo(() => {
+    const today = new Date()
+    const todayKey = dateKey(today)
+    const nearDueCutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 3)
+    const nearDueCutoffKey = dateKey(nearDueCutoff)
+
+    return {
+      total: tasks.length,
+      inProgress: tasks.filter((task) => task.status === 'In progress').length,
+      completed: tasks.filter((task) => task.status === 'Completed').length,
+      nearDue: tasks.filter((task) => task.status !== 'Completed' && task.dueDate >= todayKey && task.dueDate <= nearDueCutoffKey).length,
+    }
+  }, [tasks])
 
   const assignees = useMemo(() => Array.from(new Set(tasks.map((task) => task.assignedTo))).sort(), [tasks])
   const activeAdvancedFilterCount = Number(assigneeFilter !== 'All') + Number(priorityFilter !== 'All') + Number(dueDateFilter !== 'All')
@@ -288,6 +457,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     { label: 'Total tasks', value: summary.total, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
     { label: 'In progress', value: summary.inProgress, dot: 'bg-amber-500', valueColor: 'text-amber-600' },
     { label: 'Completed', value: summary.completed, dot: 'bg-emerald-500', valueColor: 'text-emerald-600' },
+    { label: 'Near due (3 days)', value: summary.nearDue, dot: 'bg-brand-orange', valueColor: 'text-brand-orange' },
   ]
 
   return (
@@ -298,7 +468,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
           <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Workboard</h2>
           <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Plan, assign, and monitor work in one structured view.</p>
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
           {summaryCards.map((card) => (
             <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-3 py-3.5 sm:min-w-32 sm:px-4" key={card.label}>
               <div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.dot}`} /><p className="truncate text-[11px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div>
@@ -342,9 +512,9 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 animate-[content-enter_180ms_ease-out]">
               <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs font-bold text-brand-blue">Advanced filters</p><p className="mt-0.5 text-[11px] text-slate-400">Combine filters to narrow this workboard.</p></div><button className="text-xs font-bold text-slate-400 transition hover:text-brand-orange disabled:cursor-not-allowed disabled:opacity-40" type="button" onClick={clearAdvancedFilters} disabled={!activeAdvancedFilterCount}>Clear all</button></div>
               <div className="grid gap-3 sm:grid-cols-3">
-                <div><label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="filter-assignee">Assignee</label><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="filter-assignee" value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)}><option>All</option>{assignees.map((assignee) => <option key={assignee}>{assignee}</option>)}</select></div>
-                <div><label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="filter-priority">Priority</label><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="filter-priority" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as 'All' | TaskPriority)}><option>All</option><option>Low</option><option>Medium</option><option>High</option></select></div>
-                <div><label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="filter-due-date">Due date</label><select className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="filter-due-date" value={dueDateFilter} onChange={(event) => setDueDateFilter(event.target.value as DueDateFilter)}><option>All</option><option>Overdue</option><option>Due today</option><option>Upcoming</option><option>No due date</option></select></div>
+                <div><label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="filter-assignee">Assignee</label><AnimatedDropdown id="filter-assignee" size="filter" value={assigneeFilter} options={[{ value: 'All' }, ...assignees.map((value) => ({ value }))]} onChange={setAssigneeFilter} ariaLabel="Filter by assignee" /></div>
+                <div><label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="filter-priority">Priority</label><AnimatedDropdown id="filter-priority" size="filter" value={priorityFilter} options={priorityFilterOptions} onChange={setPriorityFilter} ariaLabel="Filter by priority" /></div>
+                <div><label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="filter-due-date">Due date</label><AnimatedDropdown id="filter-due-date" size="filter" value={dueDateFilter} options={dueDateOptions} onChange={setDueDateFilter} ariaLabel="Filter by due date" /></div>
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-slate-200/70 pt-3 text-[11px] font-semibold text-slate-400"><span>Results update automatically</span><span className="text-brand-blue">{visibleTasks.length} of {tasks.length} tasks</span></div>
             </div>
@@ -368,20 +538,18 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                   <tbody key={group.status}>
                     <tr className="border-y border-slate-100 bg-white">
                       <td colSpan={7} className="px-4 py-3">
-                        <button className="group inline-flex items-center gap-2 text-left" type="button" onClick={() => toggleGroup(group.status)} aria-expanded={!isCollapsed}>
-                          <svg className={`size-3.5 text-slate-300 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-                          <span className={`size-2 rounded-full ${group.accent}`} />
+                        <button className="group -ml-2 inline-flex items-center gap-2 rounded-xl px-2 py-1.5 text-left outline-none transition-colors duration-200 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand-blue/15" type="button" onClick={() => toggleGroup(group.status)} aria-expanded={!isCollapsed}>
+                          <span className="grid size-6 place-items-center rounded-lg bg-slate-50 text-slate-300 transition-colors duration-200 group-hover:bg-white group-hover:text-brand-blue group-hover:shadow-sm"><svg className={`size-3.5 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${isCollapsed ? '-rotate-90' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span>
+                          <span className={`size-2 rounded-full transition-transform duration-200 ${group.accent} ${isCollapsed ? 'scale-75' : 'scale-100'}`} />
                           <span className={`text-sm font-extrabold ${group.text}`}>{group.status}</span>
-                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{groupTasks.length}</span>
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 transition-transform duration-200 group-hover:scale-105">{groupTasks.length}</span>
                         </button>
                       </td>
                     </tr>
-                    {!isCollapsed ? groupTasks.map((task) => {
-                      const statusStyle = task.status === 'Completed' ? 'bg-emerald-50 text-emerald-700' : task.status === 'In progress' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'
-                      const priorityStyle = task.priority === 'High' ? 'bg-red-50 text-red-600' : task.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-sky-50 text-sky-600'
+                    {!isCollapsed ? groupTasks.map((task, index) => {
                       const isOverdue = Boolean(task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10) && task.status !== 'Completed')
                       return (
-                        <tr className="group border-b border-slate-100 transition-colors hover:bg-[#fbfcfe]" key={task.id}>
+                        <tr className="group border-b border-slate-100 transition-colors hover:bg-[#fbfcfe] animate-[task-group-row-enter_200ms_cubic-bezier(0.22,1,0.36,1)_both]" key={task.id} style={{ animationDelay: `${Math.min(index, 5) * 28}ms` }}>
                           <td className={`border-l-4 ${group.border} px-4 py-3.5`}>
                             <div className="flex min-w-0 items-start gap-3">
                               <button className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition ${task.status === 'Completed' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 text-transparent hover:border-brand-blue/40 hover:text-brand-blue/30'}`} type="button" onClick={() => updateTask(task.id, { status: task.status === 'Completed' ? 'To do' : 'Completed' })} aria-label={task.status === 'Completed' ? `Reopen ${task.title}` : `Complete ${task.title}`}><svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
@@ -389,15 +557,15 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                             </div>
                           </td>
                           <td className="px-4 py-3.5"><div className="flex items-center gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[linear-gradient(145deg,#092968,#00113f)] text-[10px] font-bold text-white">{initials(task.assignedTo)}</span><span className="truncate text-xs font-semibold text-slate-700">{task.assignedTo}</span></div></td>
-                          <td className="px-4 py-3.5"><div className={`relative rounded-lg ${statusStyle}`}><select className="h-9 w-full cursor-pointer appearance-none bg-transparent px-2.5 pr-6 text-[11px] font-bold uppercase tracking-wide outline-none" value={task.status} onChange={(event) => updateTask(task.id, { status: event.target.value as TaskStatus })} aria-label={`Status for ${task.title}`}><option>To do</option><option>In progress</option><option>Completed</option></select><svg className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></div></td>
-                          <td className="px-4 py-3.5"><div className={`relative rounded-lg ${priorityStyle}`}><select className="h-9 w-full cursor-pointer appearance-none bg-transparent px-2.5 pr-6 text-[11px] font-bold uppercase tracking-wide outline-none" value={task.priority} onChange={(event) => updateTask(task.id, { priority: event.target.value as TaskPriority })} aria-label={`Priority for ${task.title}`}><option>Low</option><option>Medium</option><option>High</option></select><svg className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></div></td>
-                          <td className="px-4 py-3.5"><div className="relative"><input className={`h-9 w-full rounded-lg border border-transparent bg-slate-50 px-2 text-xs font-semibold outline-none transition hover:border-slate-200 focus:border-brand-blue/30 focus:bg-white ${dueDateClass(task)}`} type="date" value={task.dueDate} onChange={(event) => updateTask(task.id, { dueDate: event.target.value })} aria-label={`Due date for ${task.title}`} title={isOverdue ? `Overdue: ${formatDate(task.dueDate)}` : formatDate(task.dueDate)} />{isOverdue ? <span className="absolute -right-1 -top-1 size-2 rounded-full border-2 border-white bg-red-500" aria-label="Overdue" /> : null}</div></td>
+                          <td className="px-4 py-3.5"><StatusDropdown task={task} onChange={(status) => updateTask(task.id, { status })} /></td>
+                          <td className="px-4 py-3.5"><AnimatedDropdown size="compact" value={task.priority} options={priorityOptions} onChange={(priority) => updateTask(task.id, { priority })} ariaLabel={`Priority for ${task.title}`} /></td>
+                          <td className="px-4 py-3.5"><div className="relative"><AnimatedDatePicker size="compact" value={task.dueDate} onChange={(dueDate) => updateTask(task.id, { dueDate })} ariaLabel={`Due date for ${task.title}`} toneClassName={`border-transparent bg-slate-50 hover:border-slate-200 ${dueDateClass(task)}`} />{isOverdue ? <span className="absolute -right-1 -top-1 size-2 rounded-full border-2 border-white bg-red-500" aria-label="Overdue" /> : null}</div></td>
                           <td className="px-4 py-3.5"><span className="block truncate text-xs font-semibold text-slate-600">{task.assignedBy}</span><span className="mt-1 block text-[10px] text-slate-400">{formatDate(task.createdAt)}</span></td>
                           <td className="px-2 py-3.5 text-center"><button className="grid size-8 place-items-center rounded-lg text-slate-300 opacity-0 transition hover:bg-slate-100 hover:text-brand-blue group-hover:opacity-100 focus:opacity-100" type="button" onClick={() => openTaskDetails(task)} aria-label={`View details for ${task.title}`}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg></button></td>
                         </tr>
                       )
                     }) : null}
-                    {!isCollapsed ? <tr className="border-b border-slate-100"><td className={`border-l-4 ${group.border} px-4 py-2.5`} colSpan={7}><button className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => openTaskDialog(group.status)}><span className="text-lg font-light">+</span> Add item</button></td></tr> : null}
+                    {!isCollapsed ? <tr className="border-b border-slate-100 animate-[task-group-row-enter_200ms_cubic-bezier(0.22,1,0.36,1)_both]" style={{ animationDelay: `${Math.min(groupTasks.length, 5) * 28}ms` }}><td className={`border-l-4 ${group.border} px-4 py-2.5`} colSpan={7}><button className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => openTaskDialog(group.status)}><span className="text-lg font-light">+</span> Add item</button></td></tr> : null}
                   </tbody>
                 )
               })}
@@ -423,12 +591,12 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                   <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-title">Task title</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 font-medium text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-title" value={editDraft.title} onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))} required autoFocus /></div>
                   <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-description">Description</label><textarea className="min-h-28 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 leading-6 text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-description" value={editDraft.description} onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))} /></div>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-status">Status</label><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-status" value={editDraft.status} onChange={(event) => setEditDraft((current) => ({ ...current, status: event.target.value as TaskStatus }))}><option>To do</option><option>In progress</option><option>Completed</option></select></div>
-                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-priority">Priority</label><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-priority" value={editDraft.priority} onChange={(event) => setEditDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))}><option>Low</option><option>Medium</option><option>High</option></select></div>
+                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-status">Status</label><AnimatedDropdown id="edit-task-status" value={editDraft.status} options={statusOptions} onChange={(status) => setEditDraft((current) => ({ ...current, status }))} ariaLabel="Task status" /></div>
+                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-priority">Priority</label><AnimatedDropdown id="edit-task-priority" value={editDraft.priority} options={priorityOptions} onChange={(priority) => setEditDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-assignee">Assigned to</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 font-medium text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-assignee" value={editDraft.assignedTo} onChange={(event) => setEditDraft((current) => ({ ...current, assignedTo: event.target.value }))} required /></div>
-                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-due-date">Due date</label><input className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 font-semibold text-slate-600 outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-due-date" type="date" value={editDraft.dueDate} onChange={(event) => setEditDraft((current) => ({ ...current, dueDate: event.target.value }))} required /></div>
+                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-due-date">Due date</label><AnimatedDatePicker id="edit-task-due-date" value={editDraft.dueDate} onChange={(dueDate) => setEditDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" required /></div>
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsEditingTask(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">Save changes</button></div>
@@ -475,12 +643,12 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-title">Task title</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-title" value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="What needs to be done?" autoFocus required /></div>
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-description">Description <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-xs leading-5 text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="Add useful context or instructions..." /></div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-status">Status</label><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-status" value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as TaskStatus }))}><option>To do</option><option>In progress</option><option>Completed</option></select></div>
-                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-priority">Priority</label><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-priority" value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as TaskPriority }))}><option>Low</option><option>Medium</option><option>High</option></select></div>
+                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-status">Status</label><AnimatedDropdown id="task-status" value={draft.status} options={statusOptions} onChange={(status) => setDraft((current) => ({ ...current, status }))} ariaLabel="Task status" /></div>
+                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-priority">Priority</label><AnimatedDropdown id="task-priority" value={draft.priority} options={priorityOptions} onChange={(priority) => setDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assignee">Assigned to</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-assignee" value={draft.assignedTo} onChange={(event) => setDraft((current) => ({ ...current, assignedTo: event.target.value }))} placeholder="Assignee name" required /></div>
-                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-due-date">Due date</label><input className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-due-date" type="date" min={new Date().toISOString().slice(0, 10)} value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} required /></div>
+                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-due-date">Due date</label><AnimatedDatePicker id="task-due-date" value={draft.dueDate} onChange={(dueDate) => setDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" min={new Date().toISOString().slice(0, 10)} required /></div>
               </div>
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assigner">Assigned by</label><input className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-400" id="task-assigner" value={currentUsername} readOnly /></div>
             </div>

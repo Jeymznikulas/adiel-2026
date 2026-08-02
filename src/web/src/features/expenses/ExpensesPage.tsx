@@ -1,5 +1,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
+import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
+import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
 
 type DateFilterMode = 'all' | 'month' | 'range'
@@ -29,6 +31,13 @@ const paymentMethodStorageKey = 'adiel.expense-payment-methods'
 const defaultCategoryNames = ['Materials', 'Transportation', 'Office supplies', 'Utilities', 'Meals', 'Equipment', 'Professional fees', 'Other']
 const defaultPaymentMethodNames = ['Cash', 'GCash', 'Bank transfer', 'Credit card', 'Cheque', 'Other']
 const expenseStatuses: ExpenseStatus[] = ['Paid', 'Verifying', 'To pay', 'Overdue', 'Cancelled']
+const expenseStatusOptions = [
+  { value: 'Paid' as const, dotClassName: 'bg-emerald-500', toneClassName: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
+  { value: 'Verifying' as const, dotClassName: 'bg-amber-500', toneClassName: 'border-amber-100 bg-amber-50 text-amber-700' },
+  { value: 'To pay' as const, dotClassName: 'bg-sky-500', toneClassName: 'border-sky-100 bg-sky-50 text-sky-700' },
+  { value: 'Overdue' as const, dotClassName: 'bg-red-500', toneClassName: 'border-red-100 bg-red-50 text-red-600' },
+  { value: 'Cancelled' as const, dotClassName: 'bg-slate-400', toneClassName: 'border-slate-200 bg-slate-100 text-slate-500' },
+]
 const currentMonth = new Date().toISOString().slice(0, 7)
 
 function createDefaultOptions(prefix: string, names: string[]): ExpenseOption[] {
@@ -97,6 +106,193 @@ function getInvoiceUrl(value: string) {
   }
 }
 
+function formatCompactPeso(amount: number) {
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(amount)
+}
+
+type ExpenseTrendPoint = {
+  key: string
+  monthLabel: string
+  yearLabel: string
+  fullLabel: string
+  total: number
+  isSelected: boolean
+}
+
+type ExpenseTrendRange = '3m' | '6m' | '1y' | 'all'
+type ExpenseInsight = 'categories' | 'trend'
+
+const expenseTrendRangeOptions = [
+  { value: '3m', label: '3M', description: 'Last 3 months' },
+  { value: '6m', label: '6M', description: 'Last 6 months' },
+  { value: '1y', label: '1Y', description: 'Last 12 months' },
+  { value: 'all', label: 'All', description: 'All recorded months' },
+] as const
+
+const expenseTrendHeadings: Record<ExpenseTrendRange, string> = {
+  '3m': 'Three-month',
+  '6m': 'Six-month',
+  '1y': 'One-year',
+  all: 'All-time',
+}
+
+type ExpenseCategoryPoint = {
+  name: string
+  total: number
+  count: number
+}
+
+type ExpenseCategoryBreakdownProps = {
+  categories: ExpenseCategoryPoint[]
+  selectedMonthLabel: string
+  selectedMonthTotal: number
+  onClose: () => void
+}
+
+function ExpenseCategoryBreakdown({ categories, selectedMonthLabel, selectedMonthTotal, onClose }: ExpenseCategoryBreakdownProps) {
+  const topCategory = categories[0]
+  const topCategoryShare = topCategory && selectedMonthTotal > 0 ? (topCategory.total / selectedMonthTotal) * 100 : 0
+
+  return (
+    <section className="mt-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_-26px_rgba(0,20,76,0.35)] animate-[view-swap_300ms_cubic-bezier(0.22,1,0.36,1)] sm:p-5" id="expense-category-breakdown" aria-labelledby="expense-category-heading">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Category consumption</p>
+          <h4 className="mt-1.5 text-base font-bold tracking-[-0.02em] text-brand-blue" id="expense-category-heading">Where {selectedMonthLabel} spending went</h4>
+          <p className="mt-1 text-xs text-slate-400">Each bar shows its share of the selected month's {formatPeso(selectedMonthTotal)} total.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          {topCategory ? <span className="inline-flex max-w-full items-center gap-2 rounded-xl bg-orange-50 px-3 py-2 text-[10px] font-bold text-orange-700"><span className="size-1.5 shrink-0 rounded-full bg-brand-orange" /><span className="truncate">Largest: {topCategory.name}</span><span className="shrink-0 text-orange-500">{topCategoryShare.toFixed(1)}%</span></span> : null}
+          <button className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" type="button" onClick={onClose}>
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
+            Hide categories
+          </button>
+        </div>
+      </div>
+
+      {categories.length ? (
+        <div className="mt-5 grid gap-x-8 gap-y-4 lg:grid-cols-2">
+          {categories.map((category, index) => {
+            const percentage = selectedMonthTotal > 0 ? (category.total / selectedMonthTotal) * 100 : 0
+            return (
+              <div className="min-w-0" key={category.name}>
+                <div className="mb-2 flex min-w-0 items-center gap-2">
+                  <span className={`grid size-5 shrink-0 place-items-center rounded-md text-[9px] font-extrabold ${index === 0 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}>{index + 1}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-600" title={category.name}>{category.name}</span>
+                  <span className="shrink-0 text-right text-[10px] font-semibold text-slate-400">{category.count} {category.count === 1 ? 'entry' : 'entries'}</span>
+                  <span className="min-w-20 shrink-0 text-right text-xs font-extrabold tabular-nums text-brand-blue" title={formatPeso(category.total)}>{formatCompactPeso(category.total)}</span>
+                  <span className="w-10 shrink-0 text-right text-[10px] font-bold tabular-nums text-slate-500">{percentage.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label={`${category.name}: ${formatPeso(category.total)}, ${percentage.toFixed(1)} percent of ${selectedMonthLabel} expenses`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Number(percentage.toFixed(1))}>
+                  <div className={`h-full rounded-full transition-[width] duration-500 ${index === 0 ? 'bg-[linear-gradient(90deg,#fd4d00,#ff8a55)]' : 'bg-[linear-gradient(90deg,#00144c,#174785)]'}`} style={{ width: `${percentage}%`, minWidth: percentage > 0 ? '0.25rem' : undefined }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-6 text-center">
+          <p className="text-xs font-bold text-brand-blue">No category spending for {selectedMonthLabel}</p>
+          <p className="mt-1 text-[11px] text-slate-400">Add an expense in this month to see which categories consume the budget.</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+type ExpenseTrendChartProps = {
+  points: ExpenseTrendPoint[]
+  range: ExpenseTrendRange
+  selectedMonthLabel: string
+  previousMonthLabel: string
+  selectedMonthTotal: number
+  previousMonthTotal: number
+  onRangeChange: (range: ExpenseTrendRange) => void
+  onClose: () => void
+}
+
+function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLabel, selectedMonthTotal, previousMonthTotal, onRangeChange, onClose }: ExpenseTrendChartProps) {
+  const maxTotal = Math.max(0, ...points.map((point) => point.total))
+  const hasData = maxTotal > 0
+  const amountChange = selectedMonthTotal - previousMonthTotal
+
+  return (
+    <div className="mt-6 border-t border-slate-100 pt-6 animate-[view-swap_300ms_cubic-bezier(0.22,1,0.36,1)]" id="expense-trend-chart">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Spending trend</p></div>
+          <h3 className="mt-2 text-lg font-bold tracking-[-0.025em] text-brand-blue">{expenseTrendHeadings[range]} expense overview</h3>
+          <p className="mt-1 text-xs text-slate-400">Monthly totals through {selectedMonthLabel}. The graph updates when you select another month.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1" role="group" aria-label="Expense graph range">
+            {expenseTrendRangeOptions.map((option) => (
+              <button className={`h-7 rounded-lg px-2.5 text-[10px] font-bold transition ${range === option.value ? 'bg-brand-blue text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-brand-blue'}`} type="button" key={option.value} onClick={() => onRangeChange(option.value)} aria-pressed={range === option.value} title={option.description}>{option.label}</button>
+            ))}
+          </div>
+          <button className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" type="button" onClick={onClose}>
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
+            Hide graph
+          </button>
+        </div>
+      </div>
+
+      {hasData ? (
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
+          <figure className="min-w-0" aria-labelledby="expense-trend-caption">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/80">
+              <div className="relative h-64 bg-slate-50/60" style={{ minWidth: `${Math.max(560, points.length * 64)}px` }}>
+                <div className="pointer-events-none absolute inset-x-4 bottom-10 top-9 flex flex-col justify-between sm:inset-x-6" aria-hidden="true">
+                  {[0, 1, 2, 3].map((line) => <span className="block border-t border-dashed border-slate-200" key={line} />)}
+                </div>
+                <div className="relative grid h-full items-end gap-2 px-3 pb-3 pt-5 sm:gap-4 sm:px-5" style={{ gridTemplateColumns: `repeat(${points.length}, minmax(44px, 1fr))` }}>
+                  {points.map((point) => {
+                    const height = point.total > 0 ? Math.max((point.total / maxTotal) * 100, 4) : 1
+                    return (
+                      <div className="flex h-full min-w-0 flex-col items-center justify-end" key={point.key} title={`${point.fullLabel}: ${formatPeso(point.total)}`}>
+                        <span className={`mb-2 max-w-full truncate text-[9px] font-bold tabular-nums sm:text-[10px] ${point.isSelected ? 'text-brand-orange' : 'text-slate-500'}`}>{formatCompactPeso(point.total)}</span>
+                        <div className="flex min-h-0 w-full flex-1 items-end justify-center">
+                          <span className={`block w-full max-w-12 rounded-t-lg transition-[height] duration-500 ${point.isSelected ? 'bg-[linear-gradient(180deg,#ff7438,#fd4d00)] shadow-[0_8px_18px_-10px_rgba(253,77,0,0.9)]' : point.total > 0 ? 'bg-[linear-gradient(180deg,#174785,#00144c)]' : 'bg-slate-200'}`} style={{ height: `${height}%` }} aria-hidden="true" />
+                        </div>
+                        <span className={`mt-2 text-[10px] font-bold ${point.isSelected ? 'text-brand-orange' : 'text-slate-500'}`}>{point.monthLabel}</span>
+                        <span className="text-[8px] font-semibold text-slate-300">{point.yearLabel}</span>
+                        <span className="sr-only">{point.fullLabel}: {formatPeso(point.total)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+            <figcaption className="sr-only" id="expense-trend-caption">Monthly expense totals for the selected {expenseTrendRangeOptions.find((option) => option.value === range)?.description.toLowerCase()} range through {selectedMonthLabel}.</figcaption>
+          </figure>
+
+          <aside className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_-24px_rgba(0,20,76,0.35)]" aria-label="Selected month comparison">
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">Selected comparison</p>
+            <dl className="mt-4 space-y-3">
+              <div className="rounded-xl bg-orange-50/70 p-3"><dt className="text-[10px] font-bold text-orange-600">{selectedMonthLabel}</dt><dd className="mt-1 truncate text-base font-extrabold tracking-[-0.025em] text-brand-blue" title={formatPeso(selectedMonthTotal)}>{formatPeso(selectedMonthTotal)}</dd></div>
+              <div className="rounded-xl bg-slate-50 p-3"><dt className="text-[10px] font-bold text-slate-500">{previousMonthLabel}</dt><dd className="mt-1 truncate text-sm font-bold text-slate-600" title={formatPeso(previousMonthTotal)}>{formatPeso(previousMonthTotal)}</dd></div>
+              <div className="border-t border-slate-100 pt-3"><dt className="text-[10px] font-bold text-slate-400">Amount difference</dt><dd className={`mt-1 text-sm font-extrabold ${amountChange > 0 ? 'text-red-600' : amountChange < 0 ? 'text-emerald-700' : 'text-slate-500'}`}>{amountChange > 0 ? '+' : amountChange < 0 ? '−' : ''}{formatPeso(Math.abs(amountChange))}</dd></div>
+            </dl>
+          </aside>
+        </div>
+      ) : (
+        <div className="mt-5 grid min-h-48 place-items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-5 text-center">
+          <div>
+            <span className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-300 shadow-sm"><svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3" /></svg></span>
+            <p className="mt-3 text-sm font-bold text-brand-blue">No expense trend yet</p>
+            <p className="mt-1 text-xs text-slate-400">Add expenses dated within this period to populate the graph.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [expenses, setExpenses] = useState<Expense[]>(loadExpenses)
   const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(() => loadOptions(categoryStorageKey, defaultCategoryOptions))
@@ -104,6 +300,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('all')
   const [selectedMonth, setSelectedMonth] = useState(currentMonth)
+  const [openInsight, setOpenInsight] = useState<ExpenseInsight | null>(null)
+  const [trendRange, setTrendRange] = useState<ExpenseTrendRange>('6m')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('All')
@@ -160,10 +358,50 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const previousMonthDate = new Date(comparisonYear, comparisonMonthNumber - 2, 1)
   const previousMonth = `${previousMonthDate.getFullYear()}-${String(previousMonthDate.getMonth() + 1).padStart(2, '0')}`
   const selectedMonthTotal = useMemo(() => expenses.filter((expense) => expense.date.startsWith(comparisonMonth)).reduce((sum, expense) => sum + expense.amount, 0), [comparisonMonth, expenses])
+  const selectedMonthCategories = useMemo<ExpenseCategoryPoint[]>(() => {
+    const totalsByCategory = new Map<string, { total: number; count: number }>()
+    expenses.forEach((expense) => {
+      if (!expense.date.startsWith(comparisonMonth)) return
+      const current = totalsByCategory.get(expense.category) ?? { total: 0, count: 0 }
+      totalsByCategory.set(expense.category, { total: current.total + expense.amount, count: current.count + 1 })
+    })
+
+    return Array.from(totalsByCategory, ([name, values]) => ({ name, ...values }))
+      .sort((left, right) => right.total - left.total || left.name.localeCompare(right.name))
+  }, [comparisonMonth, expenses])
   const previousMonthTotal = useMemo(() => expenses.filter((expense) => expense.date.startsWith(previousMonth)).reduce((sum, expense) => sum + expense.amount, 0), [expenses, previousMonth])
   const monthChangePercent = previousMonthTotal === 0 ? (selectedMonthTotal === 0 ? 0 : 100) : ((selectedMonthTotal - previousMonthTotal) / previousMonthTotal) * 100
   const selectedMonthLabel = new Intl.DateTimeFormat('en-PH', { month: 'short', year: 'numeric' }).format(new Date(`${comparisonMonth}-01T00:00:00`))
   const previousMonthLabel = new Intl.DateTimeFormat('en-PH', { month: 'short', year: 'numeric' }).format(previousMonthDate)
+  const monthlyTrend = useMemo<ExpenseTrendPoint[]>(() => {
+    const totalsByMonth = new Map<string, number>()
+    expenses.forEach((expense) => {
+      const month = expense.date.slice(0, 7)
+      totalsByMonth.set(month, (totalsByMonth.get(month) ?? 0) + expense.amount)
+    })
+
+    const [year, month] = comparisonMonth.split('-').map(Number)
+    const earliestMonth = Array.from(totalsByMonth.keys())
+      .filter((key) => /^\d{4}-\d{2}$/.test(key) && key <= comparisonMonth)
+      .sort()[0]
+    const fixedMonthCount = trendRange === '3m' ? 3 : trendRange === '6m' ? 6 : 12
+    const monthCount = trendRange === 'all' && earliestMonth
+      ? Math.max(1, (year - Number(earliestMonth.slice(0, 4))) * 12 + month - Number(earliestMonth.slice(5, 7)) + 1)
+      : trendRange === 'all' ? 1 : fixedMonthCount
+
+    return Array.from({ length: monthCount }, (_, index) => {
+      const date = new Date(year, month - 1 - (monthCount - 1 - index), 1)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      return {
+        key,
+        monthLabel: new Intl.DateTimeFormat('en-PH', { month: 'short' }).format(date),
+        yearLabel: String(date.getFullYear()),
+        fullLabel: new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(date),
+        total: totalsByMonth.get(key) ?? 0,
+        isSelected: key === comparisonMonth,
+      }
+    })
+  }, [comparisonMonth, expenses, trendRange])
   const activeFilterCount = Number(dateFilterMode !== 'all') + Number(categoryFilter !== 'All')
 
   function getOptions(kind: ExpenseOptionKind) {
@@ -206,7 +444,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       const destination = index + direction
       if (index < 0 || destination < 0 || destination >= current.length) return current
       const next = [...current]
-      ;[next[index], next[destination]] = [next[destination], next[index]]
+        ;[next[index], next[destination]] = [next[destination], next[index]]
       return next
     })
   }
@@ -305,8 +543,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   }
 
   const summaryCards = [
-    { label: `${selectedMonthLabel} total`, value: formatPeso(selectedMonthTotal), detail: 'Selected month', accent: 'bg-brand-orange', valueClass: 'text-brand-blue', trend: null },
-    { label: `${previousMonthLabel} total`, value: formatPeso(previousMonthTotal), detail: 'Previous month', accent: 'bg-sky-500', valueClass: 'text-brand-blue', trend: null },
+    { label: `${selectedMonthLabel} total`, value: formatPeso(selectedMonthTotal), detail: 'Selected month', accent: 'bg-brand-orange', valueClass: 'text-brand-blue', trend: null, insight: 'categories' as const },
+    { label: `${previousMonthLabel} total`, value: formatPeso(previousMonthTotal), detail: 'Previous month', accent: 'bg-sky-500', valueClass: 'text-brand-blue', trend: null, insight: null },
     {
       label: 'Month change',
       value: `${monthChangePercent > 0 ? '+' : ''}${monthChangePercent.toFixed(1)}%`,
@@ -314,30 +552,59 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       accent: monthChangePercent > 0 ? 'bg-emerald-500' : monthChangePercent < 0 ? 'bg-red-500' : 'bg-slate-400',
       valueClass: monthChangePercent > 0 ? 'text-emerald-700' : monthChangePercent < 0 ? 'text-red-600' : 'text-slate-500',
       trend: monthChangePercent > 0 ? 'up' : monthChangePercent < 0 ? 'down' : 'flat',
+      insight: 'trend' as const,
     },
   ]
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
-      <section className="grid gap-5 rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_45px_-28px_rgba(0,20,76,0.3)] sm:p-6 xl:grid-cols-[1fr_auto] xl:items-center">
-        <div>
-          <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Financial operations</p></div>
-          <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Expense tracker</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Record purchases, organize supporting documents, and review spending by period.</p>
+      <section className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_45px_-28px_rgba(0,20,76,0.3)] sm:p-6">
+        <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+          <div>
+            <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Financial operations</p></div>
+            <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Expense tracker</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Record purchases, organize supporting documents, and review spending by period.</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-3 sm:gap-3">
+            {summaryCards.map((card) => {
+              const insight = card.insight
+              const isOpen = openInsight === insight
+              const actionLabel = insight === 'categories'
+                ? isOpen ? 'Hide categories' : 'View categories'
+                : isOpen ? 'Hide graph' : 'View graph'
+              const content = (
+                <>
+                  <div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.accent}`} /><p className="truncate text-[10px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div>
+                  <div className="mt-2 flex items-center gap-2" title={card.value}>
+                    {card.trend ? <span className={`grid size-6 shrink-0 place-items-center rounded-full ${card.trend === 'up' ? 'bg-emerald-100 text-emerald-700' : card.trend === 'down' ? 'bg-red-100 text-red-600' : 'bg-slate-200 text-slate-500'}`} aria-hidden="true"><svg className={`size-3.5 ${card.trend === 'down' ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={card.trend === 'flat' ? 'M5 12h14' : 'M12 19V5M5 12l7-7 7 7'} /></svg></span> : null}
+                    <p className={`truncate text-lg font-bold tracking-[-0.035em] ${card.valueClass}`}>{card.value}</p>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-medium text-slate-400">{card.detail}</p>
+                    {insight ? <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.06em] text-brand-blue">{actionLabel}<svg className={`size-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span> : null}
+                  </div>
+                </>
+              )
+
+              if (!insight) return <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3.5 sm:min-w-40 xl:min-w-44" key={card.label}>{content}</article>
+
+              const controls = insight === 'categories' ? 'expense-category-breakdown' : 'expense-trend-chart'
+              const ariaLabel = insight === 'categories'
+                ? `${isOpen ? 'Hide' : 'Show'} category breakdown for ${selectedMonthLabel} expenses totaling ${card.value}.`
+                : `${isOpen ? 'Hide' : 'Show'} expense trend graph. Current change is ${card.value} versus ${previousMonthLabel}.`
+
+              return (
+                <button className={`min-w-0 rounded-2xl border px-4 py-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-white hover:shadow-[0_12px_28px_-22px_rgba(0,20,76,0.5)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue sm:min-w-40 xl:min-w-44 ${isOpen ? 'border-brand-blue/20 bg-brand-blue/[0.035] ring-2 ring-brand-blue/[0.06]' : 'border-slate-200/80 bg-slate-50/60'}`} type="button" key={card.label} onClick={() => setOpenInsight((current) => current === insight ? null : insight)} aria-expanded={isOpen} aria-controls={controls} aria-label={ariaLabel}>
+                  {content}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-3 sm:gap-3">
-          {summaryCards.map((card) => (
-            <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3.5 sm:min-w-40 xl:min-w-44" key={card.label}>
-              <div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.accent}`} /><p className="truncate text-[10px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div>
-              <div className="mt-2 flex items-center gap-2" title={card.value}>
-                {card.trend ? <span className={`grid size-6 shrink-0 place-items-center rounded-full ${card.trend === 'up' ? 'bg-emerald-100 text-emerald-700' : card.trend === 'down' ? 'bg-red-100 text-red-600' : 'bg-slate-200 text-slate-500'}`} aria-hidden="true"><svg className={`size-3.5 ${card.trend === 'down' ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={card.trend === 'flat' ? 'M5 12h14' : 'M12 19V5M5 12l7-7 7 7'} /></svg></span> : null}
-                <p className={`truncate text-lg font-bold tracking-[-0.035em] ${card.valueClass}`}>{card.value}</p>
-              </div>
-              <p className="mt-1 text-[10px] font-medium text-slate-400">{card.detail}</p>
-            </article>
-          ))}
-        </div>
+        {openInsight === 'categories' ? <ExpenseCategoryBreakdown categories={selectedMonthCategories} selectedMonthLabel={selectedMonthLabel} selectedMonthTotal={selectedMonthTotal} onClose={() => setOpenInsight(null)} /> : null}
+        {openInsight === 'trend' ? <ExpenseTrendChart points={monthlyTrend} range={trendRange} selectedMonthLabel={selectedMonthLabel} previousMonthLabel={previousMonthLabel} selectedMonthTotal={selectedMonthTotal} previousMonthTotal={previousMonthTotal} onRangeChange={setTrendRange} onClose={() => setOpenInsight(null)} /> : null}
       </section>
 
       <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]">
@@ -348,9 +615,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
               <input className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-4 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.05]" type="search" placeholder="Search payee, description, purchaser..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} aria-label="Search expenses" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <select className="h-10 min-w-36 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 outline-none transition hover:border-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filter by category">
-                <option>All</option>{categoryFilterOptions.map((category) => <option key={category}>{category}</option>)}
-              </select>
+              <AnimatedDropdown className="min-w-36" size="filter" fullWidth={false} value={categoryFilter} options={[{ value: 'All' }, ...categoryFilterOptions.map((value) => ({ value }))]} onChange={setCategoryFilter} ariaLabel="Filter by category" />
               {activeFilterCount ? <button className="h-10 rounded-xl px-3 text-xs font-bold text-slate-400 transition hover:bg-slate-100 hover:text-brand-orange" type="button" onClick={clearFilters}>Clear filters</button> : null}
               <button className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => openSettings('categories')} aria-label="Open expense settings" title="Expense settings"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></svg></button>
               <button className="group inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5 sm:flex-none" type="button" onClick={openExpenseDialog}><svg className="size-4 transition-transform group-hover:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add expense</button>
@@ -365,12 +630,12 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
               </div>
 
               {dateFilterMode === 'month' ? (
-                <div className="min-w-52 animate-[view-swap_300ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]"><label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="expense-month">Select month and year</label><input className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="expense-month" type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} /></div>
+                <div className="min-w-52 animate-[view-swap_300ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]"><label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="expense-month">Select month and year</label><AnimatedDatePicker id="expense-month" mode="month" size="filter" value={selectedMonth} onChange={setSelectedMonth} ariaLabel="Select expense month and year" /></div>
               ) : null}
               {dateFilterMode === 'range' ? (
                 <div className="grid flex-1 gap-3 animate-[view-swap_300ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity] sm:grid-cols-2 lg:max-w-xl">
-                  <div><label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="expense-from">From</label><input className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="expense-from" type="date" max={toDate || undefined} value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></div>
-                  <div><label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="expense-to">To</label><input className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="expense-to" type="date" min={fromDate || undefined} value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
+                  <div><label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="expense-from">From</label><AnimatedDatePicker id="expense-from" size="filter" value={fromDate} onChange={setFromDate} ariaLabel="Expense date range from" max={toDate || undefined} /></div>
+                  <div><label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="expense-to">To</label><AnimatedDatePicker id="expense-to" size="filter" value={toDate} onChange={setToDate} ariaLabel="Expense date range to" min={fromDate || undefined} /></div>
                 </div>
               ) : null}
               <p className="ml-auto text-[11px] font-semibold text-slate-400">Showing <span className="text-brand-blue">{visibleExpenses.length}</span> of {expenses.length} entries</p>
@@ -386,7 +651,6 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
             <tbody>
               {visibleExpenses.map((expense) => {
                 const invoiceUrl = getInvoiceUrl(expense.invoiceLink)
-                const statusStyle = expense.status === 'Paid' ? 'bg-emerald-50 text-emerald-700' : expense.status === 'Verifying' ? 'bg-amber-50 text-amber-700' : expense.status === 'To pay' ? 'bg-sky-50 text-sky-700' : expense.status === 'Overdue' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'
                 return (
                   <tr className="border-b border-slate-100 transition-colors hover:bg-[#fbfcfe]" key={expense.id}>
                     <td className="border-l-4 border-l-brand-orange px-5 py-4 text-xs font-semibold text-slate-600">{formatDate(expense.date)}</td>
@@ -396,7 +660,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
                     <td className="px-4 py-4 text-right text-sm font-extrabold tabular-nums text-brand-blue">{formatPeso(expense.amount)}</td>
                     <td className="px-4 py-4"><span className="inline-flex rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-600">{expense.paymentMethod}</span></td>
                     <td className="px-4 py-4"><span className="block truncate text-xs font-semibold text-slate-700" title={expense.purchaser}>{expense.purchaser}</span></td>
-                    <td className="px-4 py-4"><div className={`relative rounded-lg ${statusStyle}`}><select className="h-9 w-full cursor-pointer appearance-none bg-transparent px-2.5 pr-6 text-[11px] font-bold uppercase tracking-wide outline-none" value={expense.status} onChange={(event) => updateExpenseStatus(expense.id, event.target.value as ExpenseStatus)} aria-label={`Status for expense paid to ${expense.payee}`}>{expenseStatuses.map((status) => <option key={status}>{status}</option>)}</select><svg className="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></div></td>
+                    <td className="px-4 py-4"><AnimatedDropdown size="compact" value={expense.status} options={expenseStatusOptions} onChange={(status) => updateExpenseStatus(expense.id, status)} ariaLabel={`Status for expense paid to ${expense.payee}`} /></td>
 
                     <td className="px-4 py-4">{invoiceUrl ? <a className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-bold text-brand-blue transition hover:bg-blue-50 hover:text-brand-orange" href={invoiceUrl} target="_blank" rel="noreferrer"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 3h7v7M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>Open</a> : <span className="text-xs text-slate-300">—</span>}</td>
                     <td className="px-4 py-4"><span className="block truncate text-xs text-slate-500" title={expense.notes}>{expense.notes || '—'}</span></td>
@@ -423,14 +687,14 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
             <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">{isEditingExpense ? 'Update expense record' : 'New expense record'}</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="expense-form-title">{isEditingExpense ? 'Edit expense' : 'Add an expense'}</h2><p className="mt-1 text-sm text-slate-500">{isEditingExpense ? 'Review and update the transaction details below.' : 'Record the transaction and attach its supporting invoice.'}</p></div><button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeExpenseDialog} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></div>
 
             <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
-              <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-date">Date</label><input className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-date" type="date" value={draft.date} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required /></div>
+              <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-date">Date</label><AnimatedDatePicker id="new-expense-date" value={draft.date} onChange={(date) => setDraft((current) => ({ ...current, date }))} ariaLabel="Expense date" required /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-payee">Payee</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-payee" value={draft.payee} onChange={(event) => setDraft((current) => ({ ...current, payee: event.target.value }))} placeholder="Supplier or recipient" autoFocus required /></div>
-              <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-category">Category</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('categories')}>Manage</button></div><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-category" value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))}>{draftCategories.map((category) => <option key={category}>{category}</option>)}</select></div>
+              <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-category">Category</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('categories')}>Manage</button></div><AnimatedDropdown id="new-expense-category" value={draft.category ?? ''} options={draftCategories.filter((value): value is string => Boolean(value)).map((value) => ({ value }))} onChange={(category) => setDraft((current) => ({ ...current, category }))} ariaLabel="Expense category" /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-amount">Amount (PHP)</label><div className="relative"><span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">₱</span><input className="h-11 w-full rounded-xl border border-slate-200 pl-8 pr-3.5 text-sm font-semibold text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-amount" type="number" min="0.01" step="0.01" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" required /></div></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-description">Brief description</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="What was purchased or paid for?" required /></div>
-              <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-method">Payment method</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('paymentMethods')}>Manage</button></div><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-method" value={draft.paymentMethod} onChange={(event) => setDraft((current) => ({ ...current, paymentMethod: event.target.value }))}>{draftPaymentMethods.map((method) => <option key={method}>{method}</option>)}</select></div>
+              <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-method">Payment method</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('paymentMethods')}>Manage</button></div><AnimatedDropdown id="new-expense-method" value={draft.paymentMethod ?? ''} options={draftPaymentMethods.filter((value): value is string => Boolean(value)).map((value) => ({ value }))} onChange={(paymentMethod) => setDraft((current) => ({ ...current, paymentMethod }))} ariaLabel="Payment method" /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-purchaser">Purchaser</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-purchaser" value={draft.purchaser} onChange={(event) => setDraft((current) => ({ ...current, purchaser: event.target.value }))} placeholder="Person who made the purchase" required /></div>
-              <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-status">Status</label><select className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-status" value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as ExpenseStatus }))}>{expenseStatuses.map((status) => <option key={status}>{status}</option>)}</select></div>
+              <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-status">Status</label><AnimatedDropdown id="new-expense-status" value={draft.status} options={expenseStatusOptions} onChange={(status) => setDraft((current) => ({ ...current, status }))} ariaLabel="Expense status" /></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-invoice">Invoice link <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-invoice" type="url" value={draft.invoiceLink} onChange={(event) => setDraft((current) => ({ ...current, invoiceLink: event.target.value }))} placeholder="https://drive.google.com/..." /></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-notes">Notes / remarks <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-notes" value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Add approval details, receipt references, or other context..." /></div>
             </div>
