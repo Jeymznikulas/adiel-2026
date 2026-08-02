@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { SuccessToast } from '../../components/ui/SuccessToast'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
 
 type DateFilterMode = 'all' | 'month' | 'range'
@@ -307,6 +308,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [categoryFilter, setCategoryFilter] = useState('All')
   const [isAddingExpense, setIsAddingExpense] = useState(false)
   const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null)
+  const [toast, setToast] = useState('')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<ExpenseOptionKind>('categories')
   const categories = categoryOptions.filter((option) => option.isActive).map((option) => option.name)
@@ -323,6 +325,12 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       // Expense tracking remains usable when browser storage is unavailable.
     }
   }, [expenses])
+
+  useEffect(() => {
+    if (!toast) return
+    const timeout = window.setTimeout(() => setToast(''), 2800)
+    return () => window.clearTimeout(timeout)
+  }, [toast])
 
   useEffect(() => {
     try {
@@ -517,12 +525,14 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   function updateExpenseStatus(id: number, status: ExpenseStatus) {
     setExpenses((current) => current.map((expense) => expense.id === id ? { ...expense, status } : expense))
+    setToast('Expense status updated')
   }
 
   function saveExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const amount = Number(draft.amount)
     if (!draft.date || !draft.payee.trim() || !draft.description.trim() || !draft.purchaser.trim() || !Number.isFinite(amount) || amount <= 0) return
+    const wasEditing = editingExpenseId !== null
 
     const values = {
       date: draft.date,
@@ -540,6 +550,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       ? [{ id: Date.now(), ...values }, ...current]
       : current.map((expense) => expense.id === editingExpenseId ? { id: expense.id, ...values } : expense))
     closeExpenseDialog()
+    setToast(wasEditing ? 'Expense updated successfully' : 'Expense added successfully')
   }
 
   const summaryCards = [
@@ -719,6 +730,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           onClose={() => setIsSettingsOpen(false)}
         />
       ) : null}
+      <SuccessToast message={toast} />
     </div>
   )
 }

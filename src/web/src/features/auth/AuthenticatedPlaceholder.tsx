@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js'
 import { useState } from 'react'
 import { AppShell } from '../../components/layout/AppShell'
 import { ExpensesPage } from '../expenses/ExpensesPage'
+import { SupplierPage } from '../suppliers/SupplierPage'
 import { TasksPage } from '../tasks/TasksPage'
 import { signOut } from './auth'
 
@@ -38,6 +39,7 @@ export function AuthenticatedPlaceholder({ session }: AuthenticatedPlaceholderPr
       sectionContent={{
         Tasks: <TasksPage currentUsername={username} />,
         Expenses: <ExpensesPage currentUsername={username} />,
+        'Supplier Directory': <SupplierPage />,
       }}
     >
       <div className="space-y-6 animate-[content-enter_420ms_cubic-bezier(0.22,1,0.36,1)]">

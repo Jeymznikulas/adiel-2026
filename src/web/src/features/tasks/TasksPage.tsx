@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { SuccessToast } from '../../components/ui/SuccessToast'
 
 type TaskStatus = 'To do' | 'In progress' | 'Completed'
 type TaskPriority = 'Low' | 'Medium' | 'High'
@@ -324,6 +325,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [isEditingTask, setIsEditingTask] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
+  const [toast, setToast] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<TaskStatus>>(() => new Set())
   const [draft, setDraft] = useState(emptyDraft)
   const [editDraft, setEditDraft] = useState(emptyDraft)
@@ -332,6 +334,12 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(tasks))
   }, [tasks])
+
+  useEffect(() => {
+    if (!toast) return
+    const timeout = window.setTimeout(() => setToast(''), 2800)
+    return () => window.clearTimeout(timeout)
+  }, [toast])
 
   const summary = useMemo(() => {
     const today = new Date()
@@ -418,12 +426,14 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
       dueDate: editDraft.dueDate,
     } : task))
     setIsEditingTask(false)
+    setToast('Task updated successfully')
   }
 
   function removeSelectedTask() {
     if (!selectedTask) return
     setTasks((current) => current.filter((task) => task.id !== selectedTask.id))
     closeTaskDetails()
+    setToast('Task deleted successfully')
   }
 
   function addTask(event: FormEvent<HTMLFormElement>) {
@@ -438,10 +448,16 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
       createdAt: new Date().toISOString().slice(0, 10), dueDate: draft.dueDate,
     }, ...current])
     setIsAddingTask(false)
+    setToast('Task created successfully')
   }
 
   function updateTask(id: number, changes: Partial<Pick<Task, 'status' | 'priority' | 'dueDate'>>) {
     setTasks((current) => current.map((task) => task.id === id ? { ...task, ...changes } : task))
+    setToast(changes.status === 'Completed'
+      ? 'Task marked as completed'
+      : changes.status ? 'Task status updated'
+        : changes.priority ? 'Task priority updated'
+          : 'Task due date updated')
   }
 
   function toggleGroup(status: TaskStatus) {
@@ -659,6 +675,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
           </form>
         </div>
       ) : null}
+      <SuccessToast message={toast} />
     </div>
   )
 }
