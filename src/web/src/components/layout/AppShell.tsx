@@ -12,10 +12,12 @@ const navigationItems = [
   { label: 'Sales Tracker', path: '/sales-tracker', icon: 'M3 3v18h18M7 16l4-5 3 3 6-8' },
   { label: 'Client Directory', path: '/clients', icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8' },
   { label: 'Supplier Directory', path: '/suppliers', icon: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6' },
+  { label: 'Logs', path: '/logs', icon: 'M4 4h16v16H4V4Zm4 5h8M8 13h8M8 17h5' },
 ] as const
 
 function normalizePath(pathname: string) {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (/^\/items\/[^/]+$/.test(path)) return path
   return navigationItems.some((item) => item.path === path) ? path : '/dashboard'
 }
 
@@ -38,7 +40,9 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   const [activePath, setActivePath] = useState(() => normalizePath(window.location.pathname))
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  const activeItem = navigationItems.find((item) => item.path === activePath) ?? navigationItems[0]
+  const activeItem = navigationItems.find((item) => item.path === activePath)
+    ?? (activePath.startsWith('/items/') ? navigationItems.find((item) => item.path === '/items') : undefined)
+    ?? navigationItems[0]
   const activeSection = activeItem.label
   const initial = username.charAt(0).toUpperCase() || 'U'
   const currentDate = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date())

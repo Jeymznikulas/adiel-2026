@@ -51,6 +51,22 @@ export function AnimatedDropdown<T extends string>({
       menuRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
     })
     const closeMenu = () => setIsOpen(false)
+    const repositionMenu = () => {
+      const rect = triggerRef.current?.getBoundingClientRect()
+      if (!rect || rect.bottom < 0 || rect.top > window.innerHeight) {
+        closeMenu()
+        return
+      }
+      const width = Math.max(rect.width, 156)
+      const menuHeight = Math.min(options.length, 6) * 36 + 12
+      const opensAbove = window.innerHeight - rect.bottom < menuHeight + 12 && rect.top > menuHeight + 12
+      setMenuPosition({
+        top: opensAbove ? rect.top - menuHeight - 6 : rect.bottom + 6,
+        left: Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8),
+        width,
+        opensAbove,
+      })
+    }
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node
       if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu()
@@ -64,16 +80,16 @@ export function AnimatedDropdown<T extends string>({
 
     document.addEventListener('pointerdown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('resize', closeMenu)
-    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('resize', repositionMenu)
+    window.addEventListener('scroll', repositionMenu, true)
     return () => {
       window.cancelAnimationFrame(focusFrame)
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('resize', closeMenu)
-      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('resize', repositionMenu)
+      window.removeEventListener('scroll', repositionMenu, true)
     }
-  }, [isOpen])
+  }, [isOpen, options.length])
 
   function toggleMenu() {
     if (isOpen) {

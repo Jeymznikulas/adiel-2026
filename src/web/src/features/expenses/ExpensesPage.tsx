@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
+import { SummarySurface } from '../../components/ui/SummarySurface'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
+import { appendSystemLog } from '../../services/activityLog'
 
 type DateFilterMode = 'all' | 'month' | 'range'
 type ExpenseStatus = 'Paid' | 'Verifying' | 'To pay' | 'Overdue' | 'Cancelled'
@@ -524,8 +526,10 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   }
 
   function updateExpenseStatus(id: number, status: ExpenseStatus) {
+    const expense = expenses.find((item) => item.id === id)
     setExpenses((current) => current.map((expense) => expense.id === id ? { ...expense, status } : expense))
     setToast('Expense status updated')
+    if (expense) appendSystemLog({ recordId: String(id), module: 'Expenses', action: 'Status changed', entity: expense.payee, description: `Expense status changed from ${expense.status} to ${status}.`, actor: currentUsername, tone: status === 'Paid' ? 'success' : status === 'Overdue' ? 'warning' : 'info', amount: expense.amount, status })
   }
 
   function saveExpense(event: FormEvent<HTMLFormElement>) {
@@ -546,11 +550,13 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       invoiceLink: draft.invoiceLink.trim(),
       notes: draft.notes.trim(),
     }
+    const expenseId = editingExpenseId ?? Date.now()
     setExpenses((current) => editingExpenseId === null
-      ? [{ id: Date.now(), ...values }, ...current]
+      ? [{ id: expenseId, ...values }, ...current]
       : current.map((expense) => expense.id === editingExpenseId ? { id: expense.id, ...values } : expense))
     closeExpenseDialog()
     setToast(wasEditing ? 'Expense updated successfully' : 'Expense added successfully')
+    appendSystemLog({ recordId: String(expenseId), module: 'Expenses', action: wasEditing ? 'Updated' : 'Created', entity: values.payee, description: wasEditing ? `Expense record updated: ${values.description}.` : values.description, actor: currentUsername, tone: values.status === 'Overdue' ? 'warning' : 'success', amount: values.amount, status: values.status })
   }
 
   const summaryCards = [
@@ -569,7 +575,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
-      <section className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_45px_-28px_rgba(0,20,76,0.3)] sm:p-6">
+      <SummarySurface>
         <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
           <div>
             <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Financial operations</p></div>
@@ -598,7 +604,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
                 </>
               )
 
-              if (!insight) return <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3.5 sm:min-w-40 xl:min-w-44" key={card.label}>{content}</article>
+              if (!insight) return <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-[linear-gradient(145deg,rgba(248,250,252,0.9),rgba(255,255,255,0.96))] px-4 py-3.5 shadow-[0_9px_24px_-22px_rgba(0,20,76,0.48)] ring-1 ring-inset ring-white/70 sm:min-w-40 xl:min-w-44" key={card.label}>{content}</article>
 
               const controls = insight === 'categories' ? 'expense-category-breakdown' : 'expense-trend-chart'
               const ariaLabel = insight === 'categories'
@@ -606,7 +612,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
                 : `${isOpen ? 'Hide' : 'Show'} expense trend graph. Current change is ${card.value} versus ${previousMonthLabel}.`
 
               return (
-                <button className={`min-w-0 rounded-2xl border px-4 py-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-white hover:shadow-[0_12px_28px_-22px_rgba(0,20,76,0.5)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue sm:min-w-40 xl:min-w-44 ${isOpen ? 'border-brand-blue/20 bg-brand-blue/[0.035] ring-2 ring-brand-blue/[0.06]' : 'border-slate-200/80 bg-slate-50/60'}`} type="button" key={card.label} onClick={() => setOpenInsight((current) => current === insight ? null : insight)} aria-expanded={isOpen} aria-controls={controls} aria-label={ariaLabel}>
+                <button className={`min-w-0 rounded-2xl border px-4 py-3.5 text-left shadow-[0_9px_24px_-22px_rgba(0,20,76,0.48)] ring-1 ring-inset ring-white/70 transition-all hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-white hover:shadow-[0_12px_28px_-20px_rgba(0,20,76,0.5)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue sm:min-w-40 xl:min-w-44 ${isOpen ? 'border-brand-blue/20 bg-brand-blue/[0.035] ring-2 ring-brand-blue/[0.06]' : 'border-slate-200/80 bg-[linear-gradient(145deg,rgba(248,250,252,0.9),rgba(255,255,255,0.96))]'}`} type="button" key={card.label} onClick={() => setOpenInsight((current) => current === insight ? null : insight)} aria-expanded={isOpen} aria-controls={controls} aria-label={ariaLabel}>
                   {content}
                 </button>
               )
@@ -616,7 +622,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
         {openInsight === 'categories' ? <ExpenseCategoryBreakdown categories={selectedMonthCategories} selectedMonthLabel={selectedMonthLabel} selectedMonthTotal={selectedMonthTotal} onClose={() => setOpenInsight(null)} /> : null}
         {openInsight === 'trend' ? <ExpenseTrendChart points={monthlyTrend} range={trendRange} selectedMonthLabel={selectedMonthLabel} previousMonthLabel={previousMonthLabel} selectedMonthTotal={selectedMonthTotal} previousMonthTotal={previousMonthTotal} onRangeChange={setTrendRange} onClose={() => setOpenInsight(null)} /> : null}
-      </section>
+      </SummarySurface>
 
       <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]">
         <div className="border-b border-slate-100 p-4 sm:p-5">

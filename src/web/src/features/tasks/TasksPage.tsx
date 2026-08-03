@@ -4,11 +4,19 @@ import { createPortal } from 'react-dom'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
+import { SummarySurface } from '../../components/ui/SummarySurface'
+import { appendSystemLog } from '../../services/activityLog'
 
 type TaskStatus = 'To do' | 'In progress' | 'Completed'
 type TaskPriority = 'Low' | 'Medium' | 'High'
 type TaskFilter = 'All' | TaskStatus
 type DueDateFilter = 'All' | 'Overdue' | 'Due today' | 'Upcoming' | 'No due date'
+
+type Subtask = {
+  id: number
+  title: string
+  completed: boolean
+}
 
 type Task = {
   id: number
@@ -20,6 +28,7 @@ type Task = {
   assignedBy: string
   createdAt: string
   dueDate: string
+  subtasks: Subtask[]
 }
 
 type TasksPageProps = {
@@ -47,9 +56,9 @@ const priorityFilterOptions = [{ value: 'All' as const }, ...priorityOptions]
 const dueDateOptions: { value: DueDateFilter }[] = ['All', 'Overdue', 'Due today', 'Upcoming', 'No due date'].map((value) => ({ value: value as DueDateFilter }))
 
 const initialTasks: Task[] = [
-  { id: 1, title: 'Review material requirements', description: 'Confirm quantities needed for upcoming site deliveries.', status: 'To do', priority: 'High', assignedTo: 'Alex Morgan', assignedBy: 'Operations', createdAt: '2026-07-31', dueDate: '2026-08-03' },
-  { id: 2, title: 'Prepare client quotation', description: 'Complete the pricing breakdown and commercial terms.', status: 'In progress', priority: 'Medium', assignedTo: 'Jamie Lee', assignedBy: 'Sales Team', createdAt: '2026-07-31', dueDate: '2026-08-01' },
-  { id: 3, title: 'Update supplier directory', description: 'Verify contact details for active material suppliers.', status: 'Completed', priority: 'Low', assignedTo: 'Taylor Cruz', assignedBy: 'Operations', createdAt: '2026-07-30', dueDate: '2026-07-30' },
+  { id: 1, title: 'Review material requirements', description: 'Confirm quantities needed for upcoming site deliveries.', status: 'To do', priority: 'High', assignedTo: 'Alex Morgan', assignedBy: 'Operations', createdAt: '2026-07-31', dueDate: '2026-08-03', subtasks: [] },
+  { id: 2, title: 'Prepare client quotation', description: 'Complete the pricing breakdown and commercial terms.', status: 'In progress', priority: 'Medium', assignedTo: 'Jamie Lee', assignedBy: 'Sales Team', createdAt: '2026-07-31', dueDate: '2026-08-01', subtasks: [] },
+  { id: 3, title: 'Update supplier directory', description: 'Verify contact details for active material suppliers.', status: 'Completed', priority: 'Low', assignedTo: 'Taylor Cruz', assignedBy: 'Operations', createdAt: '2026-07-30', dueDate: '2026-07-30', subtasks: [] },
 ]
 
 const emptyDraft = {
@@ -65,7 +74,11 @@ function loadTasks() {
   try {
     const savedTasks = window.localStorage.getItem(storageKey)
     if (!savedTasks) return initialTasks
-    return (JSON.parse(savedTasks) as Task[]).map((task) => ({ ...task, dueDate: task.dueDate ?? '' }))
+    return (JSON.parse(savedTasks) as Task[]).map((task) => ({
+      ...task,
+      dueDate: task.dueDate ?? '',
+      subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
+    }))
   } catch {
     return initialTasks
   }
@@ -329,6 +342,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<TaskStatus>>(() => new Set())
   const [draft, setDraft] = useState(emptyDraft)
   const [editDraft, setEditDraft] = useState(emptyDraft)
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const selectedTask = selectedTaskId === null ? null : tasks.find((task) => task.id === selectedTaskId) ?? null
 
   useEffect(() => {
@@ -370,7 +384,9 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
         || (dueDateFilter === 'Due today' && task.dueDate === today)
         || (dueDateFilter === 'Upcoming' && task.dueDate > today)
         || (dueDateFilter === 'No due date' && !task.dueDate)
-      const matchesSearch = !query || [task.title, task.description, task.assignedTo, task.assignedBy].some((value) => value.toLowerCase().includes(query))
+      const matchesSearch = !query
+        || [task.title, task.description, task.assignedTo, task.assignedBy].some((value) => value.toLowerCase().includes(query))
+        || task.subtasks.some((subtask) => subtask.title.toLowerCase().includes(query))
       return matchesStatus && matchesAssignee && matchesPriority && matchesDueDate && matchesSearch
     })
   }, [activeFilter, assigneeFilter, dueDateFilter, priorityFilter, searchQuery, tasks])
@@ -392,12 +408,14 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     setSelectedTaskId(task.id)
     setIsEditingTask(false)
     setIsConfirmingDelete(false)
+    setNewSubtaskTitle('')
   }
 
   function closeTaskDetails() {
     setSelectedTaskId(null)
     setIsEditingTask(false)
     setIsConfirmingDelete(false)
+    setNewSubtaskTitle('')
   }
 
   function beginEditingTask() {
@@ -427,11 +445,13 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     } : task))
     setIsEditingTask(false)
     setToast('Task updated successfully')
+    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Updated', entity: editDraft.title.trim(), description: 'Task details were updated.', actor: currentUsername, tone: 'info', status: editDraft.status })
   }
 
   function removeSelectedTask() {
     if (!selectedTask) return
     setTasks((current) => current.filter((task) => task.id !== selectedTask.id))
+    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Deleted', entity: selectedTask.title, description: 'Task and its related subtasks were removed.', actor: currentUsername, tone: 'danger', status: selectedTask.status })
     closeTaskDetails()
     setToast('Task deleted successfully')
   }
@@ -442,22 +462,68 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     const assignedTo = draft.assignedTo.trim()
     if (!title || !assignedTo || !draft.dueDate) return
 
+    const taskId = Date.now()
     setTasks((current) => [{
-      id: Date.now(), title, description: draft.description.trim(), status: draft.status,
+      id: taskId, title, description: draft.description.trim(), status: draft.status,
       priority: draft.priority, assignedTo, assignedBy: currentUsername,
       createdAt: new Date().toISOString().slice(0, 10), dueDate: draft.dueDate,
+      subtasks: [],
     }, ...current])
     setIsAddingTask(false)
     setToast('Task created successfully')
+    appendSystemLog({ recordId: String(taskId), module: 'Tasks', action: 'Created', entity: title, description: `Task created and assigned to ${assignedTo}.`, actor: currentUsername, tone: 'success', status: draft.status })
   }
 
   function updateTask(id: number, changes: Partial<Pick<Task, 'status' | 'priority' | 'dueDate'>>) {
+    const task = tasks.find((item) => item.id === id)
     setTasks((current) => current.map((task) => task.id === id ? { ...task, ...changes } : task))
     setToast(changes.status === 'Completed'
       ? 'Task marked as completed'
       : changes.status ? 'Task status updated'
         : changes.priority ? 'Task priority updated'
           : 'Task due date updated')
+    if (task) {
+      const action = changes.status ? 'Status changed' : 'Updated'
+      const description = changes.status
+        ? `Task status changed from ${task.status} to ${changes.status}.`
+        : changes.priority
+          ? `Task priority changed from ${task.priority} to ${changes.priority}.`
+          : `Task due date changed to ${changes.dueDate || 'no due date'}.`
+      appendSystemLog({ recordId: String(id), module: 'Tasks', action, entity: task.title, description, actor: currentUsername, tone: changes.status === 'Completed' ? 'success' : 'info', status: changes.status ?? task.status })
+    }
+  }
+
+  function addSubtask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = newSubtaskTitle.trim()
+    if (!selectedTask || !title) return
+
+    const subtask: Subtask = { id: Date.now(), title, completed: false }
+    setTasks((current) => current.map((task) => task.id === selectedTask.id
+      ? { ...task, subtasks: [...task.subtasks, subtask] }
+      : task))
+    setNewSubtaskTitle('')
+    setToast('Subtask added successfully')
+    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Subtask added', entity: selectedTask.title, description: `Subtask added: ${title}.`, actor: currentUsername, tone: 'info', status: selectedTask.status })
+  }
+
+  function toggleSubtask(subtaskId: number) {
+    if (!selectedTask) return
+    const subtask = selectedTask.subtasks.find((item) => item.id === subtaskId)
+    setTasks((current) => current.map((task) => task.id === selectedTask.id
+      ? { ...task, subtasks: task.subtasks.map((subtask) => subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask) }
+      : task))
+    if (subtask) appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Subtask updated', entity: selectedTask.title, description: `${subtask.completed ? 'Reopened' : 'Completed'} subtask: ${subtask.title}.`, actor: currentUsername, tone: subtask.completed ? 'info' : 'success', status: selectedTask.status })
+  }
+
+  function removeSubtask(subtaskId: number) {
+    if (!selectedTask) return
+    const subtask = selectedTask.subtasks.find((item) => item.id === subtaskId)
+    setTasks((current) => current.map((task) => task.id === selectedTask.id
+      ? { ...task, subtasks: task.subtasks.filter((subtask) => subtask.id !== subtaskId) }
+      : task))
+    setToast('Subtask removed')
+    if (subtask) appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Subtask removed', entity: selectedTask.title, description: `Subtask removed: ${subtask.title}.`, actor: currentUsername, tone: 'warning', status: selectedTask.status })
   }
 
   function toggleGroup(status: TaskStatus) {
@@ -478,7 +544,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
-      <section className="grid gap-5 rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_45px_-28px_rgba(0,20,76,0.3)] sm:p-6 xl:grid-cols-[1fr_auto] xl:items-center">
+      <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
         <div>
           <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Task management</p></div>
           <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Workboard</h2>
@@ -486,13 +552,13 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
           {summaryCards.map((card) => (
-            <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-3 py-3.5 sm:min-w-32 sm:px-4" key={card.label}>
-              <div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.dot}`} /><p className="truncate text-[11px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div>
+            <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-[linear-gradient(145deg,rgba(248,250,252,0.9),rgba(255,255,255,0.96))] px-3 py-3.5 shadow-[0_9px_24px_-22px_rgba(0,20,76,0.48)] ring-1 ring-inset ring-white/70 transition-transform duration-200 hover:-translate-y-0.5 sm:min-w-32 sm:px-4" key={card.label}>
+              <div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.dot} ring-4 ring-white`} /><p className="truncate text-[11px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div>
               <p className={`mt-2 text-2xl font-bold tracking-[-0.04em] ${card.valueColor}`}>{card.value}</p>
             </article>
           ))}
         </div>
-      </section>
+      </SummarySurface>
 
       <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]">
         <div className="border-b border-slate-100 p-4 sm:p-5">
@@ -569,7 +635,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                           <td className={`border-l-4 ${group.border} px-4 py-3.5`}>
                             <div className="flex min-w-0 items-start gap-3">
                               <button className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition ${task.status === 'Completed' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 text-transparent hover:border-brand-blue/40 hover:text-brand-blue/30'}`} type="button" onClick={() => updateTask(task.id, { status: task.status === 'Completed' ? 'To do' : 'Completed' })} aria-label={task.status === 'Completed' ? `Reopen ${task.title}` : `Complete ${task.title}`}><svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
-                              <div className="min-w-0"><button className={`block max-w-full truncate text-left text-sm font-bold transition hover:text-brand-orange focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue ${task.status === 'Completed' ? 'text-slate-400 line-through' : 'text-brand-blue'}`} type="button" onClick={() => openTaskDetails(task)}>{task.title}</button><p className="mt-1 truncate text-xs leading-5 text-slate-500">{task.description || 'No description'}</p></div>
+                              <div className="min-w-0"><button className={`block max-w-full truncate text-left text-sm font-bold transition hover:text-brand-orange focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue ${task.status === 'Completed' ? 'text-slate-400 line-through' : 'text-brand-blue'}`} type="button" onClick={() => openTaskDetails(task)}>{task.title}</button><p className="mt-1 truncate text-xs leading-5 text-slate-500">{task.description || 'No description'}</p>{task.subtasks.length ? <p className="mt-1 text-[10px] font-bold text-slate-400">{task.subtasks.filter((subtask) => subtask.completed).length}/{task.subtasks.length} subtasks completed</p> : null}</div>
                             </div>
                           </td>
                           <td className="px-4 py-3.5"><div className="flex items-center gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[linear-gradient(145deg,#092968,#00113f)] text-[10px] font-bold text-white">{initials(task.assignedTo)}</span><span className="truncate text-xs font-semibold text-slate-700">{task.assignedTo}</span></div></td>
@@ -625,6 +691,28 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                     <span className={`rounded-lg px-3 py-1.5 text-xs font-bold ${selectedTask.priority === 'High' ? 'bg-red-50 text-red-600' : selectedTask.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-sky-50 text-sky-600'}`}>{selectedTask.priority} priority</span>
                   </div>
                   <div><p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{selectedTask.description || 'No description provided.'}</p></div>
+                  <div>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Subtasks</p>
+                      {selectedTask.subtasks.length ? <span className="text-[11px] font-bold text-slate-400">{selectedTask.subtasks.filter((subtask) => subtask.completed).length} of {selectedTask.subtasks.length} complete</span> : null}
+                    </div>
+                    {selectedTask.subtasks.length ? (
+                      <div className="mt-3 space-y-2">
+                        {selectedTask.subtasks.map((subtask) => (
+                          <div className="group/subtask flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5" key={subtask.id}>
+                            <button className={`grid size-5 shrink-0 place-items-center rounded-md border transition ${subtask.completed ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 bg-white text-transparent hover:border-brand-blue/40'}`} type="button" onClick={() => toggleSubtask(subtask.id)} aria-label={subtask.completed ? `Mark ${subtask.title} as incomplete` : `Complete ${subtask.title}`}><svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                            <span className={`min-w-0 flex-1 text-sm font-medium ${subtask.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{subtask.title}</span>
+                            <button className="grid size-7 shrink-0 place-items-center rounded-lg text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover/subtask:opacity-100 focus:opacity-100" type="button" onClick={() => removeSubtask(subtask.id)} aria-label={`Remove ${subtask.title}`}><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="mt-2 text-xs text-slate-400">No subtasks yet.</p>}
+                    <form className="mt-3 flex gap-2" onSubmit={addSubtask}>
+                      <label className="sr-only" htmlFor="new-subtask-title">New subtask</label>
+                      <input className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-subtask-title" value={newSubtaskTitle} onChange={(event) => setNewSubtaskTitle(event.target.value)} placeholder="Add a subtask..." />
+                      <button className="h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0" type="submit" disabled={!newSubtaskTitle.trim()}>Add</button>
+                    </form>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><span className="grid size-10 place-items-center rounded-xl bg-brand-blue text-xs font-bold text-white">{initials(selectedTask.assignedTo)}</span><div><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Assigned to</p><p className="mt-1 text-sm font-bold text-brand-blue">{selectedTask.assignedTo}</p></div></div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Due date</p><p className={`mt-2 text-sm font-bold ${dueDateClass(selectedTask)}`}>{formatDate(selectedTask.dueDate)}</p></div>
