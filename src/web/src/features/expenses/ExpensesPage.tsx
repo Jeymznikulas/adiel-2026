@@ -24,6 +24,10 @@ type Expense = {
   notes: string
 }
 
+type ExpenseDraft = Omit<Expense, 'id' | 'amount'> & {
+  amount: string
+}
+
 type ExpensesPageProps = {
   currentUsername: string
 }
@@ -49,15 +53,15 @@ function createDefaultOptions(prefix: string, names: string[]): ExpenseOption[] 
 
 const defaultCategoryOptions = createDefaultOptions('category', defaultCategoryNames)
 const defaultPaymentMethodOptions = createDefaultOptions('payment', defaultPaymentMethodNames)
-const emptyDraft = {
+const emptyDraft: ExpenseDraft = {
   date: new Date().toISOString().slice(0, 10),
   payee: '',
-  category: defaultCategoryNames[0],
+  category: defaultCategoryNames[0] ?? 'Other',
   description: '',
   amount: '',
-  paymentMethod: defaultPaymentMethodNames[0],
+  paymentMethod: defaultPaymentMethodNames[0] ?? 'Other',
   purchaser: '',
-  status: 'To pay' as ExpenseStatus,
+  status: 'To pay',
   invoiceLink: '',
   notes: '',
 }
@@ -315,7 +319,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [settingsTab, setSettingsTab] = useState<ExpenseOptionKind>('categories')
   const categories = categoryOptions.filter((option) => option.isActive).map((option) => option.name)
   const paymentMethods = paymentMethodOptions.filter((option) => option.isActive).map((option) => option.name)
-  const [draft, setDraft] = useState(() => ({ ...emptyDraft, category: categories[0], paymentMethod: paymentMethods[0], purchaser: currentUsername }))
+  const [draft, setDraft] = useState<ExpenseDraft>(() => ({ ...emptyDraft, category: categories[0] ?? emptyDraft.category, paymentMethod: paymentMethods[0] ?? emptyDraft.paymentMethod, purchaser: currentUsername }))
   const isEditingExpense = editingExpenseId !== null
   const draftCategories = categories.includes(draft.category) ? categories : [draft.category, ...categories]
   const draftPaymentMethods = paymentMethods.includes(draft.paymentMethod) ? paymentMethods : [draft.paymentMethod, ...paymentMethods]
@@ -364,7 +368,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   const visibleTotal = useMemo(() => visibleExpenses.reduce((sum, expense) => sum + expense.amount, 0), [visibleExpenses])
   const comparisonMonth = /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth : currentMonth
-  const [comparisonYear, comparisonMonthNumber] = comparisonMonth.split('-').map(Number)
+  const [comparisonYear = new Date().getFullYear(), comparisonMonthNumber = new Date().getMonth() + 1] = comparisonMonth.split('-').map(Number)
   const previousMonthDate = new Date(comparisonYear, comparisonMonthNumber - 2, 1)
   const previousMonth = `${previousMonthDate.getFullYear()}-${String(previousMonthDate.getMonth() + 1).padStart(2, '0')}`
   const selectedMonthTotal = useMemo(() => expenses.filter((expense) => expense.date.startsWith(comparisonMonth)).reduce((sum, expense) => sum + expense.amount, 0), [comparisonMonth, expenses])
@@ -390,7 +394,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       totalsByMonth.set(month, (totalsByMonth.get(month) ?? 0) + expense.amount)
     })
 
-    const [year, month] = comparisonMonth.split('-').map(Number)
+    const [year = new Date().getFullYear(), month = new Date().getMonth() + 1] = comparisonMonth.split('-').map(Number)
     const earliestMonth = Array.from(totalsByMonth.keys())
       .filter((key) => /^\d{4}-\d{2}$/.test(key) && key <= comparisonMonth)
       .sort()[0]
@@ -454,7 +458,11 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       const destination = index + direction
       if (index < 0 || destination < 0 || destination >= current.length) return current
       const next = [...current]
-        ;[next[index], next[destination]] = [next[destination], next[index]]
+      const source = next[index]
+      const target = next[destination]
+      if (!source || !target) return current
+      next[index] = target
+      next[destination] = source
       return next
     })
   }
@@ -475,7 +483,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     const option = options.find((item) => item.id === id)
     if (!option || options.length === 1 || (option.isActive && options.filter((item) => item.isActive).length === 1) || expenses.some((expense) => kind === 'categories' ? expense.category === option.name : expense.paymentMethod === option.name)) return
     const remaining = options.filter((item) => item.id !== id)
-    const replacement = remaining.find((item) => item.isActive)?.name ?? remaining[0].name
+    const replacement = remaining.find((item) => item.isActive)?.name ?? remaining[0]?.name ?? option.name
     updateOptions(kind, () => remaining)
     setDraft((current) => kind === 'categories' && current.category === option.name
       ? { ...current, category: replacement }
@@ -490,7 +498,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   function openExpenseDialog() {
     setEditingExpenseId(null)
-    setDraft({ ...emptyDraft, date: new Date().toISOString().slice(0, 10), category: categories[0], paymentMethod: paymentMethods[0], purchaser: currentUsername })
+    setDraft({ ...emptyDraft, date: new Date().toISOString().slice(0, 10), category: categories[0] ?? emptyDraft.category, paymentMethod: paymentMethods[0] ?? emptyDraft.paymentMethod, purchaser: currentUsername })
     setIsAddingExpense(true)
   }
 

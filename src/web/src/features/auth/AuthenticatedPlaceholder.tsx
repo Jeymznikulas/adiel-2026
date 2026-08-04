@@ -4,6 +4,7 @@ import { AppShell } from '../../components/layout/AppShell'
 import { ExpensesPage } from '../expenses/ExpensesPage'
 import { ItemsPage } from '../items/ItemsPage'
 import { LogsPage } from '../logs/LogsPage'
+import { PurchaseOrdersPage } from '../purchase-orders/PurchaseOrdersPage'
 import { SupplierPage } from '../suppliers/SupplierPage'
 import { TasksPage } from '../tasks/TasksPage'
 import { signOut } from './auth'
@@ -41,6 +42,7 @@ export function AuthenticatedPlaceholder({ session }: AuthenticatedPlaceholderPr
       sectionContent={{
         Tasks: <TasksPage currentUsername={username} />,
         Items: <ItemsPage currentUsername={username} />,
+        'Purchase Order': <PurchaseOrdersPage currentUsername={username} />,
         Expenses: <ExpensesPage currentUsername={username} />,
         'Supplier Directory': <SupplierPage currentUsername={username} />,
         Logs: <LogsPage />,
