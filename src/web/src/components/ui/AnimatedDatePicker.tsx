@@ -68,6 +68,9 @@ export function AnimatedDatePicker({
   const initialDate = dateFromValue(value, mode) ?? new Date()
   const [isOpen, setIsOpen] = useState(false)
   const [viewDate, setViewDate] = useState(() => new Date(initialDate.getFullYear(), initialDate.getMonth(), 1))
+  const [isJumpOpen, setIsJumpOpen] = useState(false)
+  const [jumpMonth, setJumpMonth] = useState(initialDate.getMonth())
+  const [jumpYear, setJumpYear] = useState(String(initialDate.getFullYear()))
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 320, opensAbove: false })
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -125,6 +128,7 @@ export function AnimatedDatePicker({
   function togglePicker() {
     if (isOpen) {
       setIsOpen(false)
+      setIsJumpOpen(false)
       return
     }
 
@@ -132,6 +136,9 @@ export function AnimatedDatePicker({
     if (!rect) return
     const activeDate = dateFromValue(value, mode) ?? new Date()
     setViewDate(new Date(activeDate.getFullYear(), activeDate.getMonth(), 1))
+    setJumpMonth(activeDate.getMonth())
+    setJumpYear(String(activeDate.getFullYear()))
+    setIsJumpOpen(false)
     const width = Math.min(320, window.innerWidth - 16)
     const estimatedHeight = Math.min(mode === 'month' ? 300 : 390, window.innerHeight - 16)
     const opensAbove = window.innerHeight - rect.bottom < estimatedHeight + 12 && rect.top > estimatedHeight + 12
@@ -168,7 +175,26 @@ export function AnimatedDatePicker({
   }
 
   function changeView(offset: number) {
-    setViewDate((current) => new Date(current.getFullYear() + (mode === 'month' ? offset : 0), current.getMonth() + (mode === 'date' ? offset : 0), 1))
+    setViewDate((current) => {
+      const next = new Date(current.getFullYear() + (mode === 'month' ? offset : 0), current.getMonth() + (mode === 'date' ? offset : 0), 1)
+      setJumpMonth(next.getMonth())
+      setJumpYear(String(next.getFullYear()))
+      return next
+    })
+    setIsJumpOpen(false)
+  }
+
+  function toggleJumpPicker() {
+    setJumpMonth(viewDate.getMonth())
+    setJumpYear(String(viewDate.getFullYear()))
+    setIsJumpOpen((current) => !current)
+  }
+
+  function applyJump() {
+    const year = Number(jumpYear)
+    if (!Number.isInteger(year) || year < 1000 || year > 9999) return
+    setViewDate(new Date(year, mode === 'date' ? jumpMonth : viewDate.getMonth(), 1))
+    setIsJumpOpen(false)
   }
 
   const headerLabel = mode === 'month'
@@ -203,10 +229,23 @@ export function AnimatedDatePicker({
           aria-label={ariaLabel}
           style={{ top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, transformOrigin: menuPosition.opensAbove ? 'bottom right' : 'top right' }}
         >
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="relative flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <button className="grid size-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => changeView(-1)} aria-label={mode === 'month' ? 'Previous year' : 'Previous month'}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
-            <div className="text-center"><p className="text-[9px] font-bold uppercase tracking-[0.14em] text-brand-orange">{mode === 'month' ? 'Choose month' : 'Choose date'}</p><p className="mt-0.5 text-sm font-extrabold text-brand-blue">{headerLabel}</p></div>
+            <button className="group min-w-0 rounded-lg px-2 py-0.5 text-center outline-none transition hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-brand-blue/[0.06]" type="button" onClick={toggleJumpPicker} aria-expanded={isJumpOpen} aria-label={`Jump to a different ${mode === 'month' ? 'year' : 'month and year'}`}>
+              <span className="block text-[9px] font-bold uppercase tracking-[0.14em] text-brand-orange">{mode === 'month' ? 'Choose month' : 'Choose date'}</span>
+              <span className="mt-0.5 flex items-center justify-center gap-1 text-sm font-extrabold text-brand-blue">{headerLabel}<svg className={`size-3 transition-transform ${isJumpOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span>
+            </button>
             <button className="grid size-9 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => changeView(1)} aria-label={mode === 'month' ? 'Next year' : 'Next month'}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></button>
+            {isJumpOpen ? (
+              <div className="absolute left-1/2 top-[calc(100%+0.5rem)] z-10 w-64 -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-[0_18px_40px_-18px_rgba(0,20,76,0.38)]" role="group" aria-label="Jump to date">
+                <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">Jump to {mode === 'month' ? 'year' : 'month and year'}</p>
+                <div className={`mt-2 grid gap-2 ${mode === 'date' ? 'grid-cols-[1fr_5rem_auto]' : 'grid-cols-[1fr_auto]'}`}>
+                  {mode === 'date' ? <select className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-brand-blue outline-none focus:border-brand-blue/40" value={jumpMonth} onChange={(event) => setJumpMonth(Number(event.target.value))} aria-label="Month">{monthNames.map((month, index) => <option value={index} key={month}>{month.slice(0, 3)}</option>)}</select> : null}
+                  <input className="h-9 min-w-0 rounded-lg border border-slate-200 px-2 text-xs font-bold tabular-nums text-brand-blue outline-none focus:border-brand-blue/40" type="number" min="1000" max="9999" value={jumpYear} onChange={(event) => setJumpYear(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applyJump() } }} aria-label="Year" autoFocus />
+                  <button className="h-9 rounded-lg bg-brand-blue px-3 text-[10px] font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30" type="button" onClick={applyJump} disabled={!/^\d{4}$/.test(jumpYear)}>Go</button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {mode === 'date' ? (
