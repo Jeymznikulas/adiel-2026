@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
 import { useState } from 'react'
 import { AppShell } from '../../components/layout/AppShell'
+import { ClientsPage } from '../clients/ClientsPage'
 import { ExpensesPage } from '../expenses/ExpensesPage'
 import { ItemsPage } from '../items/ItemsPage'
 import { LogsPage } from '../logs/LogsPage'
@@ -44,6 +45,7 @@ export function AuthenticatedPlaceholder({ session }: AuthenticatedPlaceholderPr
         Items: <ItemsPage currentUsername={username} />,
         'Purchase Order': <PurchaseOrdersPage currentUsername={username} />,
         Expenses: <ExpensesPage currentUsername={username} />,
+        'Client Directory': <ClientsPage currentUsername={username} />,
         'Supplier Directory': <SupplierPage currentUsername={username} />,
         Logs: <LogsPage />,
       }}

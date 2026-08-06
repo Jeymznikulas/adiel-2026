@@ -1,4 +1,4 @@
-export type SystemLogModule = 'Tasks' | 'Items' | 'Expenses' | 'Suppliers' | 'Purchase Orders'
+export type SystemLogModule = 'Tasks' | 'Items' | 'Expenses' | 'Suppliers' | 'Clients' | 'Purchase Orders'
 export type SystemLogAction = 'Created' | 'Updated' | 'Deleted' | 'Status changed' | 'Subtask added' | 'Subtask updated' | 'Subtask removed' | 'Added to Expenses' | 'Removed from Expenses'
 export type SystemLogTone = 'success' | 'info' | 'warning' | 'danger'
 

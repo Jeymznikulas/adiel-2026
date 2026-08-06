@@ -18,6 +18,7 @@ const navigationItems = [
 function normalizePath(pathname: string) {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
   if (/^\/items\/[^/]+$/.test(path)) return path
+  if (/^\/clients\/[^/]+$/.test(path)) return path
   return navigationItems.some((item) => item.path === path) ? path : '/dashboard'
 }
 
@@ -42,6 +43,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const activeItem = navigationItems.find((item) => item.path === activePath)
     ?? (activePath.startsWith('/items/') ? navigationItems.find((item) => item.path === '/items') : undefined)
+    ?? (activePath.startsWith('/clients/') ? navigationItems.find((item) => item.path === '/clients') : undefined)
     ?? navigationItems[0]
   const activeSection = activeItem.label
   const initial = username.charAt(0).toUpperCase() || 'U'

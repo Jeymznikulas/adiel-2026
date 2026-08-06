@@ -7,7 +7,7 @@ import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogEntry, type Syste
 type ModuleFilter = 'All modules' | SystemLogModule
 type ActionFilter = 'All actions' | SystemLogEntry['action']
 
-const moduleOptions: { value: ModuleFilter }[] = ['All modules', 'Tasks', 'Items', 'Expenses', 'Suppliers', 'Purchase Orders'].map((value) => ({ value: value as ModuleFilter }))
+const moduleOptions: { value: ModuleFilter }[] = ['All modules', 'Tasks', 'Items', 'Expenses', 'Suppliers', 'Clients', 'Purchase Orders'].map((value) => ({ value: value as ModuleFilter }))
 const actionOptions: { value: ActionFilter }[] = ['All actions', 'Created', 'Updated', 'Deleted', 'Status changed', 'Subtask added', 'Subtask updated', 'Subtask removed', 'Added to Expenses', 'Removed from Expenses'].map((value) => ({ value: value as ActionFilter }))
 
 const moduleStyles: Record<SystemLogModule, { icon: string; iconTone: string; badge: string }> = {
@@ -15,6 +15,7 @@ const moduleStyles: Record<SystemLogModule, { icon: string; iconTone: string; ba
   Items: { icon: 'm21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5', iconTone: 'bg-orange-50 text-brand-orange', badge: 'border-orange-100 bg-orange-50 text-orange-700' },
   Expenses: { icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6', iconTone: 'bg-emerald-50 text-emerald-600', badge: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
   Suppliers: { icon: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6', iconTone: 'bg-violet-50 text-violet-600', badge: 'border-violet-100 bg-violet-50 text-violet-700' },
+  Clients: { icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8', iconTone: 'bg-sky-50 text-sky-600', badge: 'border-sky-100 bg-sky-50 text-sky-700' },
   'Purchase Orders': { icon: 'M3 3h2l2.4 12.3a2 2 0 0 0 2 1.7h7.7a2 2 0 0 0 2-1.6L21 7H6M10 21h.01M18 21h.01', iconTone: 'bg-amber-50 text-amber-600', badge: 'border-amber-100 bg-amber-50 text-amber-700' },
 }
 
