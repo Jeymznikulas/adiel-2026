@@ -22,6 +22,18 @@ type Expense = {
   status: ExpenseStatus
   invoiceLink: string
   notes: string
+  quotationId: string
+  quotationNumber: string
+  projectName: string
+}
+
+type ApprovedQuotationOption = {
+  id: string
+  quotationNumber: string
+  clientName: string
+  subject: string
+  projectLocation: string
+  status: string
 }
 
 type ExpenseDraft = Omit<Expense, 'id' | 'amount'> & {
@@ -33,6 +45,7 @@ type ExpensesPageProps = {
 }
 
 const storageKey = 'adiel.expenses'
+const quotationStorageKey = 'adiel.quotations'
 const categoryStorageKey = 'adiel.expense-categories'
 const paymentMethodStorageKey = 'adiel.expense-payment-methods'
 const defaultCategoryNames = ['Materials', 'Transportation', 'Office supplies', 'Utilities', 'Meals', 'Equipment', 'Professional fees', 'Other']
@@ -64,6 +77,9 @@ const emptyDraft: ExpenseDraft = {
   status: 'To pay',
   invoiceLink: '',
   notes: '',
+  quotationId: '',
+  quotationNumber: '',
+  projectName: '',
 }
 
 function loadExpenses(): Expense[] {
@@ -75,7 +91,31 @@ function loadExpenses(): Expense[] {
     return (parsed as Expense[]).map((expense) => ({
       ...expense,
       status: expenseStatuses.includes(expense.status) ? expense.status : 'To pay',
+      quotationId: typeof expense.quotationId === 'string' ? expense.quotationId : '',
+      quotationNumber: typeof expense.quotationNumber === 'string' ? expense.quotationNumber : '',
+      projectName: typeof expense.projectName === 'string' ? expense.projectName : '',
     }))
+  } catch {
+    return []
+  }
+}
+
+function loadApprovedQuotations(): ApprovedQuotationOption[] {
+  try {
+    const stored = window.localStorage.getItem(quotationStorageKey)
+    const parsed: unknown = stored ? JSON.parse(stored) : []
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((value): value is ApprovedQuotationOption => typeof value === 'object' && value !== null && (value as ApprovedQuotationOption).status === 'Approved')
+      .map((quotation) => ({
+        id: String(quotation.id),
+        quotationNumber: String(quotation.quotationNumber ?? ''),
+        clientName: String(quotation.clientName ?? ''),
+        subject: String(quotation.subject ?? ''),
+        projectLocation: String(quotation.projectLocation ?? ''),
+        status: quotation.status,
+      }))
+      .sort((left, right) => right.quotationNumber.localeCompare(left.quotationNumber))
   } catch {
     return []
   }
@@ -302,6 +342,7 @@ function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLab
 
 export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [expenses, setExpenses] = useState<Expense[]>(loadExpenses)
+  const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>(loadApprovedQuotations)
   const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(() => loadOptions(categoryStorageKey, defaultCategoryOptions))
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<ExpenseOption[]>(() => loadOptions(paymentMethodStorageKey, defaultPaymentMethodOptions))
   const [searchQuery, setSearchQuery] = useState('')
@@ -323,6 +364,13 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const isEditingExpense = editingExpenseId !== null
   const draftCategories = categories.includes(draft.category) ? categories : [draft.category, ...categories]
   const draftPaymentMethods = paymentMethods.includes(draft.paymentMethod) ? paymentMethods : [draft.paymentMethod, ...paymentMethods]
+  const projectOptions = useMemo(() => [
+    { value: '', label: 'General expense / no project' },
+    ...approvedQuotations.map((quotation) => ({
+      value: quotation.id,
+      label: `${quotation.quotationNumber} · ${quotation.clientName}${quotation.subject ? ` — ${quotation.subject}` : ''}`,
+    })),
+  ], [approvedQuotations])
 
   useEffect(() => {
     try {
@@ -347,6 +395,19 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     }
   }, [categoryOptions, paymentMethodOptions])
 
+  useEffect(() => {
+    const refreshQuotations = (event: StorageEvent) => {
+      if (event.key === quotationStorageKey) setApprovedQuotations(loadApprovedQuotations())
+    }
+    const refreshOnNavigate = () => setApprovedQuotations(loadApprovedQuotations())
+    window.addEventListener('storage', refreshQuotations)
+    window.addEventListener('adiel:navigate', refreshOnNavigate)
+    return () => {
+      window.removeEventListener('storage', refreshQuotations)
+      window.removeEventListener('adiel:navigate', refreshOnNavigate)
+    }
+  }, [])
+
   const categoryFilterOptions = useMemo(() => Array.from(new Set([...categoryOptions.map((option) => option.name), ...expenses.map((expense) => expense.category)])), [categoryOptions, expenses])
   const usedCategories = useMemo(() => new Set(expenses.map((expense) => expense.category)), [expenses])
   const usedPaymentMethods = useMemo(() => new Set(expenses.map((expense) => expense.paymentMethod)), [expenses])
@@ -355,7 +416,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     const query = searchQuery.trim().toLowerCase()
     return expenses
       .filter((expense) => {
-        const matchesSearch = !query || [expense.payee, expense.category, expense.description, expense.paymentMethod, expense.purchaser, expense.status, expense.notes]
+        const matchesSearch = !query || [expense.payee, expense.category, expense.description, expense.paymentMethod, expense.purchaser, expense.status, expense.notes, expense.quotationNumber, expense.projectName]
           .some((value) => value.toLowerCase().includes(query))
         const matchesCategory = categoryFilter === 'All' || expense.category === categoryFilter
         const matchesDate = dateFilterMode === 'all'
@@ -515,6 +576,9 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       status: expense.status,
       invoiceLink: expense.invoiceLink,
       notes: expense.notes,
+      quotationId: expense.quotationId,
+      quotationNumber: expense.quotationNumber,
+      projectName: expense.projectName,
     })
     setIsAddingExpense(true)
   }
@@ -545,6 +609,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     const amount = Number(draft.amount)
     if (!draft.date || !draft.payee.trim() || !draft.description.trim() || !draft.purchaser.trim() || !Number.isFinite(amount) || amount <= 0) return
     const wasEditing = editingExpenseId !== null
+    const linkedQuotation = approvedQuotations.find((quotation) => quotation.id === draft.quotationId)
 
     const values = {
       date: draft.date,
@@ -557,6 +622,9 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       status: draft.status,
       invoiceLink: draft.invoiceLink.trim(),
       notes: draft.notes.trim(),
+      quotationId: linkedQuotation?.id ?? '',
+      quotationNumber: linkedQuotation?.quotationNumber ?? '',
+      projectName: linkedQuotation ? (linkedQuotation.subject || linkedQuotation.clientName) : '',
     }
     const expenseId = editingExpenseId ?? Date.now()
     setExpenses((current) => editingExpenseId === null
@@ -681,7 +749,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
                     <td className="border-l-4 border-l-brand-orange px-5 py-4 text-xs font-semibold text-slate-600">{formatDate(expense.date)}</td>
                     <td className="px-4 py-4"><button className="group/payee flex max-w-full items-center gap-1.5 text-left" type="button" onClick={() => openEditExpense(expense)} title={`Edit ${expense.payee} expense`}><span className="truncate text-sm font-bold text-brand-blue transition group-hover/payee:text-brand-orange">{expense.payee}</span><svg className="size-3 shrink-0 text-slate-300 opacity-0 transition group-hover/payee:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg></button></td>
                     <td className="px-4 py-4"><span className="inline-flex max-w-full truncate rounded-lg bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-700" title={expense.category}>{expense.category}</span></td>
-                    <td className="px-4 py-4"><span className="block truncate text-xs font-medium text-slate-600" title={expense.description}>{expense.description}</span></td>
+                    <td className="px-4 py-4"><span className="block truncate text-xs font-medium text-slate-600" title={expense.description}>{expense.description}</span>{expense.quotationNumber ? <span className="mt-1 block truncate text-[9px] font-bold text-violet-600" title={`${expense.quotationNumber} · ${expense.projectName}`}>{expense.quotationNumber} · {expense.projectName}</span> : null}</td>
                     <td className="px-4 py-4 text-right text-sm font-extrabold tabular-nums text-brand-blue">{formatPeso(expense.amount)}</td>
                     <td className="px-4 py-4"><span className="inline-flex rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-600">{expense.paymentMethod}</span></td>
                     <td className="px-4 py-4"><span className="block truncate text-xs font-semibold text-slate-700" title={expense.purchaser}>{expense.purchaser}</span></td>
@@ -716,6 +784,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-payee">Payee</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-payee" value={draft.payee} onChange={(event) => setDraft((current) => ({ ...current, payee: event.target.value }))} placeholder="Supplier or recipient" autoFocus required /></div>
               <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-category">Category</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('categories')}>Manage</button></div><AnimatedDropdown id="new-expense-category" value={draft.category ?? ''} options={draftCategories.filter((value): value is string => Boolean(value)).map((value) => ({ value }))} onChange={(category) => setDraft((current) => ({ ...current, category }))} ariaLabel="Expense category" /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-amount">Amount (PHP)</label><div className="relative"><span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">₱</span><input className="h-11 w-full rounded-xl border border-slate-200 pl-8 pr-3.5 text-sm font-semibold text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-amount" type="number" min="0.01" step="0.01" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" required /></div></div>
+              <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Project / approved quotation <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><AnimatedDropdown value={draft.quotationId} options={projectOptions} onChange={(quotationId) => { const quotation = approvedQuotations.find((item) => item.id === quotationId); setDraft((current) => ({ ...current, quotationId, quotationNumber: quotation?.quotationNumber ?? '', projectName: quotation ? (quotation.subject || quotation.clientName) : '' })) }} ariaLabel="Project or approved quotation" /><p className="mt-1.5 text-[10px] text-slate-400">Link project costs here so Sales Tracker can calculate actual profit.</p></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-description">Brief description</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="What was purchased or paid for?" required /></div>
               <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-method">Payment method</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('paymentMethods')}>Manage</button></div><AnimatedDropdown id="new-expense-method" value={draft.paymentMethod ?? ''} options={draftPaymentMethods.filter((value): value is string => Boolean(value)).map((value) => ({ value }))} onChange={(paymentMethod) => setDraft((current) => ({ ...current, paymentMethod }))} ariaLabel="Payment method" /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-purchaser">Purchaser</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-purchaser" value={draft.purchaser} onChange={(event) => setDraft((current) => ({ ...current, purchaser: event.target.value }))} placeholder="Person who made the purchase" required /></div>

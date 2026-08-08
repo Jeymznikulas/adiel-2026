@@ -148,7 +148,7 @@ export function AnimatedDropdown<T extends string>({
       </button>
       {isOpen ? createPortal(
         <div
-          className="fixed z-[70] max-h-60 overflow-y-auto rounded-xl border border-slate-200/80 bg-white/95 p-1.5 shadow-[0_18px_45px_-16px_rgba(0,20,76,0.32)] backdrop-blur-xl animate-[status-menu-enter_160ms_cubic-bezier(0.22,1,0.36,1)]"
+          className="fixed z-[110] max-h-60 overflow-y-auto rounded-xl border border-slate-200/80 bg-white/95 p-1.5 shadow-[0_18px_45px_-16px_rgba(0,20,76,0.32)] backdrop-blur-xl animate-[status-menu-enter_160ms_cubic-bezier(0.22,1,0.36,1)]"
           id={menuId}
           ref={menuRef}
           role="listbox"

@@ -4,6 +4,7 @@ import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { appendSystemLog } from '../../services/activityLog'
+import { SupplierProfile, type SupplierPurchaseOrder, type SupplierRegisteredItem } from './SupplierProfile'
 
 type SupplierType = 'Contractor' | 'Distributor' | 'Manufacturer' | 'Service provider' | 'Other'
 type SupplierFilter = 'All suppliers' | SupplierType
@@ -46,6 +47,8 @@ type SupplierPageProps = {
 }
 
 const storageKey = 'adiel.suppliers'
+const purchaseOrderStorageKey = 'adiel.purchase-orders'
+const itemStorageKey = 'adiel.items'
 const supplierTypes: SupplierType[] = ['Contractor', 'Distributor', 'Manufacturer', 'Service provider', 'Other']
 const supplierTypeOptions = supplierTypes.map((value) => ({ value }))
 const supplierStatusOptions = [
@@ -126,6 +129,66 @@ function loadSuppliers(): Supplier[] {
   } catch {
     return []
   }
+}
+
+function loadSupplierPurchaseOrders(): SupplierPurchaseOrder[] {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(purchaseOrderStorageKey) ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((value) => {
+      if (typeof value !== 'object' || value === null) return []
+      const order = value as Partial<SupplierPurchaseOrder>
+      if (typeof order.id !== 'string' || typeof order.supplierId !== 'string' || typeof order.poNumber !== 'string' || typeof order.date !== 'string') return []
+      return [{
+        id: order.id,
+        date: order.date,
+        poNumber: order.poNumber,
+        clientName: typeof order.clientName === 'string' ? order.clientName : '',
+        supplierId: order.supplierId,
+        supplierName: typeof order.supplierName === 'string' ? order.supplierName : '',
+        contactPerson: typeof order.contactPerson === 'string' ? order.contactPerson : '',
+        totalAmount: typeof order.totalAmount === 'number' ? order.totalAmount : 0,
+        status: typeof order.status === 'string' ? order.status : 'Not yet sent',
+        addedToExpenses: order.addedToExpenses === true,
+        items: Array.isArray(order.items) ? order.items : [],
+        createdAt: typeof order.createdAt === 'string' ? order.createdAt : order.date,
+        updatedAt: typeof order.updatedAt === 'string' ? order.updatedAt : order.date,
+      }]
+    })
+  } catch { return [] }
+}
+
+function loadSupplierRegisteredItems(): (SupplierRegisteredItem & { supplierId: string })[] {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(itemStorageKey) ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((value) => {
+      if (typeof value !== 'object' || value === null) return []
+      const item = value as Record<string, unknown>
+      if (typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.supplierId !== 'string') return []
+      const variants = Array.isArray(item.variants) ? item.variants.flatMap((value) => {
+        if (typeof value !== 'object' || value === null) return []
+        const variant = value as Record<string, unknown>
+        if (typeof variant.id !== 'string') return []
+        return [{ id: variant.id, status: typeof variant.status === 'string' ? variant.status : 'Active', rawCost: typeof variant.rawCost === 'number' ? variant.rawCost : 0, sellingPrice: typeof variant.sellingPrice === 'number' ? variant.sellingPrice : 0 }]
+      }) : []
+      return [{
+        id: item.id,
+        supplierId: item.supplierId,
+        photo: typeof item.photo === 'string' ? item.photo : '',
+        name: item.name,
+        category: typeof item.category === 'string' ? item.category : '',
+        subcategory: typeof item.subcategory === 'string' ? item.subcategory : '',
+        brand: typeof item.brand === 'string' ? item.brand : '',
+        unitOfMeasure: typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece',
+        productCode: typeof item.productCode === 'string' ? item.productCode : '',
+        rawCost: typeof item.rawCost === 'number' ? item.rawCost : 0,
+        sellingPrice: typeof item.sellingPrice === 'number' ? item.sellingPrice : 0,
+        status: typeof item.status === 'string' ? item.status : 'Active',
+        variants,
+      }]
+    })
+  } catch { return [] }
 }
 
 function supplierInitials(name: string) {
@@ -218,12 +281,14 @@ function resizeLogo(file: File) {
 
 export function SupplierPage({ currentUsername }: SupplierPageProps) {
   const [suppliers, setSuppliers] = useState(loadSuppliers)
+  const [purchaseOrders, setPurchaseOrders] = useState<SupplierPurchaseOrder[]>(loadSupplierPurchaseOrders)
+  const [registeredItems, setRegisteredItems] = useState(loadSupplierRegisteredItems)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<SupplierFilter>('All suppliers')
   const [draft, setDraft] = useState<SupplierDraft>(createEmptyDraft)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(() => window.location.pathname.match(/^\/suppliers\/([^/]+)$/)?.[1] ?? null)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [categoryInput, setCategoryInput] = useState('')
   const [logoError, setLogoError] = useState('')
@@ -248,20 +313,35 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   }, [toast])
 
   useEffect(() => {
-    if (!isDialogOpen && !selectedSupplierId) return
+    if (!isDialogOpen) return
     const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (isDialogOpen) closeDialog()
-      else setSelectedSupplierId(null)
+      else return
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.body.style.overflow = originalOverflow
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isDialogOpen, selectedSupplierId])
+  }, [isDialogOpen])
+
+  useEffect(() => {
+    function syncPath() { setSelectedSupplierId(window.location.pathname.match(/^\/suppliers\/([^/]+)$/)?.[1] ?? null) }
+    window.addEventListener('popstate', syncPath)
+    return () => window.removeEventListener('popstate', syncPath)
+  }, [])
+
+  useEffect(() => {
+    function syncLinkedRecords(event: StorageEvent) {
+      if (event.key === purchaseOrderStorageKey) setPurchaseOrders(loadSupplierPurchaseOrders())
+      if (event.key === itemStorageKey) setRegisteredItems(loadSupplierRegisteredItems())
+    }
+    window.addEventListener('storage', syncLinkedRecords)
+    return () => window.removeEventListener('storage', syncLinkedRecords)
+  }, [])
 
   const visibleSuppliers = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -289,6 +369,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   const activeSupplierCount = suppliers.filter((supplier) => supplier.status === 'Active').length
   const isEditing = editingId !== null
   const selectedSupplier = selectedSupplierId === null ? null : suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null
+  const selectedSupplierOrders = useMemo(() => selectedSupplier ? purchaseOrders.filter((order) => order.supplierId === selectedSupplier.id) : [], [purchaseOrders, selectedSupplier])
+  const selectedSupplierItems = useMemo(() => selectedSupplier ? registeredItems.filter((item) => item.supplierId === selectedSupplier.id) : [], [registeredItems, selectedSupplier])
 
   function openAddDialog() {
     setDraft(createEmptyDraft())
@@ -322,7 +404,25 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   }
 
   function openSupplierDetails(supplier: Supplier) {
+    window.history.pushState({ adielSupplierProfile: true }, '', `/suppliers/${supplier.id}`)
     setSelectedSupplierId(supplier.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function closeSupplierProfile() {
+    const state: unknown = window.history.state
+    const openedFromDirectory = typeof state === 'object' && state !== null && 'adielSupplierProfile' in state && state.adielSupplierProfile === true
+    setSelectedSupplierId(null)
+    if (openedFromDirectory) window.history.back()
+    else {
+      window.history.replaceState(null, '', '/suppliers')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }
+  }
+
+  function openPurchaseOrders() {
+    window.history.pushState(null, '', '/purchase-orders')
+    window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
   function closeDialog() {
@@ -448,6 +548,9 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
     { label: 'Active', value: activeSupplierCount, dot: 'bg-emerald-500', valueColor: 'text-emerald-600' },
     { label: 'Categories', value: categoryCount, dot: 'bg-violet-500', valueColor: 'text-violet-600' },
   ]
+
+  const supplierProfile = selectedSupplier ? <><SupplierProfile supplier={selectedSupplier} orders={selectedSupplierOrders} items={selectedSupplierItems} onBack={closeSupplierProfile} onEdit={() => { openEditDialog(selectedSupplier); closeSupplierProfile() }} onOpenPurchaseOrders={openPurchaseOrders} /><SuccessToast message={toast} /></> : null
+  if (supplierProfile) return supplierProfile
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">

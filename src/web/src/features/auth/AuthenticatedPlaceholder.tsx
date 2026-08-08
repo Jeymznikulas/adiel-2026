@@ -6,6 +6,9 @@ import { ExpensesPage } from '../expenses/ExpensesPage'
 import { ItemsPage } from '../items/ItemsPage'
 import { LogsPage } from '../logs/LogsPage'
 import { PurchaseOrdersPage } from '../purchase-orders/PurchaseOrdersPage'
+import { QuotationsPage } from '../quotations/QuotationsPage'
+import { SalesTrackerPage } from '../sales/SalesTrackerPage'
+import { StatementOfAccountPage } from '../statement-of-account/StatementOfAccountPage'
 import { SupplierPage } from '../suppliers/SupplierPage'
 import { TasksPage } from '../tasks/TasksPage'
 import { signOut } from './auth'
@@ -43,7 +46,10 @@ export function AuthenticatedPlaceholder({ session }: AuthenticatedPlaceholderPr
       sectionContent={{
         Tasks: <TasksPage currentUsername={username} />,
         Items: <ItemsPage currentUsername={username} />,
+        Quotation: <QuotationsPage currentUsername={username} />,
         'Purchase Order': <PurchaseOrdersPage currentUsername={username} />,
+        'Statement of Account': <StatementOfAccountPage currentUsername={username} />,
+        'Sales Tracker': <SalesTrackerPage />,
         Expenses: <ExpensesPage currentUsername={username} />,
         'Client Directory': <ClientsPage currentUsername={username} />,
         'Supplier Directory': <SupplierPage currentUsername={username} />,

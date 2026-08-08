@@ -1,0 +1,37 @@
+import { useMemo, useState } from 'react'
+
+export type PurchaseOrderClientOption = {
+  id: string
+  name: string
+  status: string
+  address: string
+  industry: string
+  contactPerson: string
+  email: string
+  phone: string
+}
+
+type PurchaseOrderClientPickerDialogProps = {
+  clients: PurchaseOrderClientOption[]
+  selectedClientId: string
+  onSelect: (clientId: string) => void
+  onClose: () => void
+}
+
+function Icon({ path, className = 'size-4' }: { path: string; className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={path} /></svg>
+}
+
+function initials(value: string) {
+  return value.split(/\s+/).map((part) => part[0]).filter(Boolean).join('').slice(0, 2).toUpperCase() || 'CL'
+}
+
+export function PurchaseOrderClientPickerDialog({ clients, selectedClientId, onSelect, onClose }: PurchaseOrderClientPickerDialogProps) {
+  const [search, setSearch] = useState('')
+  const visibleClients = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return clients.filter((client) => !query || [client.name, client.industry, client.address, client.contactPerson, client.email, client.phone].some((value) => value.toLowerCase().includes(query))).sort((left, right) => left.status === right.status ? left.name.localeCompare(right.name) : left.status === 'Active' ? -1 : 1)
+  }, [clients, search])
+
+  return <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="po-client-picker-title"><button className="absolute inset-0" type="button" onClick={onClose} aria-label="Close client selection" /><section className="relative my-6 flex max-h-[calc(100svh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]"><header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Client directory</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="po-client-picker-title">Select client account</h2><p className="mt-1 text-xs text-slate-400">Choose a registered client for this purchase order.</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={onClose} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></header>{clients.length ? <><div className="border-b border-slate-100 px-5 py-4 sm:px-6"><div className="relative"><Icon className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-300" path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /><input className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-4 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-400 focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.05]" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, industry, contact, or address..." autoFocus /></div></div><div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/40 p-4 sm:p-5">{visibleClients.length ? <div className="grid gap-3 md:grid-cols-2">{visibleClients.map((client, index) => { const selected = client.id === selectedClientId; return <button className={`group min-w-0 rounded-2xl border p-4 text-left shadow-[0_12px_28px_-25px_rgba(0,20,76,0.5)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_34px_-24px_rgba(0,20,76,0.42)] animate-[po-card-enter_320ms_cubic-bezier(0.22,1,0.36,1)_both] ${selected ? 'border-brand-orange bg-orange-50/55 ring-2 ring-brand-orange/[0.08]' : 'border-slate-200 bg-white hover:border-brand-blue/20'}`} style={{ animationDelay: `${Math.min(index * 35, 175)}ms` }} type="button" onClick={() => onSelect(client.id)} key={client.id}><div className="flex min-w-0 items-start gap-3"><span className={`grid size-11 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${selected ? 'bg-brand-orange text-white' : 'bg-blue-50 text-brand-blue'}`}>{initials(client.name)}</span><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><h3 className="truncate text-sm font-extrabold text-brand-blue">{client.name}</h3><span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[9px] font-bold ${client.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}><span className={`size-1.5 rounded-full ${client.status === 'Active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{client.status}</span></div><p className="mt-1 text-[10px] font-bold text-violet-600">{client.industry || 'Industry not provided'}</p></div></div><div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3"><p className="truncate text-[10px] font-semibold text-slate-500"><span className="text-slate-400">Contact:</span> {client.contactPerson || 'Not provided'}</p><p className="line-clamp-2 text-[10px] leading-4 text-slate-400">{client.address || 'No address provided'}</p></div><div className="mt-3 flex items-center justify-between"><span className="truncate text-[9px] font-semibold text-slate-400">{client.email || client.phone || 'No contact details'}</span><span className={`inline-flex items-center gap-1 text-[10px] font-bold ${selected ? 'text-brand-orange' : 'text-brand-blue'}`}>{selected ? 'Selected' : 'Select'}<Icon className="size-3 transition-transform group-hover:translate-x-0.5" path="m9 18 6-6-6-6" /></span></div></button> })}</div> : <div className="grid min-h-56 place-items-center text-center"><div><span className="mx-auto grid size-12 place-items-center rounded-xl bg-slate-100 text-slate-300"><Icon path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></span><h3 className="mt-3 text-sm font-bold text-brand-blue">No matching clients</h3><button className="mt-2 text-xs font-bold text-brand-orange" type="button" onClick={() => setSearch('')}>Clear search</button></div></div>}</div></> : <div className="grid min-h-72 place-items-center p-8 text-center"><div className="max-w-sm"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-blue-50 text-brand-blue"><Icon className="size-5" path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M22 11h-6" /></span><h3 className="mt-4 text-base font-bold text-brand-blue">No clients registered</h3><p className="mt-2 text-xs leading-5 text-slate-400">Add the client to the Client Directory before creating its purchase order.</p><a className="mt-5 inline-flex h-10 items-center rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" href="/clients">Open Client Directory</a></div></div>}<footer className="flex items-center justify-between gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:px-6"><p className="text-[10px] font-semibold text-slate-400">Only registered directory clients can be assigned.</p><button className="h-9 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={onClose}>Cancel</button></footer></section></div>
+}

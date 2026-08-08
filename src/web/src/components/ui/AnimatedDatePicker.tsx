@@ -13,6 +13,7 @@ type AnimatedDatePickerProps = {
   required?: boolean
   size?: 'compact' | 'filter' | 'field'
   toneClassName?: string
+  triggerLabel?: string
 }
 
 const sizeClasses = {
@@ -64,6 +65,7 @@ export function AnimatedDatePicker({
   required = false,
   size = 'field',
   toneClassName = 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+  triggerLabel,
 }: AnimatedDatePickerProps) {
   const initialDate = dateFromValue(value, mode) ?? new Date()
   const [isOpen, setIsOpen] = useState(false)
@@ -216,12 +218,12 @@ export function AnimatedDatePicker({
         aria-required={required}
       >
         <svg className="size-4 shrink-0 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" /></svg>
-        <span className={`min-w-0 flex-1 truncate ${value ? '' : 'text-slate-400'}`}>{displayValue(value, mode)}</span>
+        <span className={`min-w-0 flex-1 truncate ${value ? '' : 'text-slate-400'}`}>{triggerLabel ?? displayValue(value, mode)}</span>
         <svg className={`size-3.5 shrink-0 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {isOpen ? createPortal(
         <div
-          className="fixed z-[80] max-h-[calc(100vh-1rem)] overflow-y-auto rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-[0_24px_60px_-20px_rgba(0,20,76,0.38)] backdrop-blur-xl animate-[status-menu-enter_170ms_cubic-bezier(0.22,1,0.36,1)]"
+          className="fixed z-[110] max-h-[calc(100vh-1rem)] overflow-y-auto rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-[0_24px_60px_-20px_rgba(0,20,76,0.38)] backdrop-blur-xl animate-[status-menu-enter_170ms_cubic-bezier(0.22,1,0.36,1)]"
           id={menuId}
           ref={menuRef}
           role="dialog"

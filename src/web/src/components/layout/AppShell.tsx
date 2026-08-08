@@ -19,6 +19,9 @@ function normalizePath(pathname: string) {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
   if (/^\/items\/[^/]+$/.test(path)) return path
   if (/^\/clients\/[^/]+$/.test(path)) return path
+  if (/^\/suppliers\/[^/]+$/.test(path)) return path
+  if (path.startsWith('/quotations/')) return path
+  if (path.startsWith('/statement-of-account/')) return path
   return navigationItems.some((item) => item.path === path) ? path : '/dashboard'
 }
 
@@ -44,6 +47,9 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   const activeItem = navigationItems.find((item) => item.path === activePath)
     ?? (activePath.startsWith('/items/') ? navigationItems.find((item) => item.path === '/items') : undefined)
     ?? (activePath.startsWith('/clients/') ? navigationItems.find((item) => item.path === '/clients') : undefined)
+    ?? (activePath.startsWith('/suppliers/') ? navigationItems.find((item) => item.path === '/suppliers') : undefined)
+    ?? (activePath.startsWith('/quotations/') ? navigationItems.find((item) => item.path === '/quotations') : undefined)
+    ?? (activePath.startsWith('/statement-of-account/') ? navigationItems.find((item) => item.path === '/statement-of-account') : undefined)
     ?? navigationItems[0]
   const activeSection = activeItem.label
   const initial = username.charAt(0).toUpperCase() || 'U'
@@ -60,7 +66,11 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
     }
 
     window.addEventListener('popstate', handleHistoryChange)
-    return () => window.removeEventListener('popstate', handleHistoryChange)
+    window.addEventListener('adiel:navigate', handleHistoryChange)
+    return () => {
+      window.removeEventListener('popstate', handleHistoryChange)
+      window.removeEventListener('adiel:navigate', handleHistoryChange)
+    }
   }, [])
 
   function navigate(event: MouseEvent<HTMLAnchorElement>, path: string) {
@@ -69,6 +79,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
     if (path !== activePath) {
       window.history.pushState(null, '', path)
       setActivePath(path)
+      window.dispatchEvent(new Event('adiel:navigate'))
     }
     setIsMenuOpen(false)
   }

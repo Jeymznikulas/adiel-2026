@@ -9,21 +9,57 @@ import { appendSystemLog } from '../../services/activityLog'
 type ItemStatus = 'Active' | 'Inactive' | 'Discontinued'
 type ItemStatusFilter = 'All statuses' | ItemStatus
 
+type VariantSpecification = {
+  id: string
+  name: string
+  value: string
+}
+
 type ItemVariant = {
   id: string
   name: string
   value: string
   photo: string
+  productCode: string
+  barcode: string
+  unitOfMeasure: string
+  unitWeight: number
+  status: ItemStatus
+  specifications: VariantSpecification[]
   rawCost: number
   sellingPrice: number
-  priceHistory: VariantPriceRecord[]
+  priceHistory: PriceAdjustmentRecord[]
 }
 
-type VariantPriceRecord = {
+type PriceAdjustmentRecord = {
   id: string
   date: string
+  recordedAt: string
+  previousRawCost: number
+  previousSellingPrice: number
   rawCost: number
   sellingPrice: number
+  reason: string
+  notes: string
+  createdBy: string
+}
+
+type PriceAdjustmentTarget = {
+  itemId: string
+  variantId?: string
+  itemName: string
+  targetName: string
+  productCode: string
+  currentRawCost: number
+  currentSellingPrice: number
+}
+
+type PriceAdjustmentDraft = {
+  rawCost: string
+  sellingPrice: string
+  effectiveDate: string
+  reason: string
+  notes: string
 }
 
 type DirectorySupplier = {
@@ -50,12 +86,13 @@ type Item = {
   lastPriceUpdate: string
   rawCost: number
   sellingPrice: number
+  priceHistory: PriceAdjustmentRecord[]
   supplierId: string
   createdAt: string
   updatedAt: string
 }
 
-type ItemDraft = Omit<Item, 'id' | 'createdAt' | 'updatedAt' | 'unitWeight' | 'rawCost' | 'sellingPrice'> & {
+type ItemDraft = Omit<Item, 'id' | 'createdAt' | 'updatedAt' | 'unitWeight' | 'rawCost' | 'sellingPrice' | 'priceHistory'> & {
   unitWeight: string
   rawCost: string
   sellingPrice: string
@@ -77,6 +114,8 @@ const statusOptions = [
 ]
 const statusFilterOptions: { value: ItemStatusFilter }[] = [{ value: 'All statuses' }, ...itemStatuses.map((value) => ({ value }))]
 const unitOptions = ['Piece', 'Box', 'Pack', 'Set', 'Kilogram', 'Gram', 'Liter', 'Meter', 'Roll', 'Pair'].map((value) => ({ value }))
+const defaultPriceAdjustmentReason = 'Supplier price change'
+const priceAdjustmentReasonOptions = [defaultPriceAdjustmentReason, 'Regular price review', 'Promotion or markdown', 'Market adjustment', 'Cost correction', 'Other'].map((value) => ({ value }))
 const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'
 const labelClassName = 'mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500'
 
@@ -101,8 +140,39 @@ function createEmptyDraft(supplierId = '', category = ''): ItemDraft {
   }
 }
 
-function createEmptyVariant(rawCost = 0, sellingPrice = 0): ItemVariant {
-  return { id: crypto.randomUUID(), name: '', value: '', photo: '', rawCost, sellingPrice, priceHistory: [] }
+function createEmptyVariant(rawCost = 0, sellingPrice = 0, productCode = '', unitOfMeasure = 'Piece', unitWeight = 0, status: ItemStatus = 'Active'): ItemVariant {
+  return { id: crypto.randomUUID(), name: '', value: '', photo: '', productCode, barcode: '', unitOfMeasure, unitWeight, status, specifications: [], rawCost, sellingPrice, priceHistory: [] }
+}
+
+function createPriceRecord(rawCost: number, sellingPrice: number, date: string, createdBy: string, reason = 'Initial price', notes = '', previousRawCost = rawCost, previousSellingPrice = sellingPrice): PriceAdjustmentRecord {
+  return { id: crypto.randomUUID(), date, recordedAt: new Date().toISOString(), previousRawCost, previousSellingPrice, rawCost, sellingPrice, reason, notes, createdBy }
+}
+
+function normalizePriceHistory(value: unknown, fallbackRawCost: number, fallbackSellingPrice: number, fallbackDate: string): PriceAdjustmentRecord[] {
+  if (!Array.isArray(value)) return [createPriceRecord(fallbackRawCost, fallbackSellingPrice, fallbackDate || new Date().toISOString().slice(0, 10), 'System')]
+  let previousRawCost = fallbackRawCost
+  let previousSellingPrice = fallbackSellingPrice
+  const records = value.flatMap((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const saved = entry as Partial<PriceAdjustmentRecord>
+    if (typeof saved.date !== 'string' || typeof saved.rawCost !== 'number' || typeof saved.sellingPrice !== 'number') return []
+    const normalized: PriceAdjustmentRecord = {
+      id: typeof saved.id === 'string' ? saved.id : crypto.randomUUID(),
+      date: saved.date,
+      recordedAt: typeof saved.recordedAt === 'string' ? saved.recordedAt : `${saved.date}T00:00:00.000Z`,
+      previousRawCost: typeof saved.previousRawCost === 'number' ? saved.previousRawCost : index ? previousRawCost : saved.rawCost,
+      previousSellingPrice: typeof saved.previousSellingPrice === 'number' ? saved.previousSellingPrice : index ? previousSellingPrice : saved.sellingPrice,
+      rawCost: saved.rawCost,
+      sellingPrice: saved.sellingPrice,
+      reason: typeof saved.reason === 'string' && saved.reason.trim() ? saved.reason : index ? 'Imported adjustment' : 'Initial price',
+      notes: typeof saved.notes === 'string' ? saved.notes : '',
+      createdBy: typeof saved.createdBy === 'string' && saved.createdBy.trim() ? saved.createdBy : 'System',
+    }
+    previousRawCost = saved.rawCost
+    previousSellingPrice = saved.sellingPrice
+    return [normalized]
+  })
+  return records.length ? records : [createPriceRecord(fallbackRawCost, fallbackSellingPrice, fallbackDate || new Date().toISOString().slice(0, 10), 'System')]
 }
 
 function loadItems(): Item[] {
@@ -116,6 +186,7 @@ function loadItems(): Item[] {
       const itemRawCost = typeof item.rawCost === 'number' ? item.rawCost : 0
       const itemSellingPrice = typeof item.sellingPrice === 'number' ? item.sellingPrice : 0
       const itemPriceDate = typeof item.lastPriceUpdate === 'string' ? item.lastPriceUpdate : ''
+      const itemPriceHistory = normalizePriceHistory(item.priceHistory, itemRawCost, itemSellingPrice, itemPriceDate)
       return [{
         id: item.id,
         photo: typeof item.photo === 'string' ? item.photo : '',
@@ -128,25 +199,27 @@ function loadItems(): Item[] {
         productCode: typeof item.productCode === 'string' ? item.productCode : '',
         barcode: typeof item.barcode === 'string' ? item.barcode : '',
         variants: Array.isArray(item.variants) ? item.variants.flatMap((variant) => {
-          if (typeof variant === 'string') return [{ id: crypto.randomUUID(), name: 'Variant', value: variant, photo: '', rawCost: itemRawCost, sellingPrice: itemSellingPrice, priceHistory: [] }]
+          if (typeof variant === 'string') return [{ id: crypto.randomUUID(), name: 'Variant', value: variant, photo: '', productCode: '', barcode: '', unitOfMeasure: typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece', unitWeight: typeof item.unitWeight === 'number' ? item.unitWeight : 0, status: itemStatuses.includes(item.status as ItemStatus) ? item.status as ItemStatus : 'Active', specifications: [], rawCost: itemRawCost, sellingPrice: itemSellingPrice, priceHistory: [createPriceRecord(itemRawCost, itemSellingPrice, itemPriceDate || new Date().toISOString().slice(0, 10), 'System')] }]
           if (typeof variant !== 'object' || variant === null) return []
           const savedVariant = variant as Partial<ItemVariant>
           if (typeof savedVariant.name !== 'string' || typeof savedVariant.value !== 'string') return []
           const rawCost = typeof savedVariant.rawCost === 'number' ? savedVariant.rawCost : itemRawCost
           const sellingPrice = typeof savedVariant.sellingPrice === 'number' ? savedVariant.sellingPrice : itemSellingPrice
-          const priceHistory = Array.isArray(savedVariant.priceHistory) ? savedVariant.priceHistory.flatMap((record) => {
-            if (typeof record !== 'object' || record === null) return []
-            const savedRecord = record as Partial<VariantPriceRecord>
-            if (typeof savedRecord.date !== 'string' || typeof savedRecord.rawCost !== 'number' || typeof savedRecord.sellingPrice !== 'number') return []
-            return [{ id: typeof savedRecord.id === 'string' ? savedRecord.id : crypto.randomUUID(), date: savedRecord.date, rawCost: savedRecord.rawCost, sellingPrice: savedRecord.sellingPrice }]
+          const specifications = Array.isArray(savedVariant.specifications) ? savedVariant.specifications.flatMap((specification) => {
+            if (typeof specification !== 'object' || specification === null) return []
+            const savedSpecification = specification as Partial<VariantSpecification>
+            if (typeof savedSpecification.name !== 'string' || typeof savedSpecification.value !== 'string') return []
+            return [{ id: typeof savedSpecification.id === 'string' ? savedSpecification.id : crypto.randomUUID(), name: savedSpecification.name, value: savedSpecification.value }]
           }) : []
-          return [{ id: typeof savedVariant.id === 'string' ? savedVariant.id : crypto.randomUUID(), name: savedVariant.name, value: savedVariant.value, photo: typeof savedVariant.photo === 'string' ? savedVariant.photo : '', rawCost, sellingPrice, priceHistory: priceHistory.length ? priceHistory : [{ id: crypto.randomUUID(), date: itemPriceDate || new Date().toISOString().slice(0, 10), rawCost, sellingPrice }] }]
+          const priceHistory = normalizePriceHistory(savedVariant.priceHistory, rawCost, sellingPrice, itemPriceDate)
+          return [{ id: typeof savedVariant.id === 'string' ? savedVariant.id : crypto.randomUUID(), name: savedVariant.name, value: savedVariant.value, photo: typeof savedVariant.photo === 'string' ? savedVariant.photo : '', productCode: typeof savedVariant.productCode === 'string' ? savedVariant.productCode : '', barcode: typeof savedVariant.barcode === 'string' ? savedVariant.barcode : '', unitOfMeasure: typeof savedVariant.unitOfMeasure === 'string' ? savedVariant.unitOfMeasure : typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece', unitWeight: typeof savedVariant.unitWeight === 'number' ? savedVariant.unitWeight : typeof item.unitWeight === 'number' ? item.unitWeight : 0, status: itemStatuses.includes(savedVariant.status as ItemStatus) ? savedVariant.status as ItemStatus : itemStatuses.includes(item.status as ItemStatus) ? item.status as ItemStatus : 'Active', specifications, rawCost, sellingPrice, priceHistory }]
         }) : [],
         description: typeof item.description === 'string' ? item.description : '',
         status: itemStatuses.includes(item.status as ItemStatus) ? item.status as ItemStatus : 'Active',
         lastPriceUpdate: itemPriceDate,
         rawCost: itemRawCost,
         sellingPrice: itemSellingPrice,
+        priceHistory: itemPriceHistory,
         supplierId: typeof item.supplierId === 'string' ? item.supplierId : '',
         createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
         updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
@@ -247,7 +320,7 @@ function DetailField({ label, value, mono = false }: { label: string; value: str
   return <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"><dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">{label}</dt><dd className={`mt-1.5 break-words text-sm font-bold text-slate-700 ${mono ? 'font-mono' : ''}`}>{value}</dd></div>
 }
 
-function VariantEditor({ variant, index, isProcessingPhoto, onUpdate, onPhotoChange, onRemove, showRemove = true }: { variant: ItemVariant; index: number; isProcessingPhoto: boolean; onUpdate: (id: string, field: 'name' | 'value' | 'rawCost' | 'sellingPrice', value: string) => void; onPhotoChange: (id: string, event: ChangeEvent<HTMLInputElement>) => void; onRemove: (id: string) => void; showRemove?: boolean }) {
+function VariantEditor({ variant, index, isProcessingPhoto, onUpdate, onPhotoChange, onRemove, showRemove = true }: { variant: ItemVariant; index: number; isProcessingPhoto: boolean; onUpdate: (id: string, field: VariantEditableField, value: string) => void; onPhotoChange: (id: string, event: ChangeEvent<HTMLInputElement>) => void; onRemove: (id: string) => void; showRemove?: boolean }) {
   const variantProfit = variant.sellingPrice - variant.rawCost
   return <div className="rounded-2xl border border-slate-200/80 bg-slate-50/55 p-4 shadow-[0_10px_24px_-22px_rgba(0,20,76,0.38)] animate-[content-enter_160ms_ease-out]">
     <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="grid size-7 place-items-center rounded-lg bg-white text-[10px] font-extrabold text-violet-600 shadow-sm">{String(index + 1).padStart(2, '0')}</span><div><p className="text-xs font-extrabold text-brand-blue">Variant {index + 1}</p><p className="text-[9px] text-slate-400">Photo, option, and individual pricing</p></div></div>{showRemove ? <button className="grid size-8 place-items-center rounded-lg text-slate-300 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => onRemove(variant.id)} aria-label={`Remove variant ${index + 1}`}><Icon className="size-3.5" path="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6" /></button> : null}</div>
@@ -258,7 +331,17 @@ function VariantEditor({ variant, index, isProcessingPhoto, onUpdate, onPhotoCha
       <div><label className={labelClassName} htmlFor={`variant-raw-${variant.id}`}>Raw cost</label><input className={`${fieldClassName} h-10 text-xs`} id={`variant-raw-${variant.id}`} type="number" min="0" step="0.01" value={variant.rawCost} onChange={(event) => onUpdate(variant.id, 'rawCost', event.target.value)} /></div>
       <div><label className={labelClassName} htmlFor={`variant-selling-${variant.id}`}>Selling price</label><input className={`${fieldClassName} h-10 text-xs`} id={`variant-selling-${variant.id}`} type="number" min="0" step="0.01" value={variant.sellingPrice} onChange={(event) => onUpdate(variant.id, 'sellingPrice', event.target.value)} /></div>
     </div>
+    <VariantIndependentFields variant={variant} onUpdate={onUpdate} onAddSpecification={() => onUpdate(variant.id, 'addSpecification', '')} onUpdateSpecification={(id, field, value) => onUpdate(id, field === 'name' ? 'specificationName' : 'specificationValue', value)} onRemoveSpecification={(id) => onUpdate(id, 'removeSpecification', '')} />
     <div className={`mt-3 flex items-center justify-between rounded-xl border px-3 py-2 ${variantProfit >= 0 ? 'border-emerald-100 bg-emerald-50/65' : 'border-red-100 bg-red-50/65'}`}><span className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">Variant profit</span><span className={`text-xs font-extrabold ${variantProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatPeso(variantProfit)}</span></div>
+  </div>
+}
+
+type VariantEditableField = 'name' | 'value' | 'productCode' | 'barcode' | 'unitOfMeasure' | 'unitWeight' | 'status' | 'rawCost' | 'sellingPrice' | 'addSpecification' | 'specificationName' | 'specificationValue' | 'removeSpecification'
+
+function VariantIndependentFields({ variant, onUpdate, onAddSpecification, onUpdateSpecification, onRemoveSpecification }: { variant: ItemVariant; onUpdate: (id: string, field: VariantEditableField, value: string) => void; onAddSpecification: () => void; onUpdateSpecification: (id: string, field: 'name' | 'value', value: string) => void; onRemoveSpecification: (id: string) => void }) {
+  return <div className="mt-4 space-y-4">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4"><div className="mb-4 flex items-center gap-3"><span className="grid size-8 place-items-center rounded-xl bg-violet-50 text-violet-600"><Icon className="size-3.5" path="M4 4h16v16H4V4Zm4 4h8M8 12h8M8 16h5" /></span><div><h3 className="text-xs font-extrabold text-brand-blue">Independent item details</h3><p className="text-[10px] text-slate-400">This variant can now be identified and purchased as its own SKU.</p></div></div><div className="grid gap-4 sm:grid-cols-2"><div><label className={labelClassName} htmlFor={`variant-code-${variant.id}`}>SKU / product code</label><input className={`${fieldClassName} font-mono`} id={`variant-code-${variant.id}`} value={variant.productCode} onChange={(event) => onUpdate(variant.id, 'productCode', event.target.value)} placeholder="SKU-001-A" required /></div><div><label className={labelClassName} htmlFor={`variant-barcode-${variant.id}`}>Barcode <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><input className={`${fieldClassName} font-mono`} id={`variant-barcode-${variant.id}`} value={variant.barcode} onChange={(event) => onUpdate(variant.id, 'barcode', event.target.value)} placeholder="Barcode value" /></div><div><label className={labelClassName}>Unit of measure</label><AnimatedDropdown value={variant.unitOfMeasure} options={unitOptions} onChange={(unitOfMeasure) => onUpdate(variant.id, 'unitOfMeasure', unitOfMeasure)} ariaLabel="Variant unit of measure" /></div><div><label className={labelClassName} htmlFor={`variant-weight-${variant.id}`}>Unit weight (kg)</label><input className={fieldClassName} id={`variant-weight-${variant.id}`} type="number" min="0" step="0.001" value={variant.unitWeight || ''} onChange={(event) => onUpdate(variant.id, 'unitWeight', event.target.value)} placeholder="0.000" /></div><div className="sm:col-span-2"><label className={labelClassName}>Variant status</label><AnimatedDropdown value={variant.status} options={statusOptions} onChange={(status) => onUpdate(variant.id, 'status', status)} ariaLabel="Variant status" /></div></div></section>
+    <section className="rounded-2xl border border-slate-200 bg-white p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="text-xs font-extrabold text-brand-blue">Variant specifications</h3><p className="mt-0.5 text-[10px] text-slate-400">Technical details that differ from the parent item.</p></div><button className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-blue-50 px-3 text-[10px] font-bold text-brand-blue transition hover:bg-blue-100" type="button" onClick={onAddSpecification}><Icon className="size-3.5" path="M12 5v14M5 12h14" />Add specification</button></div>{variant.specifications.length ? <div className="mt-4 space-y-2">{variant.specifications.map((specification, index) => <div className="grid gap-2 sm:grid-cols-[1fr_1.25fr_auto]" key={specification.id}><input className="h-10 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-brand-blue outline-none focus:border-brand-blue/40" value={specification.name} onChange={(event) => onUpdateSpecification(specification.id, 'name', event.target.value)} placeholder={`Specification ${index + 1}`} aria-label={`Specification ${index + 1} name`} /><input className="h-10 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 outline-none focus:border-brand-blue/40" value={specification.value} onChange={(event) => onUpdateSpecification(specification.id, 'value', event.target.value)} placeholder="Value" aria-label={`Specification ${index + 1} value`} /><button className="grid size-10 place-items-center rounded-xl text-slate-300 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => onRemoveSpecification(specification.id)} aria-label={`Remove specification ${index + 1}`}><Icon className="size-3.5" path="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6" /></button></div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-[10px] text-slate-400">No separate specifications yet.</p>}</section>
   </div>
 }
 
@@ -274,12 +357,58 @@ function ProductSpecifications({ item }: { item: Item }) {
   return <section className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_45px_-32px_rgba(0,20,76,0.34)] sm:p-6"><div className="grid gap-5 lg:grid-cols-2"><div><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-blue-50 text-brand-blue"><Icon path="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" /></span><div><h3 className="text-sm font-extrabold text-brand-blue">Product specifications</h3><p className="mt-0.5 text-xs text-slate-400">Identification and measurement details</p></div></div><dl className="mt-5 grid gap-3 sm:grid-cols-2"><DetailField label="Product code" value={item.productCode} mono /><DetailField label="Barcode" value={item.barcode} mono /><DetailField label="Category" value={item.category} /><DetailField label="Subcategory" value={item.subcategory} /><DetailField label="Brand" value={item.brand} /><DetailField label="Unit of measure" value={item.unitOfMeasure} /><DetailField label="Unit weight" value={item.unitWeight ? `${item.unitWeight} kg` : 'No weight provided'} /><DetailField label="Status" value={item.status} /></dl></div><div><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-emerald-50 text-emerald-600"><Icon path="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></span><div><h3 className="text-sm font-extrabold text-brand-blue">Pricing & record details</h3><p className="mt-0.5 text-xs text-slate-400">Base pricing and product history</p></div></div><dl className="mt-5 grid gap-3 sm:grid-cols-2"><DetailField label="Raw cost" value={formatPeso(item.rawCost)} /><DetailField label="Selling price" value={formatPeso(item.sellingPrice)} /><DetailField label="Profit per unit" value={formatPeso(profit)} /><DetailField label="Margin" value={`${margin.toFixed(1)}%`} /><DetailField label="Created" value={formatTimestamp(item.createdAt)} /><DetailField label="Last updated" value={formatTimestamp(item.updatedAt)} /></dl><div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Description</p><p className="mt-2 text-sm leading-6 text-slate-600">{item.description || 'No product description has been added.'}</p></div></div></div></section>
 }
 
+function VariantRecordSummary({ variant }: { variant: ItemVariant }) {
+  return <section className="rounded-[1.5rem] border border-violet-100 bg-[linear-gradient(145deg,#fbfaff,#f7f5ff)] p-5 shadow-[0_12px_35px_-30px_rgba(76,29,149,0.35)]"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-600">Selected variant item</p><h3 className="mt-1 text-base font-extrabold text-brand-blue">{variant.name}: {variant.value}</h3></div><span className={`rounded-lg px-2.5 py-1 text-[10px] font-bold ${variant.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : variant.status === 'Discontinued' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-600'}`}>{variant.status}</span></div><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><DetailField label="SKU / product code" value={variant.productCode || 'Not provided'} mono /><DetailField label="Barcode" value={variant.barcode || 'Not provided'} mono /><DetailField label="Unit of measure" value={variant.unitOfMeasure} /><DetailField label="Unit weight" value={variant.unitWeight ? `${variant.unitWeight} kg` : 'Not provided'} /></dl><div className="mt-4"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Separate specifications</p>{variant.specifications.length ? <dl className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{variant.specifications.map((specification) => <div className="rounded-xl border border-violet-100/80 bg-white px-3.5 py-3" key={specification.id}><dt className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">{specification.name}</dt><dd className="mt-1 text-xs font-bold text-slate-700">{specification.value}</dd></div>)}</dl> : <p className="mt-2 text-xs text-slate-400">No separate specifications have been added.</p>}</div></section>
+}
+
+function PriceAdjustmentDialog({ target, draft, error, onChange, onClose, onSubmit }: { target: PriceAdjustmentTarget; draft: PriceAdjustmentDraft; error: string; onChange: (field: keyof PriceAdjustmentDraft, value: string) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  const newRawCost = Number(draft.rawCost) || 0
+  const newSellingPrice = Number(draft.sellingPrice) || 0
+  const currentProfit = target.currentSellingPrice - target.currentRawCost
+  const newProfit = newSellingPrice - newRawCost
+  const currentMargin = target.currentSellingPrice > 0 ? (currentProfit / target.currentSellingPrice) * 100 : 0
+  const newMargin = newSellingPrice > 0 ? (newProfit / newSellingPrice) * 100 : 0
+  const sellingChange = newSellingPrice - target.currentSellingPrice
+
+  return <div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="price-adjustment-title">
+    <button className="absolute inset-0" type="button" onClick={onClose} aria-label="Close price adjustment form" />
+    <form className="relative my-6 w-full max-w-3xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.36)]" onSubmit={onSubmit}>
+      <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Pricing control</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="price-adjustment-title">Adjust price</h2><p className="mt-1 text-xs text-slate-400">{target.itemName} · {target.targetName}</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={onClose} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></div>
+      <div className="max-h-[calc(100svh-12rem)] overflow-y-auto px-6 py-5">
+        {error ? <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{error}</div> : null}
+        <div className="rounded-2xl border border-brand-blue/10 bg-[linear-gradient(145deg,#f8faff,#f2f6fc)] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Adjustment target</p><p className="mt-1 text-sm font-extrabold text-brand-blue">{target.targetName}</p></div><span className="rounded-lg bg-white px-2.5 py-1 font-mono text-[10px] font-bold text-slate-500 shadow-sm">{target.productCode}</span></div></div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <section className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Current price</p><dl className="mt-4 grid grid-cols-2 gap-3"><DetailField label="Raw cost" value={formatPeso(target.currentRawCost)} /><DetailField label="Selling price" value={formatPeso(target.currentSellingPrice)} /><DetailField label="Profit" value={formatPeso(currentProfit)} /><DetailField label="Margin" value={`${currentMargin.toFixed(1)}%`} /></dl></section>
+          <section className="rounded-2xl border border-emerald-100 bg-emerald-50/45 p-4"><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-emerald-700">New price</p><div className="mt-4 grid grid-cols-2 gap-3"><div><label className={labelClassName} htmlFor="adjustment-raw-cost">Raw cost</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₱</span><input className={`${fieldClassName} pl-8`} id="adjustment-raw-cost" type="number" min="0" step="0.01" value={draft.rawCost} onChange={(event) => onChange('rawCost', event.target.value)} autoFocus required /></div></div><div><label className={labelClassName} htmlFor="adjustment-selling-price">Selling price</label><div className="relative"><span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₱</span><input className={`${fieldClassName} pl-8`} id="adjustment-selling-price" type="number" min="0" step="0.01" value={draft.sellingPrice} onChange={(event) => onChange('sellingPrice', event.target.value)} required /></div></div></div><div className={`mt-3 rounded-xl border px-3.5 py-3 ${newProfit >= 0 ? 'border-emerald-100 bg-white/80' : 'border-red-100 bg-red-50'}`}><div className="flex items-center justify-between gap-3"><span className="text-[10px] font-bold text-slate-500">New profit and margin</span><span className={`text-xs font-extrabold ${newProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatPeso(newProfit)} · {newMargin.toFixed(1)}%</span></div><p className={`mt-1 text-[9px] font-semibold ${sellingChange > 0 ? 'text-emerald-600' : sellingChange < 0 ? 'text-red-600' : 'text-slate-400'}`}>Selling price change: {sellingChange > 0 ? '+' : ''}{formatPeso(sellingChange)}</p></div></section>
+        </div>
+        <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4"><div className="grid gap-4 sm:grid-cols-2"><div><label className={labelClassName}>Effective date</label><AnimatedDatePicker value={draft.effectiveDate} onChange={(value) => onChange('effectiveDate', value)} ariaLabel="Price adjustment effective date" max={new Date().toISOString().slice(0, 10)} required /></div><div><label className={labelClassName}>Reason</label><AnimatedDropdown value={draft.reason} options={priceAdjustmentReasonOptions} onChange={(value) => onChange('reason', value)} ariaLabel="Price adjustment reason" /></div><div className="sm:col-span-2"><label className={labelClassName} htmlFor="adjustment-notes">Notes or reference <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="adjustment-notes" value={draft.notes} onChange={(event) => onChange('notes', event.target.value)} placeholder="Supplier quotation, promotion reference, or explanation..." /></div></div></section>
+        <p className="mt-4 text-[10px] leading-5 text-slate-400">This creates a permanent history entry. Existing adjustments cannot be edited or deleted.</p>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={onClose}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">Save adjustment</button></div>
+    </form>
+  </div>
+}
+
+function BasePriceHistory({ item, onAdjustPrice }: { item: Item; onAdjustPrice: () => void }) {
+  const records = [...item.priceHistory].sort((left, right) => right.date.localeCompare(left.date) || right.recordedAt.localeCompare(left.recordedAt))
+  return <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-32px_rgba(0,20,76,0.34)]"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Base item price history</h3><p className="mt-0.5 text-[11px] text-slate-400">Append-only audit trail for {item.productCode}</p></div><div className="flex items-center gap-2"><span className="rounded-lg bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-brand-orange">{records.length} {records.length === 1 ? 'record' : 'records'}</span><button className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand-blue px-3.5 text-[10px] font-bold text-white shadow-sm transition hover:-translate-y-0.5" type="button" onClick={onAdjustPrice}><Icon className="size-3.5" path="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />Adjust price</button></div></div><div className="divide-y divide-slate-100">{records.map((record) => { const sellingChange = record.sellingPrice - record.previousSellingPrice; const costChange = record.rawCost - record.previousRawCost; return <article className="grid gap-4 px-5 py-4 lg:grid-cols-[9rem_1fr_1fr_1.4fr] lg:items-center" key={record.id}><div><p className="text-xs font-extrabold text-brand-blue">{formatDate(record.date)}</p><p className="mt-1 text-[9px] text-slate-400">Recorded {formatTimestamp(record.recordedAt)}</p></div><div><p className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">Raw cost</p><p className="mt-1 text-xs font-bold text-slate-600">{formatPeso(record.previousRawCost)} <span className="px-1 text-slate-300">→</span> {formatPeso(record.rawCost)}</p><p className={`mt-1 text-[9px] font-bold ${costChange > 0 ? 'text-red-500' : costChange < 0 ? 'text-emerald-600' : 'text-slate-400'}`}>{costChange > 0 ? '+' : ''}{formatPeso(costChange)}</p></div><div><p className="text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">Selling price</p><p className="mt-1 text-xs font-extrabold text-brand-blue">{formatPeso(record.previousSellingPrice)} <span className="px-1 text-slate-300">→</span> {formatPeso(record.sellingPrice)}</p><p className={`mt-1 text-[9px] font-bold ${sellingChange > 0 ? 'text-emerald-600' : sellingChange < 0 ? 'text-red-500' : 'text-slate-400'}`}>{sellingChange > 0 ? '+' : ''}{formatPeso(sellingChange)}</p></div><div className="rounded-xl border border-slate-100 bg-slate-50/60 px-3.5 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-extrabold text-slate-700">{record.reason}</p><span className="text-[9px] font-semibold text-slate-400">by {record.createdBy}</span></div>{record.notes ? <p className="mt-1.5 text-[10px] leading-4 text-slate-500">{record.notes}</p> : null}</div></article> })}</div></section>
+}
+
 function VariantPriceHistory({ item }: { item: Item }) {
   const records = item.variants.flatMap((variant) => variant.priceHistory.map((record, index) => ({ ...record, variant, previous: variant.priceHistory[index - 1] }))).sort((left, right) => right.date.localeCompare(left.date))
   return <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-32px_rgba(0,20,76,0.34)]"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Variant price history</h3><p className="mt-0.5 text-[11px] text-slate-400">A timeline is saved automatically whenever variant pricing changes</p></div><span className="rounded-lg bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-brand-orange">{records.length} {records.length === 1 ? 'adjustment' : 'adjustments'}</span></div>{records.length ? <div className="overflow-x-auto"><table className="w-full min-w-[800px] table-fixed text-left"><thead><tr className="border-b border-slate-100 bg-slate-50/70 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400"><th className="w-[28%] px-5 py-3.5">Variant</th><th className="w-[18%] px-4 py-3.5">Effective date</th><th className="w-[18%] px-4 py-3.5 text-right">Raw cost</th><th className="w-[18%] px-4 py-3.5 text-right">Selling price</th><th className="w-[18%] px-5 py-3.5 text-right">Price change</th></tr></thead><tbody>{records.map((entry) => { const change = entry.previous ? entry.sellingPrice - entry.previous.sellingPrice : 0; return <tr className="border-b border-slate-100" key={entry.id}><td className="border-l-4 border-l-brand-orange px-5 py-4"><div className="flex items-center gap-3"><ProductPhoto item={{ photo: entry.variant.photo || item.photo, name: entry.variant.value }} size="small" /><div><p className="text-xs font-extrabold text-brand-blue">{entry.variant.value}</p><p className="mt-1 text-[10px] text-slate-400">{entry.variant.name}</p></div></div></td><td className="px-4 py-4 text-xs font-bold text-slate-600">{formatDate(entry.date)}</td><td className="px-4 py-4 text-right text-xs font-bold tabular-nums text-slate-600">{formatPeso(entry.rawCost)}</td><td className="px-4 py-4 text-right text-xs font-extrabold tabular-nums text-brand-blue">{formatPeso(entry.sellingPrice)}</td><td className={`px-5 py-4 text-right text-xs font-extrabold tabular-nums ${change > 0 ? 'text-emerald-600' : change < 0 ? 'text-red-600' : 'text-slate-400'}`}>{entry.previous ? `${change > 0 ? '+' : ''}${formatPeso(change)}` : 'Initial price'}</td></tr> })}</tbody></table></div> : <div className="grid min-h-52 place-items-center p-8 text-center"><div><span className="mx-auto grid size-12 place-items-center rounded-xl bg-orange-50 text-brand-orange"><Icon path="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2" /></span><p className="mt-4 text-sm font-bold text-brand-blue">No price history yet</p><p className="mt-1 text-xs text-slate-400">The first record will appear after a variant is saved.</p></div></div>}</section>
 }
 
-function ItemDetailsView({ item, supplier, onBack, onEdit, onAddVariant, onEditVariant }: { item: Item; supplier?: DirectorySupplier; onBack: () => void; onEdit: () => void; onAddVariant: () => void; onEditVariant: (variant: ItemVariant) => void }) {
+function VariantAdjustmentAudit({ item, onAdjustPrice }: { item: Item; onAdjustPrice: (variant: ItemVariant) => void }) {
+  const records = item.variants.flatMap((variant) => variant.priceHistory.map((record) => ({ record, variant }))).sort((left, right) => right.record.date.localeCompare(left.record.date) || right.record.recordedAt.localeCompare(left.record.recordedAt))
+  if (!records.length) return <VariantPriceHistory item={item} />
+  return <div className="space-y-4">
+    <VariantPriceHistory item={item} />
+    <section className="overflow-hidden rounded-[1.5rem] border border-violet-100 bg-white shadow-[0_14px_45px_-32px_rgba(76,29,149,0.25)]"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100 px-5 py-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Variant adjustment context</h3><p className="mt-0.5 text-[11px] text-slate-400">Reasons, references, and users behind each recorded price</p></div><span className="rounded-lg bg-violet-50 px-2.5 py-1 text-[10px] font-bold text-violet-700">Append-only</span></div><div className="grid gap-3 p-4 lg:grid-cols-2">{records.map(({ record, variant }) => { const sellingChange = record.sellingPrice - record.previousSellingPrice; return <article className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4" key={`${variant.id}-${record.id}`}><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><ProductPhoto item={{ photo: variant.photo || item.photo, name: variant.value }} size="small" /><div className="min-w-0"><p className="truncate text-xs font-extrabold text-brand-blue">{variant.name}: {variant.value}</p><p className="mt-1 truncate font-mono text-[9px] text-slate-400">{variant.productCode}</p></div></div><button className="shrink-0 rounded-lg bg-white px-2.5 py-1.5 text-[9px] font-bold text-violet-700 shadow-sm transition hover:bg-violet-50" type="button" onClick={() => onAdjustPrice(variant)}>Adjust</button></div><div className="mt-3 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5 border-t border-slate-200/70 pt-3 text-[10px]"><span className="font-semibold text-slate-400">Effective date</span><span className="font-bold text-slate-600">{formatDate(record.date)}</span><span className="font-semibold text-slate-400">Selling price</span><span className="font-extrabold text-brand-blue">{formatPeso(record.previousSellingPrice)} → {formatPeso(record.sellingPrice)} <span className={sellingChange > 0 ? 'text-emerald-600' : sellingChange < 0 ? 'text-red-500' : 'text-slate-400'}>({sellingChange > 0 ? '+' : ''}{formatPeso(sellingChange)})</span></span><span className="font-semibold text-slate-400">Reason</span><span className="font-bold text-slate-600">{record.reason}</span><span className="font-semibold text-slate-400">Recorded by</span><span className="font-bold text-slate-600">{record.createdBy}</span></div>{record.notes ? <p className="mt-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5 text-[10px] leading-4 text-slate-500">{record.notes}</p> : null}</article> })}</div></section>
+  </div>
+}
+
+function ItemDetailsView({ item, supplier, onBack, onEdit, onAddVariant, onEditVariant, onAdjustPrice }: { item: Item; supplier?: DirectorySupplier; onBack: () => void; onEdit: () => void; onAddVariant: () => void; onEditVariant: (variant: ItemVariant) => void; onAdjustPrice: (variant?: ItemVariant) => void }) {
   const statusClass = item.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : item.status === 'Inactive' ? 'bg-slate-100 text-slate-600' : 'bg-red-50 text-red-600'
   const [activeDetailTab, setActiveDetailTab] = useState<'variants' | 'specifications' | 'history'>('variants')
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
@@ -293,7 +422,7 @@ function ItemDetailsView({ item, supplier, onBack, onEdit, onAddVariant, onEditV
   return <div className="item-detail-page space-y-4 animate-[content-enter_300ms_cubic-bezier(0.22,1,0.36,1)]">
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div><div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Product catalog</p></div><h2 className="mt-2 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Product specification & variant detail</h2></div>
-      <div className="flex flex-wrap gap-2"><button className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-blue/20 hover:text-brand-blue" type="button" onClick={onBack}><Icon path="m15 18-6-6 6-6" />Back to items</button><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition hover:-translate-y-0.5" type="button" onClick={onEdit}><Icon path="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" />Edit product</button></div>
+      <div className="flex flex-wrap gap-2"><button className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-600 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-blue/20 hover:text-brand-blue" type="button" onClick={onBack}><Icon path="m15 18-6-6 6-6" />Back to items</button><button className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-xs font-bold text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100" type="button" onClick={() => onAdjustPrice(selectedVariant)}><Icon path="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />Adjust {selectedVariant ? 'variant' : 'base'} price</button><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition hover:-translate-y-0.5" type="button" onClick={onEdit}><Icon path="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" />Edit product</button></div>
     </div>
 
     <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_-35px_rgba(0,20,76,0.38)]" aria-label={`${item.name} summary`}>
@@ -315,9 +444,11 @@ function ItemDetailsView({ item, supplier, onBack, onEdit, onAddVariant, onEditV
       </div>
     </section>
 
+    {selectedVariant ? <VariantRecordSummary variant={selectedVariant} /> : null}
+
     <div className="border-b border-slate-200"><div className="flex gap-3 overflow-x-auto px-1 sm:gap-7" role="tablist" aria-label="Product detail sections"><button className={`relative whitespace-nowrap px-3 py-3 text-xs font-bold transition ${activeDetailTab === 'variants' ? 'text-brand-blue' : 'text-slate-400 hover:text-slate-600'}`} type="button" role="tab" aria-selected={activeDetailTab === 'variants'} onClick={() => setActiveDetailTab('variants')}>Variants <span className="ml-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[9px] text-violet-700">{item.variants.length}</span>{activeDetailTab === 'variants' ? <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-orange" /> : null}</button><button className={`relative whitespace-nowrap px-3 py-3 text-xs font-bold transition ${activeDetailTab === 'specifications' ? 'text-brand-blue' : 'text-slate-400 hover:text-slate-600'}`} type="button" role="tab" aria-selected={activeDetailTab === 'specifications'} onClick={() => setActiveDetailTab('specifications')}>Specifications{activeDetailTab === 'specifications' ? <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-orange" /> : null}</button><button className={`relative whitespace-nowrap px-3 py-3 text-xs font-bold transition ${activeDetailTab === 'history' ? 'text-brand-blue' : 'text-slate-400 hover:text-slate-600'}`} type="button" role="tab" aria-selected={activeDetailTab === 'history'} onClick={() => setActiveDetailTab('history')}>Price history <span className="ml-1 rounded-md bg-orange-50 px-1.5 py-0.5 text-[9px] text-brand-orange">{item.variants.reduce((total, variant) => total + variant.priceHistory.length, 0)}</span>{activeDetailTab === 'history' ? <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-orange" /> : null}</button></div></div>
 
-    {activeDetailTab === 'variants' ? <VariantCatalog item={item} supplier={supplier} onSelect={(id) => { setSelectedVariantId(id); window.scrollTo({ top: 0, behavior: 'smooth' }) }} onAdd={onAddVariant} onEdit={onEditVariant} /> : activeDetailTab === 'specifications' ? <ProductSpecifications item={item} /> : <VariantPriceHistory item={item} />}
+    {activeDetailTab === 'variants' ? <VariantCatalog item={item} supplier={supplier} onSelect={(id) => { setSelectedVariantId(id); window.scrollTo({ top: 0, behavior: 'smooth' }) }} onAdd={onAddVariant} onEdit={onEditVariant} /> : activeDetailTab === 'specifications' ? <ProductSpecifications item={item} /> : <div className="space-y-4"><BasePriceHistory item={item} onAdjustPrice={() => onAdjustPrice()} /><VariantAdjustmentAudit item={item} onAdjustPrice={onAdjustPrice} /></div>}
   </div>
 }
 
@@ -352,6 +483,9 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const [processingVariantPhotoId, setProcessingVariantPhotoId] = useState<string | null>(null)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [toast, setToast] = useState('')
+  const [priceAdjustmentTarget, setPriceAdjustmentTarget] = useState<PriceAdjustmentTarget | null>(null)
+  const [priceAdjustmentDraft, setPriceAdjustmentDraft] = useState<PriceAdjustmentDraft>({ rawCost: '', sellingPrice: '', effectiveDate: new Date().toISOString().slice(0, 10), reason: defaultPriceAdjustmentReason, notes: '' })
+  const [priceAdjustmentError, setPriceAdjustmentError] = useState('')
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -388,11 +522,11 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   }, [toast])
 
   useEffect(() => {
-    if (!isDialogOpen && !isCategoryManagerOpen && !isVariantDialogOpen) return
+    if (!isDialogOpen && !isCategoryManagerOpen && !isVariantDialogOpen && !priceAdjustmentTarget) return
     const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = originalOverflow }
-  }, [isCategoryManagerOpen, isDialogOpen, isVariantDialogOpen])
+  }, [isCategoryManagerOpen, isDialogOpen, isVariantDialogOpen, priceAdjustmentTarget])
 
   const supplierMap = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers])
   const detailItem = detailItemId ? items.find((item) => item.id === detailItemId) : undefined
@@ -415,7 +549,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     const query = search.trim().toLowerCase()
     return items.filter((item) => {
       const supplier = supplierMap.get(item.supplierId)
-      const matchesSearch = !query || [item.name, item.category, item.subcategory, item.brand, item.productCode, item.barcode, item.description, ...item.variants.flatMap((variant) => [variant.name, variant.value]), supplier?.name ?? '', supplier?.address ?? ''].some((value) => value.toLowerCase().includes(query))
+      const matchesSearch = !query || [item.name, item.category, item.subcategory, item.brand, item.productCode, item.barcode, item.description, ...item.variants.flatMap((variant) => [variant.name, variant.value, variant.productCode, variant.barcode, variant.unitOfMeasure, variant.status, ...variant.specifications.flatMap((specification) => [specification.name, specification.value])]), supplier?.name ?? '', supplier?.address ?? ''].some((value) => value.toLowerCase().includes(query))
       const matchesCategory = categoryFilter === 'All categories' || item.category === categoryFilter
       const matchesStatus = statusFilter === 'All statuses' || item.status === statusFilter
       return matchesSearch && matchesCategory && matchesStatus
@@ -477,20 +611,66 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   function addVariant(item: Item) {
     setVariantParentItemId(item.id)
     setEditingVariantId(null)
-    setVariantDraft(createEmptyVariant(item.rawCost, item.sellingPrice))
+    setVariantDraft(createEmptyVariant(item.rawCost, item.sellingPrice, `${item.productCode}-V${String(item.variants.length + 1).padStart(2, '0')}`, item.unitOfMeasure, item.unitWeight, item.status))
     setVariantFormError('')
     setPhotoError('')
     setIsVariantDialogOpen(true)
   }
 
-  function updateVariant(id: string, field: 'name' | 'value' | 'rawCost' | 'sellingPrice', value: string) {
-    setVariantDraft((current) => current.id === id ? { ...current, [field]: field === 'rawCost' || field === 'sellingPrice' ? Number(value) : value } : current)
+  function updateVariant(id: string, field: VariantEditableField, value: string) {
+    setVariantDraft((current) => {
+      if (field === 'addSpecification') return { ...current, specifications: [...current.specifications, { id: crypto.randomUUID(), name: '', value: '' }] }
+      if (field === 'removeSpecification') return { ...current, specifications: current.specifications.filter((specification) => specification.id !== id) }
+      if (field === 'specificationName' || field === 'specificationValue') return { ...current, specifications: current.specifications.map((specification) => specification.id === id ? { ...specification, [field === 'specificationName' ? 'name' : 'value']: value } : specification) }
+      return current.id === id ? { ...current, [field]: field === 'rawCost' || field === 'sellingPrice' || field === 'unitWeight' ? Number(value) : value } : current
+    })
+  }
+
+  function openPriceAdjustment(item: Item, variant?: ItemVariant) {
+    const currentRawCost = variant?.rawCost ?? item.rawCost
+    const currentSellingPrice = variant?.sellingPrice ?? item.sellingPrice
+    setPriceAdjustmentTarget({ itemId: item.id, variantId: variant?.id, itemName: item.name, targetName: variant ? `${variant.name}: ${variant.value}` : 'Base item', productCode: variant?.productCode || item.productCode, currentRawCost, currentSellingPrice })
+    setPriceAdjustmentDraft({ rawCost: String(currentRawCost), sellingPrice: String(currentSellingPrice), effectiveDate: new Date().toISOString().slice(0, 10), reason: defaultPriceAdjustmentReason, notes: '' })
+    setPriceAdjustmentError('')
+  }
+
+  function savePriceAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!priceAdjustmentTarget) return
+    const rawCost = Number(priceAdjustmentDraft.rawCost)
+    const sellingPrice = Number(priceAdjustmentDraft.sellingPrice)
+    if (!Number.isFinite(rawCost) || rawCost < 0 || !Number.isFinite(sellingPrice) || sellingPrice < 0 || !priceAdjustmentDraft.effectiveDate || priceAdjustmentDraft.effectiveDate > new Date().toISOString().slice(0, 10) || !priceAdjustmentDraft.reason.trim()) {
+      setPriceAdjustmentError('Enter valid prices, an effective date, and an adjustment reason.')
+      return
+    }
+    if (rawCost === priceAdjustmentTarget.currentRawCost && sellingPrice === priceAdjustmentTarget.currentSellingPrice) {
+      setPriceAdjustmentError('Change the raw cost or selling price before saving.')
+      return
+    }
+    const item = items.find((entry) => entry.id === priceAdjustmentTarget.itemId)
+    const variant = priceAdjustmentTarget.variantId ? item?.variants.find((entry) => entry.id === priceAdjustmentTarget.variantId) : undefined
+    if (!item || (priceAdjustmentTarget.variantId && !variant)) {
+      setPriceAdjustmentError('The selected item or variant is no longer available.')
+      return
+    }
+    const record = createPriceRecord(rawCost, sellingPrice, priceAdjustmentDraft.effectiveDate, currentUsername, priceAdjustmentDraft.reason.trim(), priceAdjustmentDraft.notes.trim(), priceAdjustmentTarget.currentRawCost, priceAdjustmentTarget.currentSellingPrice)
+    const now = new Date().toISOString()
+    setItems((current) => current.map((entry) => {
+      if (entry.id !== priceAdjustmentTarget.itemId) return entry
+      if (!priceAdjustmentTarget.variantId) return { ...entry, rawCost, sellingPrice, lastPriceUpdate: priceAdjustmentDraft.effectiveDate, priceHistory: [...entry.priceHistory, record], updatedAt: now }
+      return { ...entry, variants: entry.variants.map((option) => option.id === priceAdjustmentTarget.variantId ? { ...option, rawCost, sellingPrice, priceHistory: [...option.priceHistory, record] } : option), updatedAt: now }
+    }))
+    const targetLabel = variant ? `${item.name} - ${variant.value}` : item.name
+    appendSystemLog({ recordId: record.id, module: 'Items', action: 'Updated', entity: targetLabel, description: `${record.reason}: price adjusted from ${formatPeso(priceAdjustmentTarget.currentSellingPrice)} to ${formatPeso(sellingPrice)}.`, actor: currentUsername, tone: sellingPrice >= priceAdjustmentTarget.currentSellingPrice ? 'success' : 'warning', amount: sellingPrice, status: variant?.status ?? item.status })
+    setPriceAdjustmentTarget(null)
+    setPriceAdjustmentError('')
+    setToast(`${variant ? 'Variant' : 'Item'} price adjusted successfully`)
   }
 
   function editVariant(item: Item, variant: ItemVariant) {
     setVariantParentItemId(item.id)
     setEditingVariantId(variant.id)
-    setVariantDraft({ ...variant, priceHistory: [...variant.priceHistory] })
+    setVariantDraft({ ...variant, specifications: variant.specifications.map((specification) => ({ ...specification })), priceHistory: [...variant.priceHistory] })
     setVariantFormError('')
     setPhotoError('')
     setIsVariantDialogOpen(true)
@@ -498,8 +678,12 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
 
   function saveVariant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!variantDraft.name.trim() || !variantDraft.value.trim() || !Number.isFinite(variantDraft.rawCost) || variantDraft.rawCost < 0 || !Number.isFinite(variantDraft.sellingPrice) || variantDraft.sellingPrice < 0) {
-      setVariantFormError('Complete the variant name, value, raw cost, and selling price.')
+    if (!variantDraft.name.trim() || !variantDraft.value.trim() || !variantDraft.productCode.trim() || !variantDraft.unitOfMeasure || !Number.isFinite(variantDraft.rawCost) || variantDraft.rawCost < 0 || !Number.isFinite(variantDraft.sellingPrice) || variantDraft.sellingPrice < 0 || !Number.isFinite(variantDraft.unitWeight) || variantDraft.unitWeight < 0) {
+      setVariantFormError('Complete the variant name, value, SKU, unit, weight, raw cost, and selling price.')
+      return
+    }
+    if (variantDraft.specifications.some((specification) => !specification.name.trim() || !specification.value.trim())) {
+      setVariantFormError('Complete both the name and value for every variant specification.')
       return
     }
     if (!variantParentItemId) return
@@ -508,10 +692,20 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       setVariantFormError('The parent product could not be found.')
       return
     }
+    const productCode = variantDraft.productCode.trim()
+    const duplicateCode = items.some((item) => item.productCode.toLowerCase() === productCode.toLowerCase() || item.variants.some((variant) => variant.id !== editingVariantId && variant.productCode.toLowerCase() === productCode.toLowerCase()))
+    if (duplicateCode) {
+      setVariantFormError('That SKU or product code is already used by another item or variant.')
+      return
+    }
     const previous = parentItem.variants.find((variant) => variant.id === editingVariantId)
-    const priceChanged = !previous || previous.rawCost !== variantDraft.rawCost || previous.sellingPrice !== variantDraft.sellingPrice
-    const priceHistory = priceChanged ? [...variantDraft.priceHistory, { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), rawCost: variantDraft.rawCost, sellingPrice: variantDraft.sellingPrice }] : variantDraft.priceHistory
-    const values = { ...variantDraft, name: variantDraft.name.trim(), value: variantDraft.value.trim(), priceHistory }
+    const priceChanged = previous ? previous.rawCost !== variantDraft.rawCost || previous.sellingPrice !== variantDraft.sellingPrice : false
+    const priceHistory = !previous
+      ? [createPriceRecord(variantDraft.rawCost, variantDraft.sellingPrice, new Date().toISOString().slice(0, 10), currentUsername)]
+      : priceChanged
+        ? [...variantDraft.priceHistory, createPriceRecord(variantDraft.rawCost, variantDraft.sellingPrice, new Date().toISOString().slice(0, 10), currentUsername, 'Item details update', 'Price changed while editing variant details.', previous.rawCost, previous.sellingPrice)]
+        : variantDraft.priceHistory
+    const values = { ...variantDraft, name: variantDraft.name.trim(), value: variantDraft.value.trim(), productCode, barcode: variantDraft.barcode.trim(), specifications: variantDraft.specifications.map((specification) => ({ ...specification, name: specification.name.trim(), value: specification.value.trim() })), priceHistory }
     const now = new Date().toISOString()
     setItems((current) => current.map((item) => item.id === variantParentItemId ? { ...item, variants: editingVariantId ? item.variants.map((variant) => variant.id === editingVariantId ? values : variant) : [...item.variants, values], updatedAt: now } : item))
     appendSystemLog({ recordId: values.id, module: 'Items', action: editingVariantId ? 'Updated' : 'Created', entity: `${parentItem.name} - ${values.value}`, description: editingVariantId ? 'Product variant details and pricing were updated.' : 'A new product variant was added.', actor: currentUsername, tone: 'success', amount: values.sellingPrice, status: parentItem.status })
@@ -664,19 +858,33 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       setFormError('Complete all required item, pricing, and supplier fields.')
       return
     }
-    const duplicateCode = items.some((item) => item.id !== editingId && item.productCode.toLowerCase() === draft.productCode.trim().toLowerCase())
-    const duplicateBarcode = items.some((item) => item.id !== editingId && item.barcode.toLowerCase() === draft.barcode.trim().toLowerCase())
+    const normalizedProductCode = draft.productCode.trim().toLowerCase()
+    const normalizedBarcode = draft.barcode.trim().toLowerCase()
+    const duplicateCode = items.some((item) => item.id !== editingId && (item.productCode.toLowerCase() === normalizedProductCode || item.variants.some((variant) => variant.productCode.toLowerCase() === normalizedProductCode)))
+    const duplicateBarcode = items.some((item) => item.id !== editingId && (item.barcode.toLowerCase() === normalizedBarcode || item.variants.some((variant) => Boolean(variant.barcode) && variant.barcode.toLowerCase() === normalizedBarcode)))
     if (duplicateCode || duplicateBarcode) {
       setFormError(duplicateCode ? 'That product code is already in use.' : 'That barcode is already in use.')
       return
     }
-    if (draft.variants.some((variant) => !variant.name.trim() || !variant.value.trim() || !Number.isFinite(variant.rawCost) || variant.rawCost < 0 || !Number.isFinite(variant.sellingPrice) || variant.sellingPrice < 0)) {
-      setFormError('Complete the name, value, raw cost, and selling price for every variant, or remove the unfinished variant.')
+    if (draft.variants.some((variant) => !variant.name.trim() || !variant.value.trim() || !variant.productCode.trim() || !variant.unitOfMeasure || !Number.isFinite(variant.unitWeight) || variant.unitWeight < 0 || !Number.isFinite(variant.rawCost) || variant.rawCost < 0 || !Number.isFinite(variant.sellingPrice) || variant.sellingPrice < 0 || variant.specifications.some((specification) => !specification.name.trim() || !specification.value.trim()))) {
+      setFormError('Complete the identification, unit, specifications, and pricing for every variant.')
+      return
+    }
+    const itemCodes = [normalizedProductCode, ...draft.variants.map((variant) => variant.productCode.trim().toLowerCase())]
+    const itemBarcodes = [normalizedBarcode, ...draft.variants.map((variant) => variant.barcode.trim().toLowerCase()).filter(Boolean)]
+    if (new Set(itemCodes).size !== itemCodes.length || new Set(itemBarcodes).size !== itemBarcodes.length) {
+      setFormError('Every parent item and variant must have a unique SKU and barcode.')
       return
     }
     const now = new Date().toISOString()
     const itemId = editingId ?? crypto.randomUUID()
     const existingItem = editingId ? items.find((item) => item.id === editingId) : undefined
+    const basePriceChanged = Boolean(existingItem) && (existingItem?.rawCost !== rawCost || existingItem.sellingPrice !== sellingPrice)
+    const priceHistory = !existingItem
+      ? [createPriceRecord(rawCost, sellingPrice, draft.lastPriceUpdate, currentUsername)]
+      : basePriceChanged
+        ? [...existingItem.priceHistory, createPriceRecord(rawCost, sellingPrice, draft.lastPriceUpdate, currentUsername, 'Item details update', 'Price changed while editing item details.', existingItem.rawCost, existingItem.sellingPrice)]
+        : existingItem.priceHistory
     const values: Item = {
       id: itemId,
       photo: draft.photo,
@@ -690,15 +898,20 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       barcode: draft.barcode.trim(),
       variants: draft.variants.map((variant) => {
         const previous = existingItem?.variants.find((entry) => entry.id === variant.id)
-        const priceChanged = !previous || previous.rawCost !== variant.rawCost || previous.sellingPrice !== variant.sellingPrice
-        const priceHistory = priceChanged ? [...variant.priceHistory, { id: crypto.randomUUID(), date: draft.lastPriceUpdate, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice }] : variant.priceHistory
-        return { ...variant, name: variant.name.trim(), value: variant.value.trim(), priceHistory }
+        const variantPriceChanged = Boolean(previous) && (previous?.rawCost !== variant.rawCost || previous.sellingPrice !== variant.sellingPrice)
+        const variantPriceHistory = !previous
+          ? [createPriceRecord(variant.rawCost, variant.sellingPrice, draft.lastPriceUpdate, currentUsername)]
+          : variantPriceChanged
+            ? [...variant.priceHistory, createPriceRecord(variant.rawCost, variant.sellingPrice, draft.lastPriceUpdate, currentUsername, 'Item details update', 'Price changed while editing item details.', previous.rawCost, previous.sellingPrice)]
+            : variant.priceHistory
+        return { ...variant, name: variant.name.trim(), value: variant.value.trim(), productCode: variant.productCode.trim(), barcode: variant.barcode.trim(), specifications: variant.specifications.map((specification) => ({ ...specification, name: specification.name.trim(), value: specification.value.trim() })), priceHistory: variantPriceHistory }
       }),
       description: draft.description.trim(),
       status: draft.status,
       lastPriceUpdate: draft.lastPriceUpdate,
       rawCost,
       sellingPrice,
+      priceHistory,
       supplierId: draft.supplierId,
       createdAt: existingItem?.createdAt ?? now,
       updatedAt: now,
@@ -722,7 +935,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
-      {detailItemId ? detailItem ? <ItemDetailsView item={detailItem} supplier={detailSupplier} onBack={returnToItems} onEdit={() => openEditDialog(detailItem)} onAddVariant={() => addVariant(detailItem)} onEditVariant={(variant) => editVariant(detailItem, variant)} /> : <section className="grid min-h-[28rem] place-items-center rounded-[1.5rem] border border-slate-200/80 bg-white p-8 text-center shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="max-w-sm"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-slate-50 text-brand-blue"><Icon className="size-6" path="m21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5" /></span><h2 className="mt-5 text-xl font-bold text-brand-blue">Product not found</h2><p className="mt-2 text-sm leading-6 text-slate-500">This product may have been removed or the link is no longer available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={returnToItems}>Back to items</button></div></section> : <>
+      {detailItemId ? detailItem ? <ItemDetailsView item={detailItem} supplier={detailSupplier} onBack={returnToItems} onEdit={() => openEditDialog(detailItem)} onAddVariant={() => addVariant(detailItem)} onEditVariant={(variant) => editVariant(detailItem, variant)} onAdjustPrice={(variant) => openPriceAdjustment(detailItem, variant)} /> : <section className="grid min-h-[28rem] place-items-center rounded-[1.5rem] border border-slate-200/80 bg-white p-8 text-center shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="max-w-sm"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-slate-50 text-brand-blue"><Icon className="size-6" path="m21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5" /></span><h2 className="mt-5 text-xl font-bold text-brand-blue">Product not found</h2><p className="mt-2 text-sm leading-6 text-slate-500">This product may have been removed or the link is no longer available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={returnToItems}>Back to items</button></div></section> : <>
       <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Item summary">
         <div>
           <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Product catalog</p></div>
@@ -802,6 +1015,8 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       </form></div> : null}
 
       {isVariantDialogOpen ? <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_160ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="variant-dialog-title"><button className="absolute inset-0" type="button" onClick={() => setIsVariantDialogOpen(false)} aria-label="Close variant form" /><form className="relative my-6 w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.36)]" onSubmit={saveVariant}><div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Product option</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="variant-dialog-title">{editingVariantId ? 'Edit variant' : 'Add a new variant'}</h2><p className="mt-1 text-xs text-slate-400">Manage this option’s photo and individual pricing.</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsVariantDialogOpen(false)} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="px-6 py-5">{variantFormError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{variantFormError}</div> : null}{photoError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{photoError}</div> : null}<VariantEditor variant={variantDraft} index={variantDialogIndex} isProcessingPhoto={processingVariantPhotoId === variantDraft.id} onUpdate={updateVariant} onPhotoChange={(id, event) => void handleVariantPhotoChange(id, event)} onRemove={() => undefined} showRemove={false} /></div><div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingVariantId ? <button className="h-10 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={deleteVariant}>Remove variant</button> : <span />}<div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsVariantDialogOpen(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{editingVariantId ? 'Save changes' : 'Add variant'}</button></div></div></form></div> : null}
+
+      {priceAdjustmentTarget ? <PriceAdjustmentDialog target={priceAdjustmentTarget} draft={priceAdjustmentDraft} error={priceAdjustmentError} onChange={(field, value) => { setPriceAdjustmentDraft((current) => ({ ...current, [field]: value })); setPriceAdjustmentError('') }} onClose={() => { setPriceAdjustmentTarget(null); setPriceAdjustmentError('') }} onSubmit={savePriceAdjustment} /> : null}
 
       {isCategoryManagerOpen ? (
         <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="category-manager-title">
