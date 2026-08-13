@@ -4,6 +4,8 @@ import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { usePersistentState } from '../../components/ui/usePersistentState'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
 import { appendSystemLog } from '../../services/activityLog'
 
@@ -345,15 +347,16 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>(loadApprovedQuotations)
   const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(() => loadOptions(categoryStorageKey, defaultCategoryOptions))
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<ExpenseOption[]>(() => loadOptions(paymentMethodStorageKey, defaultPaymentMethodOptions))
-  const [searchQuery, setSearchQuery] = useState('')
-  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('all')
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth)
+  const [searchQuery, setSearchQuery] = usePersistentState('expenses.search', '')
+  const [dateFilterMode, setDateFilterMode] = usePersistentState<DateFilterMode>('expenses.date-mode', 'all')
+  const [selectedMonth, setSelectedMonth] = usePersistentState('expenses.month', currentMonth)
   const [openInsight, setOpenInsight] = useState<ExpenseInsight | null>(null)
   const [trendRange, setTrendRange] = useState<ExpenseTrendRange>('6m')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('All')
-  const [isAddingExpense, setIsAddingExpense] = useState(false)
+  const [categoryFilter, setCategoryFilter] = usePersistentState('expenses.category', 'All')
+  const openNewOnLoad = new URLSearchParams(window.location.search).get('new') === '1'
+  const [isAddingExpense, setIsAddingExpense] = useState(openNewOnLoad)
   const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null)
   const [toast, setToast] = useState('')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -364,6 +367,10 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const isEditingExpense = editingExpenseId !== null
   const draftCategories = categories.includes(draft.category) ? categories : [draft.category, ...categories]
   const draftPaymentMethods = paymentMethods.includes(draft.paymentMethod) ? paymentMethods : [draft.paymentMethod, ...paymentMethods]
+
+  useEffect(() => {
+    if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
+  }, [openNewOnLoad])
   const projectOptions = useMemo(() => [
     { value: '', label: 'General expense / no project' },
     ...approvedQuotations.map((quotation) => ({
@@ -412,7 +419,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const usedCategories = useMemo(() => new Set(expenses.map((expense) => expense.category)), [expenses])
   const usedPaymentMethods = useMemo(() => new Set(expenses.map((expense) => expense.paymentMethod)), [expenses])
 
-  const visibleExpenses = useMemo(() => {
+  const matchingExpenses = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     return expenses
       .filter((expense) => {
@@ -427,7 +434,16 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       .sort((left, right) => right.date.localeCompare(left.date) || right.id - left.id)
   }, [categoryFilter, dateFilterMode, expenses, fromDate, searchQuery, selectedMonth, toDate])
 
-  const visibleTotal = useMemo(() => visibleExpenses.reduce((sum, expense) => sum + expense.amount, 0), [visibleExpenses])
+  const expenseSortOptions = [
+    { value: 'newest', label: 'Newest first', getValue: (expense: Expense) => expense.date, direction: 'desc' as const },
+    { value: 'oldest', label: 'Oldest first', getValue: (expense: Expense) => expense.date, direction: 'asc' as const },
+    { value: 'highest', label: 'Highest amount', getValue: (expense: Expense) => expense.amount, direction: 'desc' as const },
+    { value: 'payee', label: 'Payee A-Z', getValue: (expense: Expense) => expense.payee, direction: 'asc' as const },
+    { value: 'category', label: 'Category A-Z', getValue: (expense: Expense) => expense.category, direction: 'asc' as const },
+  ]
+  const expenseTable = useTableView({ rows: matchingExpenses, storageKey: 'expenses.table', sortOptions: expenseSortOptions })
+  const visibleExpenses = expenseTable.pageRows
+  const visibleTotal = useMemo(() => matchingExpenses.reduce((sum, expense) => sum + expense.amount, 0), [matchingExpenses])
   const comparisonMonth = /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth : currentMonth
   const [comparisonYear = new Date().getFullYear(), comparisonMonthNumber = new Date().getMonth() + 1] = comparisonMonth.split('-').map(Number)
   const previousMonthDate = new Date(comparisonYear, comparisonMonthNumber - 2, 1)
@@ -654,9 +670,9 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       <SummarySurface>
         <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
           <div>
-            <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Financial operations</p></div>
-            <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Expense tracker</h2>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Record purchases, organize supporting documents, and review spending by period.</p>
+            <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Company spending</p></div>
+            <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Expenses</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Record expenses, attach invoices, and check spending by date.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-3 sm:gap-3">
@@ -736,6 +752,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           </div>
         </div>
 
+        <TableControls tableId="expenses-table" storageKey="expenses.table" columns={[{ index: 1, label: 'Date' }, { index: 2, label: 'Payee', required: true }, { index: 3, label: 'Category' }, { index: 4, label: 'Description' }, { index: 5, label: 'Amount' }, { index: 6, label: 'Payment method' }, { index: 7, label: 'Purchaser' }, { index: 8, label: 'Status' }, { index: 9, label: 'Invoice' }, { index: 10, label: 'Notes' }]} sortKey={expenseTable.sortKey} sortOptions={expenseSortOptions} onSortChange={expenseTable.setSortKey} page={expenseTable.page} pageCount={expenseTable.pageCount} pageSize={expenseTable.pageSize} onPageChange={expenseTable.setPage} onPageSizeChange={expenseTable.setPageSize} total={expenseTable.total} />
+
         <div className="overflow-hidden">
           <table className="w-full table-fixed border-collapse text-left [&_td]:px-2.5 [&_th]:px-2.5">
             <caption className="sr-only">Expense records</caption>
@@ -777,7 +795,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="expense-form-title">
           <button className="absolute inset-0" type="button" onClick={closeExpenseDialog} aria-label="Close expense form" />
           <form className="relative my-6 w-full max-w-3xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.28)]" onSubmit={saveExpense}>
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">{isEditingExpense ? 'Update expense record' : 'New expense record'}</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="expense-form-title">{isEditingExpense ? 'Edit expense' : 'Add an expense'}</h2><p className="mt-1 text-sm text-slate-500">{isEditingExpense ? 'Review and update the transaction details below.' : 'Record the transaction and attach its supporting invoice.'}</p></div><button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeExpenseDialog} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></div>
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">{isEditingExpense ? 'Update expense' : 'New expense'}</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="expense-form-title">{isEditingExpense ? 'Edit expense' : 'Add an expense'}</h2><p className="mt-1 text-sm text-slate-500">{isEditingExpense ? 'Check and update the expense details below.' : 'Enter the expense details and attach the invoice if available.'}</p></div><button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeExpenseDialog} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></div>
 
             <div className="grid gap-4 px-6 py-5 sm:grid-cols-2">
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-date">Date</label><AnimatedDatePicker id="new-expense-date" value={draft.date} onChange={(date) => setDraft((current) => ({ ...current, date }))} ariaLabel="Expense date" required /></div>

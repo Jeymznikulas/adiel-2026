@@ -1,19 +1,69 @@
 import type { MouseEvent, PropsWithChildren, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
+import { GlobalSearch } from '../ui/GlobalSearch'
 
-const navigationItems = [
-  { label: 'Dashboard', path: '/dashboard', icon: 'M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10 0h8V11h-8v10Zm0-18v6h8V3h-8Z' },
-  { label: 'Tasks', path: '/tasks', icon: 'M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
-  { label: 'Items', path: '/items', icon: 'm21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5' },
-  { label: 'Quotation', path: '/quotations', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6M8 13h8M8 17h5' },
-  { label: 'Purchase Order', path: '/purchase-orders', icon: 'M3 3h2l2.4 12.3a2 2 0 0 0 2 1.7h7.7a2 2 0 0 0 2-1.6L21 7H6M10 21h.01M18 21h.01' },
-  { label: 'Statement of Account', path: '/statement-of-account', icon: 'M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2Zm4 6h8M8 12h8M8 16h5' },
-  { label: 'Expenses', path: '/expenses', icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
-  { label: 'Sales Tracker', path: '/sales-tracker', icon: 'M3 3v18h18M7 16l4-5 3 3 6-8' },
-  { label: 'Client Directory', path: '/clients', icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8' },
-  { label: 'Supplier Directory', path: '/suppliers', icon: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6' },
-  { label: 'Logs', path: '/logs', icon: 'M4 4h16v16H4V4Zm4 5h8M8 13h8M8 17h5' },
-] as const
+type NavigationItem = {
+  label: string
+  path: string
+  icon: string
+}
+
+type NavigationGroup = {
+  label: string
+  items: readonly NavigationItem[]
+}
+
+const navigationGroups: readonly NavigationGroup[] = [
+  {
+    label: 'Main',
+    items: [
+      { label: 'Dashboard', path: '/dashboard', icon: 'M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10 0h8V11h-8v10Zm0-18v6h8V3h-8Z' },
+      { label: 'Tasks', path: '/tasks', icon: 'M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' },
+    ],
+  },
+  {
+    label: 'Sales',
+    items: [
+      { label: 'Clients', path: '/clients', icon: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8' },
+      { label: 'Quotations', path: '/quotations', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6M8 13h8M8 17h5' },
+      { label: 'Sales', path: '/sales-tracker', icon: 'M3 3v18h18M7 16l4-5 3 3 6-8' },
+      { label: 'Statements of Account', path: '/statement-of-account', icon: 'M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2Zm4 6h8M8 12h8M8 16h5' },
+    ],
+  },
+  {
+    label: 'Purchasing',
+    items: [
+      { label: 'Suppliers', path: '/suppliers', icon: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6' },
+      { label: 'Items', path: '/items', icon: 'm21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5' },
+      { label: 'Purchase Orders', path: '/purchase-orders', icon: 'M3 3h2l2.4 12.3a2 2 0 0 0 2 1.7h7.7a2 2 0 0 0 2-1.6L21 7H6M10 21h.01M18 21h.01' },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { label: 'Expenses', path: '/expenses', icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { label: 'Settings', path: '/settings', icon: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.63h.01A1.7 1.7 0 0 0 10.03 3.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.64a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.37 9v.01A1.7 1.7 0 0 0 20.9 10.03H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15Z' },
+      { label: 'Activity Log', path: '/logs', icon: 'M4 4h16v16H4V4Zm4 5h8M8 13h8M8 17h5' },
+    ],
+  },
+]
+
+const navigationItems = navigationGroups.flatMap((group) => group.items)
+const defaultNavigationItem = navigationItems[0]!
+const sidebarStorageKey = 'adiel.sidebar-collapsed'
+
+function getInitialSidebarState() {
+  try {
+    return window.localStorage.getItem(sidebarStorageKey) === 'true'
+  } catch {
+    return false
+  }
+}
 
 function normalizePath(pathname: string) {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
@@ -43,14 +93,14 @@ function NavigationIcon({ path }: { path: string }) {
 export function AppShell({ children, username, isSigningOut, onSignOut, sectionContent }: AppShellProps) {
   const [activePath, setActivePath] = useState(() => normalizePath(window.location.pathname))
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarState)
   const activeItem = navigationItems.find((item) => item.path === activePath)
     ?? (activePath.startsWith('/items/') ? navigationItems.find((item) => item.path === '/items') : undefined)
     ?? (activePath.startsWith('/clients/') ? navigationItems.find((item) => item.path === '/clients') : undefined)
     ?? (activePath.startsWith('/suppliers/') ? navigationItems.find((item) => item.path === '/suppliers') : undefined)
     ?? (activePath.startsWith('/quotations/') ? navigationItems.find((item) => item.path === '/quotations') : undefined)
     ?? (activePath.startsWith('/statement-of-account/') ? navigationItems.find((item) => item.path === '/statement-of-account') : undefined)
-    ?? navigationItems[0]
+    ?? defaultNavigationItem
   const activeSection = activeItem.label
   const initial = username.charAt(0).toUpperCase() || 'U'
   const currentDate = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date())
@@ -73,12 +123,93 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(sidebarStorageKey, String(isSidebarCollapsed))
+    } catch {
+      // The sidebar still works when browser storage is unavailable.
+    }
+  }, [isSidebarCollapsed])
+
+  useEffect(() => {
+    const markDirty = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+      const form = target.closest('form')
+      if (form?.closest('[role="dialog"]')) form.dataset.dirty = 'true'
+    }
+    const clearSaving = (form: HTMLFormElement) => {
+      window.setTimeout(() => {
+        delete form.dataset.saving
+        const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')
+        button?.removeAttribute('aria-busy')
+      }, 650)
+    }
+    const handleSubmit = (event: Event) => {
+      const form = event.target
+      if (!(form instanceof HTMLFormElement)) return
+      delete form.dataset.dirty
+      form.dataset.saving = 'true'
+      form.querySelector<HTMLButtonElement>('button[type="submit"]')?.setAttribute('aria-busy', 'true')
+      clearSaving(form)
+    }
+    const handleClosingClick = (event: globalThis.MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+      const dialog = target.closest<HTMLElement>('[role="dialog"], [role="alertdialog"]')
+      const form = dialog?.querySelector<HTMLFormElement>('form[data-dirty="true"]')
+      if (!form) return
+      const button = target.closest<HTMLButtonElement>('button')
+      if (!button) return
+      const label = `${button.getAttribute('aria-label') ?? ''} ${button.textContent ?? ''}`.trim().toLowerCase()
+      const isCloseAction = button === dialog?.firstElementChild || /close|cancel|back|keep editing/.test(label)
+      if (!isCloseAction || window.confirm('Discard your unsaved changes?')) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!document.querySelector('form[data-dirty="true"]')) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    const addIconTitles = () => {
+      document.querySelectorAll<HTMLButtonElement>('button[aria-label]:not([title])').forEach((button) => {
+        if (!button.textContent?.trim()) button.title = button.getAttribute('aria-label') ?? ''
+      })
+    }
+    addIconTitles()
+    const observer = new MutationObserver(addIconTitles)
+    observer.observe(document.body, { childList: true, subtree: true })
+    document.addEventListener('input', markDirty, true)
+    document.addEventListener('change', markDirty, true)
+    document.addEventListener('submit', handleSubmit, true)
+    document.addEventListener('click', handleClosingClick, true)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('input', markDirty, true)
+      document.removeEventListener('change', markDirty, true)
+      document.removeEventListener('submit', handleSubmit, true)
+      document.removeEventListener('click', handleClosingClick, true)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+
   function navigate(event: MouseEvent<HTMLAnchorElement>, path: string) {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     if (path !== activePath) {
       window.history.pushState(null, '', path)
       setActivePath(path)
+      window.dispatchEvent(new Event('adiel:navigate'))
+    }
+    setIsMenuOpen(false)
+  }
+
+  function navigateTo(path: string) {
+    if (path !== activePath) {
+      window.history.pushState(null, '', path)
+      setActivePath(normalizePath(path))
       window.dispatchEvent(new Event('adiel:navigate'))
     }
     setIsMenuOpen(false)
@@ -102,27 +233,37 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
         </div>
 
         <nav className={`relative flex-1 overflow-x-hidden overflow-y-auto py-6 transition-[padding] duration-300 ${isCollapsed ? 'px-2.5' : 'px-3.5'}`} aria-label="Primary navigation">
-          <p className={`mb-3 overflow-hidden whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400 transition-all duration-300 ${isCollapsed ? 'max-h-0 max-w-0 px-0 opacity-0' : 'max-h-5 max-w-40 px-3 opacity-100'}`}>Main menu</p>
-          <ul className="space-y-1">
-            {navigationItems.map((item) => {
-              const isActive = activeSection === item.label
-              return (
-                <li key={item.path}>
-                  <a
-                    className={`group relative flex w-full items-center rounded-xl py-[0.68rem] text-left text-[12.5px] font-medium transition-all duration-200 ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${isActive ? 'bg-brand-blue/[0.07] text-brand-blue ring-1 ring-inset ring-brand-blue/[0.08]' : 'text-slate-500 hover:bg-slate-100/80 hover:text-brand-blue'}`}
-                    href={item.path}
-                    onClick={(event) => navigate(event, item.path)}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    {isActive ? <span className="absolute -left-0.5 h-5 w-0.5 rounded-full bg-brand-orange shadow-[0_0_10px_rgba(253,77,0,0.65)]" aria-hidden="true" /> : null}
-                    <span className={`transition-all duration-200 ${isActive ? 'text-brand-orange' : 'text-slate-400 group-hover:text-brand-blue/70'}`}><NavigationIcon path={item.icon} /></span>
-                    <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${isCollapsed ? 'max-w-0 opacity-0' : 'max-w-44 opacity-100'}`}>{item.label}</span>
-                    {isActive && !isCollapsed ? <span className="ml-auto size-1 rounded-full bg-brand-orange" aria-hidden="true" /> : null}
-                    {isCollapsed ? <span className="pointer-events-none absolute left-[calc(100%+0.85rem)] z-50 -translate-x-1 whitespace-nowrap rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-[11px] font-semibold text-white opacity-0 shadow-xl transition-all group-hover:translate-x-0 group-hover:opacity-100" role="tooltip">{item.label}</span> : null}
-                  </a>
-                </li>
-              )
-            })}
+          <ul className={isCollapsed ? 'space-y-2.5' : 'space-y-4'}>
+            {navigationGroups.map((group, groupIndex) => (
+              <li key={group.label}>
+                {isCollapsed ? (
+                  groupIndex > 0 ? <div className="mx-auto mb-2.5 h-px w-7 bg-slate-200/90" aria-hidden="true" /> : null
+                ) : (
+                  <p className="mb-1.5 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">{group.label}</p>
+                )}
+                <ul className="space-y-1">
+                  {group.items.map((item) => {
+                    const isActive = activeSection === item.label
+                    return (
+                      <li key={item.path}>
+                        <a
+                          className={`group relative flex w-full items-center rounded-xl py-[0.68rem] text-left text-[12.5px] font-medium transition-all duration-200 ${isCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${isActive ? 'bg-brand-blue/[0.07] text-brand-blue ring-1 ring-inset ring-brand-blue/[0.08]' : 'text-slate-500 hover:bg-slate-100/80 hover:text-brand-blue'}`}
+                          href={item.path}
+                          onClick={(event) => navigate(event, item.path)}
+                          aria-current={isActive ? 'page' : undefined}
+                        >
+                          {isActive ? <span className="absolute -left-0.5 h-5 w-0.5 rounded-full bg-brand-orange shadow-[0_0_10px_rgba(253,77,0,0.65)]" aria-hidden="true" /> : null}
+                          <span className={`transition-all duration-200 ${isActive ? 'text-brand-orange' : 'text-slate-400 group-hover:text-brand-blue/70'}`}><NavigationIcon path={item.icon} /></span>
+                          <span className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${isCollapsed ? 'max-w-0 opacity-0' : 'max-w-44 opacity-100'}`}>{item.label}</span>
+                          {isActive && !isCollapsed ? <span className="ml-auto size-1 rounded-full bg-brand-orange" aria-hidden="true" /> : null}
+                          {isCollapsed ? <span className="pointer-events-none absolute left-[calc(100%+0.85rem)] z-50 -translate-x-1 whitespace-nowrap rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-[11px] font-semibold text-white opacity-0 shadow-xl transition-all group-hover:translate-x-0 group-hover:opacity-100" role="tooltip">{item.label}</span> : null}
+                        </a>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </li>
+            ))}
           </ul>
         </nav>
 
@@ -145,7 +286,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   }
 
   return (
-    <div className="min-h-svh bg-[#f5f7fb] text-slate-900">
+    <div className="app-shell min-h-svh bg-[#f5f7fb] text-slate-900">
       <aside className={`fixed inset-y-0 left-0 z-30 hidden border-r border-slate-200/80 bg-white shadow-[10px_0_40px_rgba(0,20,76,0.05)] transition-[width] duration-300 ease-in-out lg:block ${isSidebarCollapsed ? 'w-[5.25rem]' : 'w-[17.5rem]'}`}>
         {renderSidebar(isSidebarCollapsed)}
         <button className="group absolute -right-3 top-[6.35rem] grid size-7 place-items-center rounded-full border border-slate-200/80 bg-white text-slate-400 shadow-[0_5px_18px_rgba(0,20,76,0.15)] transition-all hover:scale-110 hover:text-brand-blue" type="button" onClick={() => setIsSidebarCollapsed((current) => !current)} aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
@@ -168,6 +309,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
             <h1 className="mt-1 text-base font-bold tracking-[-0.025em] text-brand-blue sm:text-lg">{activeSection}</h1>
           </div>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
+            <GlobalSearch onNavigate={navigateTo} />
             <span className="hidden rounded-lg border border-slate-200/80 bg-white/70 px-3 py-1.5 text-[10px] font-semibold text-slate-400 md:block">{currentDate}</span>
             <span className="hidden h-7 w-px bg-slate-200 sm:block" aria-hidden="true" />
             <span className="hidden text-right sm:block"><span className="block text-[11px] font-semibold text-slate-700">{username}</span><span className="mt-0.5 flex items-center justify-end gap-1 text-[9px] font-medium text-emerald-600"><span className="size-1 rounded-full bg-emerald-500" /> Online</span></span>
@@ -179,10 +321,10 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
           {activeSection === 'Dashboard' ? children : sectionContent?.[activeSection] ?? (
             <section className="grid min-h-[calc(100svh-9rem)] place-items-center animate-[content-enter_320ms_ease-out]">
               <div className="max-w-md text-center">
-                <span className="mx-auto grid size-16 place-items-center rounded-2xl border border-slate-200 bg-white text-brand-blue shadow-[0_16px_40px_-22px_rgba(0,20,76,0.4)]"><NavigationIcon path={navigationItems.find((item) => item.label === activeSection)?.icon ?? navigationItems[0].icon} /></span>
+                <span className="mx-auto grid size-16 place-items-center rounded-2xl border border-slate-200 bg-white text-brand-blue shadow-[0_16px_40px_-22px_rgba(0,20,76,0.4)]"><NavigationIcon path={navigationItems.find((item) => item.label === activeSection)?.icon ?? defaultNavigationItem.icon} /></span>
                 <p className="mt-6 text-[9px] font-bold uppercase tracking-[0.18em] text-brand-orange">Module</p>
                 <h2 className="mt-2 text-2xl font-bold tracking-[-0.035em] text-brand-blue">{activeSection}</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-400">A focused workspace for {activeSection.toLowerCase()} is ready to be configured.</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">This page for {activeSection.toLowerCase()} is ready to set up.</p>
                 <span className="mt-5 inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-semibold text-slate-400 shadow-sm">Coming next</span>
               </div>
             </section>

@@ -5,6 +5,8 @@ import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
 
 type TaskStatus = 'To do' | 'In progress' | 'Completed'
@@ -57,8 +59,8 @@ const dueDateOptions: { value: DueDateFilter }[] = ['All', 'Overdue', 'Due today
 
 const initialTasks: Task[] = [
   { id: 1, title: 'Review material requirements', description: 'Confirm quantities needed for upcoming site deliveries.', status: 'To do', priority: 'High', assignedTo: 'Alex Morgan', assignedBy: 'Operations', createdAt: '2026-07-31', dueDate: '2026-08-03', subtasks: [] },
-  { id: 2, title: 'Prepare client quotation', description: 'Complete the pricing breakdown and commercial terms.', status: 'In progress', priority: 'Medium', assignedTo: 'Jamie Lee', assignedBy: 'Sales Team', createdAt: '2026-07-31', dueDate: '2026-08-01', subtasks: [] },
-  { id: 3, title: 'Update supplier directory', description: 'Verify contact details for active material suppliers.', status: 'Completed', priority: 'Low', assignedTo: 'Taylor Cruz', assignedBy: 'Operations', createdAt: '2026-07-30', dueDate: '2026-07-30', subtasks: [] },
+  { id: 2, title: 'Prepare client quotation', description: 'Complete the prices and payment terms.', status: 'In progress', priority: 'Medium', assignedTo: 'Jamie Lee', assignedBy: 'Sales Team', createdAt: '2026-07-31', dueDate: '2026-08-01', subtasks: [] },
+  { id: 3, title: 'Update supplier details', description: 'Check the contact details for active material suppliers.', status: 'Completed', priority: 'Low', assignedTo: 'Taylor Cruz', assignedBy: 'Operations', createdAt: '2026-07-30', dueDate: '2026-07-30', subtasks: [] },
 ]
 
 const emptyDraft = {
@@ -327,14 +329,15 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
 
 export function TasksPage({ currentUsername }: TasksPageProps) {
   const [tasks, setTasks] = useState<Task[]>(loadTasks)
-  const [activeFilter, setActiveFilter] = useState<TaskFilter>('All')
+  const [activeFilter, setActiveFilter] = usePersistentState<TaskFilter>('tasks.status', 'All')
   const [activeView, setActiveView] = useState<'Table' | 'Calendar'>('Table')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = usePersistentState('tasks.search', '')
   const [isFilterOpen, setIsFilterOpen] = useState(false)
-  const [assigneeFilter, setAssigneeFilter] = useState('All')
-  const [priorityFilter, setPriorityFilter] = useState<'All' | TaskPriority>('All')
-  const [dueDateFilter, setDueDateFilter] = useState<DueDateFilter>('All')
-  const [isAddingTask, setIsAddingTask] = useState(false)
+  const [assigneeFilter, setAssigneeFilter] = usePersistentState('tasks.assignee', 'All')
+  const [priorityFilter, setPriorityFilter] = usePersistentState<'All' | TaskPriority>('tasks.priority', 'All')
+  const [dueDateFilter, setDueDateFilter] = usePersistentState<DueDateFilter>('tasks.due-date', 'All')
+  const openNewOnLoad = new URLSearchParams(window.location.search).get('new') === '1'
+  const [isAddingTask, setIsAddingTask] = useState(openNewOnLoad)
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [isEditingTask, setIsEditingTask] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
@@ -344,6 +347,10 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const [editDraft, setEditDraft] = useState(emptyDraft)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const selectedTask = selectedTaskId === null ? null : tasks.find((task) => task.id === selectedTaskId) ?? null
+
+  useEffect(() => {
+    if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
+  }, [openNewOnLoad])
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(tasks))
@@ -372,7 +379,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const assignees = useMemo(() => Array.from(new Set(tasks.map((task) => task.assignedTo))).sort(), [tasks])
   const activeAdvancedFilterCount = Number(assigneeFilter !== 'All') + Number(priorityFilter !== 'All') + Number(dueDateFilter !== 'All')
 
-  const visibleTasks = useMemo(() => {
+  const matchingTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     const today = new Date().toISOString().slice(0, 10)
     return tasks.filter((task) => {
@@ -390,6 +397,14 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
       return matchesStatus && matchesAssignee && matchesPriority && matchesDueDate && matchesSearch
     })
   }, [activeFilter, assigneeFilter, dueDateFilter, priorityFilter, searchQuery, tasks])
+  const taskSortOptions = [
+    { value: 'due', label: 'Due date first', getValue: (task: Task) => task.dueDate || '9999-12-31', direction: 'asc' as const },
+    { value: 'newest', label: 'Newest first', getValue: (task: Task) => task.createdAt, direction: 'desc' as const },
+    { value: 'priority', label: 'Highest priority', getValue: (task: Task) => ({ High: 3, Medium: 2, Low: 1 })[task.priority], direction: 'desc' as const },
+    { value: 'assignee', label: 'Assignee A-Z', getValue: (task: Task) => task.assignedTo, direction: 'asc' as const },
+  ]
+  const taskTable = useTableView({ rows: matchingTasks, storageKey: 'tasks.table', sortOptions: taskSortOptions, pageSizeOptions: [15, 30, 60] })
+  const visibleTasks = taskTable.pageRows
 
   function clearAdvancedFilters() {
     setAssigneeFilter('All')
@@ -603,7 +618,8 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
           ) : null}
         </div>
 
-        {activeView === 'Calendar' ? <TasksCalendar tasks={visibleTasks} onTaskSelect={openTaskDetails} /> : visibleTasks.length ? (
+        {activeView === 'Calendar' ? <TasksCalendar tasks={matchingTasks} onTaskSelect={openTaskDetails} /> : matchingTasks.length ? (<>
+          <TableControls tableId="tasks-table" storageKey="tasks.table" columns={[{ index: 1, label: 'Task', required: true }, { index: 2, label: 'Assignee' }, { index: 3, label: 'Status' }, { index: 4, label: 'Priority' }, { index: 5, label: 'Due date' }, { index: 6, label: 'Assigned by' }, { index: 7, label: 'Details', required: true }]} sortKey={taskTable.sortKey} sortOptions={taskSortOptions} onSortChange={taskTable.setSortKey} page={taskTable.page} pageCount={taskTable.pageCount} pageSize={taskTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={taskTable.setPage} onPageSizeChange={taskTable.setPageSize} total={taskTable.total} />
           <div className="overflow-x-auto animate-[view-swap_340ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]">
             <table className="w-full min-w-[1120px] table-fixed border-collapse text-left">
               <caption className="sr-only">Tasks grouped by status</caption>
@@ -652,7 +668,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                 )
               })}
             </table>
-          </div>
+          </div></>
         ) : (
           <div className="grid min-h-72 place-items-center p-8 text-center animate-[view-swap_340ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]"><div><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-50 text-slate-300"><svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg></span><h3 className="mt-4 text-sm font-bold text-brand-blue">No tasks found</h3><p className="mt-1 text-xs text-slate-400">Adjust your search or add a new task.</p><button className="mt-4 rounded-xl bg-brand-blue px-4 py-2 text-[10px] font-bold text-white" type="button" onClick={() => openTaskDialog()}>Add task</button></div></div>
         )}
@@ -745,7 +761,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
             </div>
             <div className="space-y-4 px-6 py-5">
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-title">Task title</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-title" value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="What needs to be done?" autoFocus required /></div>
-              <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-description">Description <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-xs leading-5 text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="Add useful context or instructions..." /></div>
+              <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-description">Description <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-xs leading-5 text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="Add details or instructions..." /></div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-status">Status</label><AnimatedDropdown id="task-status" value={draft.status} options={statusOptions} onChange={(status) => setDraft((current) => ({ ...current, status }))} ariaLabel="Task status" /></div>
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-priority">Priority</label><AnimatedDropdown id="task-priority" value={draft.priority} options={priorityOptions} onChange={(priority) => setDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>

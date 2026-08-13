@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { usePersistentState } from '../../components/ui/usePersistentState'
 import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogEntry, type SystemLogModule } from '../../services/activityLog'
 
 type ModuleFilter = 'All modules' | SystemLogModule
@@ -45,11 +47,10 @@ function escapeCsv(value: string | number | undefined) {
 
 export function LogsPage() {
   const [logs, setLogs] = useState<SystemLogEntry[]>(loadSystemLogs)
-  const [search, setSearch] = useState('')
-  const [moduleFilter, setModuleFilter] = useState<ModuleFilter>('All modules')
-  const [actionFilter, setActionFilter] = useState<ActionFilter>('All actions')
-  const [dateFilter, setDateFilter] = useState('')
-  const [visibleCount, setVisibleCount] = useState(15)
+  const [search, setSearch] = usePersistentState('logs.search', '')
+  const [moduleFilter, setModuleFilter] = usePersistentState<ModuleFilter>('logs.module', 'All modules')
+  const [actionFilter, setActionFilter] = usePersistentState<ActionFilter>('logs.action', 'All actions')
+  const [dateFilter, setDateFilter] = usePersistentState('logs.date', '')
 
   useEffect(() => {
     const refresh = () => setLogs(loadSystemLogs())
@@ -72,7 +73,13 @@ export function LogsPage() {
     })
   }, [actionFilter, dateFilter, logs, moduleFilter, search])
 
-  useEffect(() => setVisibleCount(15), [actionFilter, dateFilter, moduleFilter, search])
+  const logSortOptions = [
+    { value: 'newest', label: 'Newest first', getValue: (entry: SystemLogEntry) => entry.timestamp, direction: 'desc' as const },
+    { value: 'oldest', label: 'Oldest first', getValue: (entry: SystemLogEntry) => entry.timestamp, direction: 'asc' as const },
+    { value: 'module', label: 'Module A-Z', getValue: (entry: SystemLogEntry) => entry.module, direction: 'asc' as const },
+    { value: 'user', label: 'User A-Z', getValue: (entry: SystemLogEntry) => entry.actor, direction: 'asc' as const },
+  ]
+  const logTable = useTableView({ rows: filteredLogs, storageKey: 'logs.table', sortOptions: logSortOptions, pageSizeOptions: [15, 30, 60] })
 
   const today = new Date().toISOString().slice(0, 10)
   const todayCount = logs.filter((entry) => entry.timestamp.slice(0, 10) === today).length
@@ -105,7 +112,7 @@ export function LogsPage() {
         <div>
           <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">System activity</p></div>
           <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Transaction logs</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Review operational activity across tasks, expenses, and supplier records.</p>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">See changes made to tasks, expenses, suppliers, and other records.</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
           {[
@@ -137,13 +144,15 @@ export function LogsPage() {
           <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4"><div><p className="text-sm font-bold text-brand-blue">Activity ledger</p><p className="mt-0.5 text-[11px] text-slate-400">Newest transactions appear first</p></div><span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">{filteredLogs.length} {filteredLogs.length === 1 ? 'event' : 'events'}</span></div>
         </div>
 
+        <TableControls tableId="logs-table" storageKey="logs.table" columns={[{ index: 1, label: 'Transaction', required: true }, { index: 2, label: 'Module' }, { index: 3, label: 'Action' }, { index: 4, label: 'User' }, { index: 5, label: 'Date and time' }, { index: 6, label: 'Value' }]} sortKey={logTable.sortKey} sortOptions={logSortOptions} onSortChange={logTable.setSortKey} page={logTable.page} pageCount={logTable.pageCount} pageSize={logTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={logTable.setPage} onPageSizeChange={logTable.setPageSize} total={logTable.total} />
+
         {filteredLogs.length ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] table-fixed text-left">
                 <thead><tr className="border-b border-slate-100 bg-slate-50/70 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400"><th className="w-[29%] px-5 py-3.5">Transaction</th><th className="w-[14%] px-4 py-3.5">Module</th><th className="w-[15%] px-4 py-3.5">Action</th><th className="w-[16%] px-4 py-3.5">User</th><th className="w-[14%] px-4 py-3.5">Date &amp; time</th><th className="w-[12%] px-4 py-3.5 text-right">Value</th></tr></thead>
                 <tbody>
-                  {filteredLogs.slice(0, visibleCount).map((entry) => {
+                  {logTable.pageRows.map((entry) => {
                     const style = moduleStyles[entry.module]
                     const timestamp = formatTimestamp(entry.timestamp)
                     return (
@@ -160,7 +169,6 @@ export function LogsPage() {
                 </tbody>
               </table>
             </div>
-            {visibleCount < filteredLogs.length ? <div className="border-t border-slate-100 bg-slate-50/40 p-4 text-center"><button className="h-10 rounded-xl border border-slate-200 bg-white px-5 text-xs font-bold text-brand-blue shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300" type="button" onClick={() => setVisibleCount((count) => count + 15)}>Load more activity</button></div> : null}
           </>
         ) : (
           <div className="grid min-h-72 place-items-center p-8 text-center"><div><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-50 text-slate-300"><svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h16v16H4zM8 9h8M8 13h8M8 17h5" /></svg></span><h3 className="mt-4 text-sm font-bold text-brand-blue">No matching transactions</h3><p className="mt-1 text-xs text-slate-400">Adjust the filters or start working in another module.</p>{activeFilterCount || search ? <button className="mt-4 rounded-xl bg-brand-blue px-4 py-2 text-xs font-bold text-white" type="button" onClick={clearFilters}>Clear filters</button> : null}</div></div>

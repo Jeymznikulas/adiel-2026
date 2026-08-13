@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
 import { SupplierProfile, type SupplierPurchaseOrder, type SupplierRegisteredItem } from './SupplierProfile'
 
@@ -283,8 +285,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   const [suppliers, setSuppliers] = useState(loadSuppliers)
   const [purchaseOrders, setPurchaseOrders] = useState<SupplierPurchaseOrder[]>(loadSupplierPurchaseOrders)
   const [registeredItems, setRegisteredItems] = useState(loadSupplierRegisteredItems)
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState<SupplierFilter>('All suppliers')
+  const [search, setSearch] = usePersistentState('suppliers.search', '')
+  const [typeFilter, setTypeFilter] = usePersistentState<SupplierFilter>('suppliers.type', 'All suppliers')
   const [draft, setDraft] = useState<SupplierDraft>(createEmptyDraft)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -343,7 +345,7 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
     return () => window.removeEventListener('storage', syncLinkedRecords)
   }, [])
 
-  const visibleSuppliers = useMemo(() => {
+  const matchingSuppliers = useMemo(() => {
     const query = search.trim().toLowerCase()
     return suppliers
       .filter((supplier) => typeFilter === 'All suppliers' || supplier.type === typeFilter)
@@ -364,6 +366,14 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
       })
       .sort((left, right) => left.name.localeCompare(right.name))
   }, [search, suppliers, typeFilter])
+  const supplierSortOptions = [
+    { value: 'name', label: 'Name A-Z', getValue: (supplier: Supplier) => supplier.name, direction: 'asc' as const },
+    { value: 'type', label: 'Type A-Z', getValue: (supplier: Supplier) => supplier.type, direction: 'asc' as const },
+    { value: 'status', label: 'Active first', getValue: (supplier: Supplier) => supplier.status === 'Active' ? 1 : 0, direction: 'desc' as const },
+    { value: 'contacts', label: 'Most contacts', getValue: (supplier: Supplier) => supplier.contacts.length, direction: 'desc' as const },
+  ]
+  const supplierTable = useTableView({ rows: matchingSuppliers, storageKey: 'suppliers.directory', sortOptions: supplierSortOptions, pageSizeOptions: [12, 24, 48] })
+  const visibleSuppliers = supplierTable.pageRows
 
   const categoryCount = new Set(suppliers.flatMap((supplier) => supplier.categories.map((category) => category.toLowerCase()))).size
   const activeSupplierCount = suppliers.filter((supplier) => supplier.status === 'Active').length
@@ -556,9 +566,9 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
       <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Supplier summary">
         <div>
-          <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Procurement network</p></div>
-          <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Supplier directory</h2>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Keep vendor contacts, capabilities, catalogs, and delivery insights together in one reliable workspace.</p>
+          <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Supplier records</p></div>
+          <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Suppliers</h2>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Keep supplier contacts, products, delivery details, and notes in one place.</p>
         </div>
         <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-3 sm:gap-3">
           {stats.map((stat) => (
@@ -569,6 +579,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
           ))}
         </div>
       </SummarySurface>
+
+      <TableControls tableId="supplier-directory" storageKey="suppliers.directory" columns={[]} sortKey={supplierTable.sortKey} sortOptions={supplierSortOptions} onSortChange={supplierTable.setSortKey} page={supplierTable.page} pageCount={supplierTable.pageCount} pageSize={supplierTable.pageSize} pageSizeOptions={[12, 24, 48]} onPageChange={supplierTable.setPage} onPageSizeChange={supplierTable.setPageSize} total={supplierTable.total} />
 
       <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]" aria-labelledby="supplier-list-heading">
         <div className="border-b border-slate-100 p-4 sm:p-5">
@@ -686,8 +698,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
             <div className="max-w-sm">
               <span className="mx-auto grid size-16 place-items-center rounded-2xl border border-slate-200 bg-slate-50 text-brand-blue shadow-[0_15px_35px_-26px_rgba(0,20,76,0.5)]"><Icon className="size-6" path={suppliers.length ? 'm21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z' : 'M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h6'} /></span>
               <p className="mt-5 text-[9px] font-bold uppercase tracking-[0.15em] text-brand-orange">{suppliers.length ? 'No matches' : 'Start your network'}</p>
-              <h3 className="mt-2 text-lg font-bold tracking-[-0.02em] text-brand-blue">{suppliers.length ? 'No suppliers found' : 'Build your supplier directory'}</h3>
-              <p className="mt-2 text-xs leading-5 text-slate-400">{suppliers.length ? 'Try a different search term or clear the active filter.' : 'Add your first supplier to keep contacts, product categories, catalogs, and performance notes close at hand.'}</p>
+              <h3 className="mt-2 text-lg font-bold tracking-[-0.02em] text-brand-blue">{suppliers.length ? 'No suppliers found' : 'Add your first supplier'}</h3>
+              <p className="mt-2 text-xs leading-5 text-slate-400">{suppliers.length ? 'Try a different search or clear the filter.' : 'Save supplier contacts, products, catalogs, and notes here.'}</p>
               {suppliers.length ? <button className="mt-5 h-10 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-500 transition hover:border-slate-300 hover:text-brand-blue" type="button" onClick={() => { setSearch(''); setTypeFilter('All suppliers') }}>Clear filters</button> : <button className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white shadow-[0_8px_20px_-12px_rgba(0,20,76,0.8)] transition hover:-translate-y-0.5" type="button" onClick={openAddDialog}><Icon className="size-3.5" path="M12 5v14M5 12h14" />Add first supplier</button>}
             </div>
           </div>
@@ -722,9 +734,9 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
               <div className="pointer-events-none absolute right-0 top-0 h-full w-64 bg-[radial-gradient(circle_at_100%_0%,rgba(0,20,76,0.06),transparent_65%)]" aria-hidden="true" />
               <div className="relative flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[9px] font-bold uppercase tracking-[0.17em] text-brand-orange">{isEditing ? 'Supplier profile' : 'New directory record'}</p>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.17em] text-brand-orange">{isEditing ? 'Supplier details' : 'New supplier'}</p>
                   <h2 className="mt-1.5 text-xl font-extrabold tracking-[-0.03em] text-brand-blue" id="supplier-form-heading">{isEditing ? 'Edit supplier' : 'Add a supplier'}</h2>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">Capture the people, capabilities, and procurement details your team needs.</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">Add the contact, product, and delivery details your team needs.</p>
                 </div>
                 <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeDialog} aria-label="Close dialog"><Icon path="M18 6 6 18M6 6l12 12" /></button>
               </div>
@@ -784,7 +796,7 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
                   </section>
 
                   <section className="border-t border-slate-100 pt-5">
-                    <div className="mb-4 flex items-center gap-3"><span className="grid size-8 place-items-center rounded-xl bg-amber-50 text-amber-700"><Icon className="size-3.5" path="M14 3h7v7M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></span><div><h3 className="text-xs font-extrabold text-brand-blue">Procurement details</h3><p className="text-[10px] text-slate-400">Reference materials and internal supplier observations</p></div></div>
+                    <div className="mb-4 flex items-center gap-3"><span className="grid size-8 place-items-center rounded-xl bg-amber-50 text-amber-700"><Icon className="size-3.5" path="M14 3h7v7M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></span><div><h3 className="text-xs font-extrabold text-brand-blue">Files and notes</h3><p className="text-[10px] text-slate-400">Supplier catalog, website, and notes for your team</p></div></div>
                     <div className="space-y-4">
                       <div><label className={labelClassName} htmlFor="supplier-catalog">Catalog link <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><div className="relative"><Icon className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-300" path="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1" /><input className={`${fieldClassName} pl-10`} id="supplier-catalog" type="url" value={draft.catalogLink} onChange={(event) => setDraft((current) => ({ ...current, catalogLink: event.target.value }))} placeholder="https://supplier.com/catalog" /></div></div>
                       <div>

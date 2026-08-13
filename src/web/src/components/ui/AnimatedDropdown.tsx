@@ -132,7 +132,7 @@ export function AnimatedDropdown<T extends string>({
   return (
     <>
       <button
-        className={`inline-flex items-center gap-2 border text-left outline-none transition-all duration-200 hover:brightness-[0.98] focus-visible:border-brand-blue/40 focus-visible:ring-4 focus-visible:ring-brand-blue/[0.06] ${fullWidth ? 'w-full' : ''} ${sizeClasses[size]} ${selectedOption.toneClassName ?? neutralTone} ${className}`}
+        className={`app-control inline-flex items-center gap-2 border text-left outline-none transition-all duration-200 hover:brightness-[0.98] focus-visible:border-brand-blue/40 focus-visible:ring-4 focus-visible:ring-brand-blue/[0.06] ${fullWidth ? 'w-full' : ''} ${sizeClasses[size]} ${selectedOption.toneClassName ?? neutralTone} ${className}`}
         type="button"
         id={id}
         ref={triggerRef}

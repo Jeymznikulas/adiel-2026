@@ -206,7 +206,7 @@ export function AnimatedDatePicker({
   return (
     <>
       <button
-        className={`inline-flex w-full items-center gap-2.5 border text-left outline-none transition-all duration-200 hover:brightness-[0.98] focus-visible:border-brand-blue/40 focus-visible:ring-4 focus-visible:ring-brand-blue/[0.06] ${sizeClasses[size]} ${toneClassName}`}
+        className={`app-control inline-flex w-full items-center gap-2.5 border text-left outline-none transition-all duration-200 hover:brightness-[0.98] focus-visible:border-brand-blue/40 focus-visible:ring-4 focus-visible:ring-brand-blue/[0.06] ${sizeClasses[size]} ${toneClassName}`}
         type="button"
         id={id}
         ref={triggerRef}
