@@ -8,26 +8,16 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
+import { navigateToBusinessSettings } from '../settings/settingsStorage'
+import { loadClientTimeline, summarizeClientTimeline, type ClientTimelineEntry, type ClientTimelineSummary } from './clientTimeline'
 
 type ClientStatus = 'Active' | 'Inactive'
-type TransactionStatus = 'Paid' | 'Pending' | 'Overdue' | 'Completed' | 'Cancelled'
-type TransactionType = 'Quotation' | 'Invoice' | 'Payment' | 'Project' | 'Service' | 'Other'
 
 type ClientContact = {
   id: string
   name: string
   email: string
   phone: string
-}
-
-type ClientTransaction = {
-  id: string
-  date: string
-  type: TransactionType
-  referenceNumber: string
-  amount: number
-  status: TransactionStatus
-  notes: string
 }
 
 type Client = {
@@ -42,21 +32,17 @@ type Client = {
   clientSince: string
   status: ClientStatus
   contacts: ClientContact[]
-  transactions: ClientTransaction[]
   createdAt: string
   updatedAt: string
 }
 
-type ClientDraft = Omit<Client, 'id' | 'transactions' | 'createdAt' | 'updatedAt'>
-type TransactionDraft = Omit<ClientTransaction, 'id' | 'amount'> & { amount: string }
+type ClientDraft = Omit<Client, 'id' | 'createdAt' | 'updatedAt'>
 type ClientsPageProps = { currentUsername: string }
 
 const storageKey = 'adiel.clients'
 const industryStorageKey = 'adiel.client-industries'
 const defaultIndustries = ['Construction', 'Retail', 'Real estate', 'Manufacturing', 'Hospitality', 'Government', 'Education', 'Healthcare', 'Professional services', 'Other']
 const statusOptions = [{ value: 'Active' as const }, { value: 'Inactive' as const }]
-const transactionStatusOptions = ['Paid', 'Pending', 'Overdue', 'Completed', 'Cancelled'].map((value) => ({ value: value as TransactionStatus }))
-const transactionTypeOptions = ['Quotation', 'Invoice', 'Payment', 'Project', 'Service', 'Other'].map((value) => ({ value: value as TransactionType }))
 const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'
 const labelClassName = 'mb-2 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500'
 
@@ -101,10 +87,6 @@ function createEmptyContact(): ClientContact {
   return { id: crypto.randomUUID(), name: '', email: '', phone: '' }
 }
 
-function createEmptyTransaction(): TransactionDraft {
-  return { date: new Date().toISOString().slice(0, 10), type: 'Invoice', referenceNumber: '', amount: '', status: 'Pending', notes: '' }
-}
-
 function loadClients(): Client[] {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
@@ -122,20 +104,6 @@ function loadClients(): Client[] {
       }) : []
       if (!contacts.length && typeof legacyClient.contactPerson === 'string') contacts.push({ id: crypto.randomUUID(), name: legacyClient.contactPerson, email: typeof legacyClient.email === 'string' ? legacyClient.email : '', phone: typeof legacyClient.phone === 'string' ? legacyClient.phone : '' })
       const primaryContact = contacts[0]
-      const transactions = Array.isArray(client.transactions) ? (client.transactions as unknown[]).flatMap((entry) => {
-        if (typeof entry !== 'object' || entry === null) return []
-        const transaction = entry as Partial<ClientTransaction>
-        if (typeof transaction.id !== 'string' || typeof transaction.date !== 'string' || typeof transaction.referenceNumber !== 'string') return []
-        return [{
-          id: transaction.id,
-          date: transaction.date,
-          type: typeof transaction.type === 'string' ? transaction.type : 'Other',
-          referenceNumber: transaction.referenceNumber,
-          amount: typeof transaction.amount === 'number' ? transaction.amount : 0,
-          status: typeof transaction.status === 'string' ? transaction.status : 'Pending',
-          notes: typeof transaction.notes === 'string' ? transaction.notes : '',
-        }]
-      }) : []
       const normalizedClient: Client = {
         id: client.id,
         photo: typeof client.photo === 'string' ? client.photo : '',
@@ -148,7 +116,6 @@ function loadClients(): Client[] {
         clientSince: typeof client.clientSince === 'string' ? client.clientSince : new Date().toISOString().slice(0, 10),
         status: client.status === 'Inactive' ? 'Inactive' : 'Active',
         contacts,
-        transactions,
         createdAt: typeof client.createdAt === 'string' ? client.createdAt : new Date().toISOString(),
         updatedAt: typeof client.updatedAt === 'string' ? client.updatedAt : new Date().toISOString(),
       }
@@ -162,66 +129,147 @@ function ClientPhoto({ client, size = 'card' }: { client: Pick<Client, 'photo' |
   return client.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><img className="size-full object-cover" src={client.photo} alt={client.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#dfe8f6)] text-lg font-extrabold text-brand-blue shadow-sm`}>{initials(client.name)}</span>
 }
 
-function statusTone(status: TransactionStatus) {
-  if (status === 'Paid' || status === 'Completed') return 'border-emerald-100 bg-emerald-50 text-emerald-700'
-  if (status === 'Pending') return 'border-amber-100 bg-amber-50 text-amber-700'
-  if (status === 'Overdue') return 'border-red-100 bg-red-50 text-red-600'
+function timelineStatusTone(status: string) {
+  if (['Approved', 'Settled', 'Received', 'Completed'].includes(status)) return 'border-emerald-100 bg-emerald-50 text-emerald-700'
+  if (['For Approval', 'Issued', 'Partially Settled', 'Pending', 'In progress'].includes(status)) return 'border-amber-100 bg-amber-50 text-amber-700'
+  if (['Rejected', 'Overdue'].includes(status)) return 'border-red-100 bg-red-50 text-red-600'
   return 'border-slate-200 bg-slate-100 text-slate-500'
 }
 
-function clientTotals(client: Client) {
-  const valid = client.transactions.filter((transaction) => transaction.status !== 'Cancelled')
-  const total = valid.reduce((sum, transaction) => sum + transaction.amount, 0)
-  const settled = valid.filter((transaction) => transaction.status === 'Paid' || transaction.status === 'Completed').reduce((sum, transaction) => sum + transaction.amount, 0)
-  const outstanding = valid.filter((transaction) => transaction.status === 'Pending' || transaction.status === 'Overdue').reduce((sum, transaction) => sum + transaction.amount, 0)
-  return { total, settled, outstanding, count: valid.length }
+function timelineKindTone(kind: ClientTimelineEntry['kind']) {
+  if (kind === 'Sale') return 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+  if (kind === 'Payment') return 'bg-cyan-50 text-cyan-700 ring-cyan-100'
+  if (kind === 'SOA') return 'bg-violet-50 text-violet-700 ring-violet-100'
+  if (kind === 'Task') return 'bg-amber-50 text-amber-700 ring-amber-100'
+  return 'bg-blue-50 text-brand-blue ring-blue-100'
 }
 
-function monthlyActivity(transactions: ClientTransaction[]) {
+function monthlyActivity(entries: ClientTimelineEntry[]) {
   const now = new Date()
   return Array.from({ length: 6 }, (_, index) => {
     const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1)
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-    const entries = transactions.filter((transaction) => transaction.date.startsWith(key) && transaction.status !== 'Cancelled')
-    return { key, label: new Intl.DateTimeFormat('en', { month: 'short' }).format(date), amount: entries.reduce((sum, transaction) => sum + transaction.amount, 0), count: entries.length }
+    const sales = entries.filter((entry) => entry.kind === 'Sale' && entry.date.startsWith(key))
+    return { key, label: new Intl.DateTimeFormat('en', { month: 'short' }).format(date), amount: sales.reduce((sum, entry) => sum + (entry.amount ?? 0), 0), count: sales.length }
   })
 }
 
 type ClientProfileProps = {
   client: Client
+  timeline: ClientTimelineEntry[]
+  summary: ClientTimelineSummary
   onBack: () => void
   onEdit: () => void
-  onAddTransaction: () => void
-  onEditTransaction: (transaction: ClientTransaction) => void
-  onDeleteTransaction: (transaction: ClientTransaction) => void
 }
 
-function ClientProfile({ client, onBack, onEdit, onAddTransaction, onEditTransaction, onDeleteTransaction }: ClientProfileProps) {
-  const totals = clientTotals(client)
-  const activity = monthlyActivity(client.transactions)
+type TimelineFilter = 'All' | 'Sales' | 'SOAs' | 'Payments' | 'Tasks'
+const timelineFilters: TimelineFilter[] = ['All', 'Sales', 'SOAs', 'Payments', 'Tasks']
+
+function ClientProfile({ client, timeline, summary, onBack, onEdit }: ClientProfileProps) {
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('All')
+  const [visibleTimelineCount, setVisibleTimelineCount] = useState(10)
+  const activity = monthlyActivity(timeline)
   const maxActivity = Math.max(...activity.map((point) => point.amount), 1)
-  const sortedTransactions = [...client.transactions].sort((left, right) => right.date.localeCompare(left.date))
+  const latestEntry = timeline[0]
+  const filteredTimeline = timeline.filter((entry) => timelineFilter === 'All'
+    || (timelineFilter === 'Sales' && (entry.kind === 'Sale' || entry.kind === 'Quotation'))
+    || (timelineFilter === 'SOAs' && entry.kind === 'SOA')
+    || (timelineFilter === 'Payments' && entry.kind === 'Payment')
+    || (timelineFilter === 'Tasks' && entry.kind === 'Task'))
+  const visibleTimeline = filteredTimeline.slice(0, visibleTimelineCount)
+
+  function selectTimelineFilter(filter: TimelineFilter) {
+    setTimelineFilter(filter)
+    setVisibleTimelineCount(10)
+  }
+
+  function timelineMonth(date: string) {
+    if (!date) return 'Undated activity'
+    return new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(new Date(`${date}T00:00:00`))
+  }
+
+  function timelineDate(date: string) {
+    if (!date) return 'No date'
+    return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric' }).format(new Date(`${date}T00:00:00`))
+  }
+
+  function timelineIcon(kind: ClientTimelineEntry['kind']) {
+    if (kind === 'Payment') return 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'
+    if (kind === 'SOA') return 'M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2'
+    if (kind === 'Task') return 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'
+    return 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6M14 2v6h6'
+  }
+
+  function openRecord(href: string) {
+    window.history.pushState(null, '', href)
+    window.dispatchEvent(new Event('adiel:navigate'))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   return <div className="space-y-4 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Client details</p></div><h2 className="mt-2 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Client profile</h2></div><div className="flex gap-2"><button className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-brand-blue shadow-sm transition hover:-translate-y-0.5 hover:border-brand-blue/20" type="button" onClick={onBack}><Icon path="m15 18-6-6 6-6" />Back to clients</button><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_9px_22px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="button" onClick={onEdit}><Icon className="size-3.5" path="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" />Edit client</button></div></div>
 
     <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_16px_48px_-34px_rgba(0,20,76,0.4)]"><div className="grid gap-5 p-5 lg:grid-cols-[1.15fr_1.35fr] lg:p-6"><div className="flex min-w-0 gap-4"><ClientPhoto client={client} size="profile" /><div className="min-w-0 pt-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-xl font-extrabold tracking-[-0.03em] text-brand-blue sm:text-2xl">{client.name}</h3><span className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-bold ${client.status === 'Active' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-500'}`}><span className={`size-1.5 rounded-full ${client.status === 'Active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{client.status}</span></div><p className="mt-2 text-sm font-semibold text-slate-500">{client.industry}</p><p className="mt-4 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">Primary contact</p><p className="mt-1 text-sm font-bold text-slate-700">{client.contactPerson}</p><p className="mt-3 text-xs font-semibold text-slate-400">Client since {formatDate(client.clientSince)}</p></div></div><div className="min-w-0"><div className="flex items-center justify-between gap-3"><p className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">Contact persons</p><span className="rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-bold text-brand-blue">{client.contacts.length}</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2">{client.contacts.map((contact) => <article className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/65 p-3 transition hover:border-brand-blue/15 hover:bg-white" key={contact.id}><div className="flex items-center gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-[10px] font-extrabold text-brand-blue shadow-sm">{initials(contact.name)}</span><p className="truncate text-sm font-bold text-slate-700">{contact.name}</p></div><div className="mt-2 space-y-1 pl-10"><a className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold text-slate-500 transition hover:text-brand-blue" href={`mailto:${contact.email}`}><Icon className="size-3 shrink-0" path="M4 4h16v16H4V4Zm0 2 8 7 8-7" /><span className="truncate">{contact.email}</span></a><a className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 transition hover:text-brand-blue" href={`tel:${contact.phone}`}><Icon className="size-3 shrink-0" path="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3" /><span>{contact.phone}</span></a></div></article>)}</div><div className="mt-2 flex gap-2.5 rounded-xl border border-slate-100 bg-slate-50/65 p-3"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-brand-orange shadow-sm"><Icon className="size-3.5" path="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0ZM12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" /></span><div><p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Address</p><p className="mt-1 text-sm font-semibold leading-5 text-slate-600">{client.address}</p></div></div></div></div></section>
 
-    <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Transaction summary">{[
-      { label: 'Lifetime value', value: formatPeso(totals.total), tone: 'text-brand-blue', dot: 'bg-brand-blue' },
-      { label: 'Settled value', value: formatPeso(totals.settled), tone: 'text-emerald-600', dot: 'bg-emerald-500' },
-      { label: 'Outstanding', value: formatPeso(totals.outstanding), tone: 'text-amber-600', dot: 'bg-amber-500' },
-      { label: 'Transactions', value: totals.count, tone: 'text-violet-600', dot: 'bg-violet-500' },
+    <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Client account summary">{[
+      { label: 'Approved sales', value: formatPeso(summary.salesValue), tone: 'text-brand-blue', dot: 'bg-brand-blue' },
+      { label: 'Payments received', value: formatPeso(summary.collected), tone: 'text-emerald-600', dot: 'bg-emerald-500' },
+      { label: 'SOA outstanding', value: formatPeso(summary.outstanding), tone: 'text-amber-600', dot: 'bg-amber-500' },
+      { label: 'Linked records', value: summary.recordCount, tone: 'text-violet-600', dot: 'bg-violet-500' },
     ].map((card, index) => <article className="rounded-2xl border border-slate-200/80 bg-white px-4 py-4 shadow-[0_10px_28px_-24px_rgba(0,20,76,0.42)] transition hover:-translate-y-0.5 animate-[po-card-enter_340ms_cubic-bezier(0.22,1,0.36,1)_both]" style={{ animationDelay: `${index * 45}ms` }} key={card.label}><div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.dot}`} /><p className="text-[11px] font-bold uppercase tracking-[0.07em] text-slate-500">{card.label}</p></div><p className={`mt-2 truncate text-xl font-extrabold tracking-[-0.035em] ${card.tone}`}>{card.value}</p></article>)}</section>
 
-    <section className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]"><article className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_36px_-30px_rgba(0,20,76,0.35)]"><div><h3 className="text-base font-extrabold text-brand-blue">Activity overview</h3><p className="mt-1 text-xs text-slate-400">Transaction value during the last six months</p></div><div className="mt-5 flex h-40 items-end gap-2 rounded-2xl bg-slate-50/70 px-3 pb-3 pt-5">{activity.map((point) => <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" key={point.key}><span className="mb-2 text-[9px] font-bold text-slate-400">{point.count || ''}</span><span className={`w-full max-w-10 rounded-t-lg transition-[height] duration-500 ${point.amount ? 'bg-[linear-gradient(180deg,#174785,#00144c)] shadow-[0_8px_18px_-12px_rgba(0,20,76,0.7)]' : 'bg-slate-200'}`} style={{ height: `${point.amount ? Math.max((point.amount / maxActivity) * 100, 10) : 4}%` }} title={`${point.label}: ${formatPeso(point.amount)}`} /><span className="mt-2 text-[10px] font-bold text-slate-400">{point.label}</span></div>)}</div></article><article className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_36px_-30px_rgba(0,20,76,0.35)]"><div className="flex items-start justify-between gap-3"><div><h3 className="text-base font-extrabold text-brand-blue">Relationship overview</h3><p className="mt-1 text-xs text-slate-400">A quick view of engagement and account health</p></div><span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-brand-blue">{client.industry}</span></div><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Latest activity</p><p className="mt-1.5 text-sm font-bold text-slate-700">{sortedTransactions[0] ? formatDate(sortedTransactions[0].date) : 'No activity yet'}</p></div><div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Account health</p><p className={`mt-1.5 text-sm font-bold ${client.status === 'Active' ? 'text-emerald-600' : 'text-slate-500'}`}>{client.status === 'Active' ? 'Active relationship' : 'Inactive account'}</p></div><div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Open transactions</p><p className="mt-1.5 text-sm font-bold text-amber-600">{client.transactions.filter((entry) => entry.status === 'Pending' || entry.status === 'Overdue').length}</p></div><div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Completed records</p><p className="mt-1.5 text-sm font-bold text-emerald-600">{client.transactions.filter((entry) => entry.status === 'Paid' || entry.status === 'Completed').length}</p></div></div></article></section>
+    <section className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+      <article className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_36px_-30px_rgba(0,20,76,0.35)]">
+        <div><h3 className="text-base font-extrabold text-brand-blue">Sales overview</h3><p className="mt-1 text-xs text-slate-400">Approved sales value during the last six months</p></div>
+        <div className="mt-5 flex h-40 items-end gap-2 rounded-2xl bg-slate-50/70 px-3 pb-3 pt-5">{activity.map((point) => <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" key={point.key}><span className="mb-2 text-[9px] font-bold text-slate-400">{point.count || ''}</span><span className={`w-full max-w-10 rounded-t-lg transition-[height] duration-500 ${point.amount ? 'bg-[linear-gradient(180deg,#174785,#00144c)] shadow-[0_8px_18px_-12px_rgba(0,20,76,0.7)]' : 'bg-slate-200'}`} style={{ height: `${point.amount ? Math.max((point.amount / maxActivity) * 100, 10) : 4}%` }} title={`${point.label}: ${formatPeso(point.amount)}`} /><span className="mt-2 text-[10px] font-bold text-slate-400">{point.label}</span></div>)}</div>
+      </article>
+      <article className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_36px_-30px_rgba(0,20,76,0.35)]">
+        <div className="flex items-start justify-between gap-3"><div><h3 className="text-base font-extrabold text-brand-blue">Relationship overview</h3><p className="mt-1 text-xs text-slate-400">Automatically calculated from linked records</p></div><span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-brand-blue">{client.industry}</span></div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Latest activity</p><p className="mt-1.5 text-sm font-bold text-slate-700">{latestEntry?.date ? formatDate(latestEntry.date) : 'No activity yet'}</p></div>
+          <div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Account health</p><p className={`mt-1.5 text-sm font-bold ${client.status === 'Active' ? 'text-emerald-600' : 'text-slate-500'}`}>{client.status === 'Active' ? 'Active relationship' : 'Inactive account'}</p></div>
+          <div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Open statements</p><p className="mt-1.5 text-sm font-bold text-amber-600">{summary.openStatements}</p></div>
+          <div className="rounded-xl bg-slate-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Payments received</p><p className="mt-1.5 text-sm font-bold text-emerald-600">{summary.paymentCount}</p></div>
+        </div>
+      </article>
+    </section>
 
-    <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_42px_-32px_rgba(0,20,76,0.38)]"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h3 className="text-base font-extrabold text-brand-blue">Transaction history</h3><p className="mt-1 text-xs text-slate-400">Quotes, invoices, payments, projects, and services</p></div><button className="group inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_9px_22px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="button" onClick={onAddTransaction}><Icon className="size-4 transition-transform group-hover:rotate-90" path="M12 5v14M5 12h14" />Add transaction</button></div>{sortedTransactions.length ? <div className="overflow-x-auto"><table className="w-full min-w-[900px] table-fixed text-left"><thead><tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500"><th className="w-[13%] px-4 py-3.5">Date</th><th className="w-[13%] px-4 py-3.5">Type</th><th className="w-[16%] px-4 py-3.5">Ref no.</th><th className="w-[15%] px-4 py-3.5 text-right">Amount</th><th className="w-[14%] px-4 py-3.5">Status</th><th className="w-[22%] px-4 py-3.5">Notes</th><th className="w-[7%] px-4 py-3.5 text-right">Action</th></tr></thead><tbody>{sortedTransactions.map((transaction, index) => <tr className="border-b border-slate-100 transition hover:bg-slate-50/70 animate-[po-row-enter_300ms_cubic-bezier(0.22,1,0.36,1)_both]" style={{ animationDelay: `${Math.min(index * 35, 175)}ms` }} key={transaction.id}><td className="px-4 py-4 text-[13px] font-semibold text-slate-600">{formatDate(transaction.date)}</td><td className="px-4 py-4 text-[13px] font-bold text-brand-blue">{transaction.type}</td><td className="px-4 py-4 font-mono text-[12px] font-bold text-slate-600">{transaction.referenceNumber}</td><td className="px-4 py-4 text-right text-[13px] font-extrabold tabular-nums text-brand-blue">{formatPeso(transaction.amount)}</td><td className="px-4 py-4"><span className={`inline-flex rounded-lg border px-2.5 py-1 text-[10px] font-bold ${statusTone(transaction.status)}`}>{transaction.status}</span></td><td className="px-4 py-4"><p className="truncate text-[12px] font-medium text-slate-500" title={transaction.notes}>{transaction.notes || '—'}</p></td><td className="px-4 py-4 text-right"><div className="flex justify-end gap-1"><button className="grid size-8 place-items-center rounded-lg text-slate-300 transition hover:bg-blue-50 hover:text-brand-blue" type="button" onClick={() => onEditTransaction(transaction)} aria-label={`Edit ${transaction.referenceNumber}`}><Icon className="size-3.5" path="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></button><button className="grid size-8 place-items-center rounded-lg text-slate-300 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => onDeleteTransaction(transaction)} aria-label={`Delete ${transaction.referenceNumber}`}><Icon className="size-3.5" path="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6" /></button></div></td></tr>)}</tbody></table></div> : <div className="grid min-h-48 place-items-center p-8 text-center"><div><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-100 text-slate-300"><Icon path="M4 2h16v20H4V2Zm4 6h8M8 12h8M8 16h5" /></span><p className="mt-3 text-sm font-bold text-brand-blue">No transactions recorded</p><p className="mt-1 text-xs text-slate-400">Add the first transaction to build this client’s history.</p></div></div>}</section>
+    <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_42px_-32px_rgba(0,20,76,0.38)]">
+      <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h3 className="text-base font-extrabold text-brand-blue">Client timeline</h3><p className="mt-1 text-[11px] text-slate-400">Automatically generated from linked system records.</p></div>
+          <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-1.5 text-[9px] font-bold text-emerald-700"><span className="size-1.5 rounded-full bg-emerald-500" />Read only · Synced</span>
+        </div>
+        {timeline.length ? <div className="mt-3 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/70 p-1" aria-label="Filter client timeline">{timelineFilters.map((filter) => {
+          const count = filter === 'All' ? timeline.length : timeline.filter((entry) => filter === 'Sales' ? entry.kind === 'Sale' || entry.kind === 'Quotation' : filter === 'SOAs' ? entry.kind === 'SOA' : filter === 'Payments' ? entry.kind === 'Payment' : entry.kind === 'Task').length
+          return <button className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[10px] font-bold transition ${timelineFilter === filter ? 'bg-white text-brand-blue shadow-sm ring-1 ring-slate-200' : 'text-slate-400 hover:bg-white/70 hover:text-brand-blue'}`} type="button" onClick={() => selectTimelineFilter(filter)} aria-pressed={timelineFilter === filter} key={filter}>{filter}<span className={`rounded-md px-1.5 py-0.5 text-[8px] ${timelineFilter === filter ? 'bg-blue-50 text-brand-blue' : 'bg-slate-200/70 text-slate-400'}`}>{count}</span></button>
+        })}</div> : null}
+      </div>
+      {visibleTimeline.length ? <>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[760px] table-fixed text-left">
+            <thead><tr className="border-b border-slate-100 bg-slate-50/55 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400"><th className="w-[13%] px-4 py-2.5 sm:px-5">Date</th><th className="w-[45%] px-4 py-2.5">Activity</th><th className="w-[24%] px-4 py-2.5">Source / status</th><th className="w-[18%] px-4 py-2.5 text-right sm:px-5">Amount</th></tr></thead>
+            <tbody>{visibleTimeline.flatMap((entry, index) => {
+              const month = timelineMonth(entry.date)
+              const showMonth = index === 0 || timelineMonth(visibleTimeline[index - 1]?.date ?? '') !== month
+              return [showMonth ? <tr className="border-t border-slate-100 bg-slate-50/35" key={`month-${month}`}><td className="px-4 py-2 text-[9px] font-extrabold uppercase tracking-[0.12em] text-slate-400 sm:px-5" colSpan={4}>{month}</td></tr> : null,
+                <tr className="group cursor-pointer border-t border-slate-100 transition hover:bg-blue-50/35 focus:bg-blue-50/35 focus:outline-none" onClick={() => openRecord(entry.href)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRecord(entry.href) } }} tabIndex={0} role="link" aria-label={`View ${entry.reference}`} key={entry.id}>
+                  <td className="px-4 py-3 text-[11px] font-bold text-slate-500 sm:px-5">{timelineDate(entry.date)}</td>
+                  <td className="px-4 py-3"><div className="flex min-w-0 items-center gap-2.5"><span className={`grid size-7 shrink-0 place-items-center rounded-lg ring-1 ${timelineKindTone(entry.kind)}`}><Icon className="size-3.5" path={timelineIcon(entry.kind)} /></span><div className="min-w-0"><p className="truncate font-mono text-[10px] font-extrabold text-brand-blue">{entry.reference}</p><p className="mt-0.5 truncate text-[11px] font-bold text-slate-700" title={entry.title}>{entry.title}</p><p className="mt-0.5 hidden truncate text-[9px] text-slate-400 lg:block" title={entry.description}>{entry.description}</p></div></div></td>
+                  <td className="px-4 py-3"><div className="flex flex-wrap items-center gap-1.5"><span className="text-[10px] font-bold text-slate-500">{entry.source}</span><span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[8px] font-bold ${timelineStatusTone(entry.status)}`}>{entry.status}</span></div></td>
+                  <td className="px-4 py-3 text-right sm:px-5"><div className="flex items-center justify-end gap-2">{entry.amount === null ? <span className="text-[10px] font-semibold text-slate-300">—</span> : <div><p className="text-xs font-extrabold tabular-nums text-brand-blue">{formatPeso(entry.amount)}</p>{entry.kind === 'SOA' && entry.balance !== null ? <p className="mt-0.5 text-[8px] font-semibold text-amber-600">Bal. {formatPeso(entry.balance)}</p> : null}</div>}<Icon className="size-3.5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-blue" path="m9 18 6-6-6-6" /></div></td>
+                </tr>]
+            })}</tbody>
+          </table>
+        </div>
+        <div className="divide-y divide-slate-100 md:hidden">{visibleTimeline.map((entry) => <button className="group block w-full px-4 py-3 text-left transition hover:bg-blue-50/35" type="button" onClick={() => openRecord(entry.href)} key={entry.id}><div className="flex items-start gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-lg ring-1 ${timelineKindTone(entry.kind)}`}><Icon className="size-3.5" path={timelineIcon(entry.kind)} /></span><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-[10px] font-extrabold text-brand-blue">{entry.reference}</p><p className="mt-1 truncate text-xs font-bold text-slate-700">{entry.title}</p></div>{entry.amount === null ? null : <p className="shrink-0 text-xs font-extrabold tabular-nums text-brand-blue">{formatPeso(entry.amount)}</p>}</div><div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="text-[9px] font-semibold text-slate-400">{timelineDate(entry.date)} · {entry.source}</span><span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[8px] font-bold ${timelineStatusTone(entry.status)}`}>{entry.status}</span></div></div><Icon className="mt-2 size-3.5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-blue" path="m9 18 6-6-6-6" /></div></button>)}</div>
+        {filteredTimeline.length > visibleTimeline.length ? <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/40 px-4 py-3 sm:px-5"><p className="text-[9px] font-semibold text-slate-400">Showing {visibleTimeline.length} of {filteredTimeline.length} records</p><button className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-[9px] font-bold text-brand-blue transition hover:border-brand-blue/20 hover:bg-blue-50" type="button" onClick={() => setVisibleTimelineCount((current) => current + 10)}>Show more</button></div> : null}
+      </> : timeline.length ? <div className="grid min-h-36 place-items-center p-6 text-center"><div><p className="text-sm font-bold text-brand-blue">No {timelineFilter.toLowerCase()} records</p><p className="mt-1 text-xs text-slate-400">Choose another filter to view linked activity.</p></div></div> : <div className="grid min-h-44 place-items-center p-8 text-center"><div className="max-w-sm"><span className="mx-auto grid size-11 place-items-center rounded-xl bg-slate-100 text-slate-300"><Icon path="M4 2h16v20H4V2Zm4 6h8M8 12h8M8 16h5" /></span><p className="mt-3 text-sm font-bold text-brand-blue">No linked activity yet</p><p className="mt-1 text-xs leading-5 text-slate-400">Records will appear automatically when this client is selected in Quotations, SOAs, Payments, or linked Tasks.</p></div></div>}
+    </section>
   </div>
 }
 
-function ClientDirectoryCard({ client, index, onEdit, onView }: { client: Client; index: number; onEdit: () => void; onView: () => void }) {
-  const totals = clientTotals(client)
+function ClientDirectoryCard({ client, summary, index, onEdit, onView }: { client: Client; summary: ClientTimelineSummary; index: number; onEdit: () => void; onView: () => void }) {
   return <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_-26px_rgba(0,20,76,0.4)] transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_20px_42px_-28px_rgba(0,20,76,0.4)] animate-[supplier-card-enter_360ms_cubic-bezier(0.22,1,0.36,1)_both] sm:p-5" style={{ animationDelay: `${Math.min(index * 45, 225)}ms` }}>
     <div className="absolute inset-x-0 top-0 h-0.5 origin-left scale-x-0 bg-[linear-gradient(90deg,#fd4d00,#ff9567)] transition-transform duration-300 group-hover:scale-x-100" aria-hidden="true" />
     <div className="flex min-w-0 items-start gap-3.5"><ClientPhoto client={client} /><div className="min-w-0 flex-1 pt-0.5"><h4 className="truncate text-[15px] font-extrabold tracking-[-0.02em] text-brand-blue">{client.name}</h4><div className="mt-2 flex flex-wrap items-center gap-2"><span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.08em] text-brand-blue">{client.industry}</span><span className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.08em] ${client.status === 'Active' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-500'}`}><span className={`size-1.5 rounded-full ${client.status === 'Active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{client.status}</span></div></div><button className="grid size-8 shrink-0 place-items-center rounded-xl border border-transparent text-slate-300 transition-all hover:border-slate-200 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={onEdit} aria-label={`Edit ${client.name}`}><Icon className="size-3.5" path="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></button></div>
@@ -230,7 +278,7 @@ function ClientDirectoryCard({ client, index, onEdit, onView }: { client: Client
 
     <div className="mt-3 border-y border-slate-100 py-3.5"><div className="flex items-center justify-between"><p className="text-[9px] font-bold uppercase tracking-[0.13em] text-slate-400">Contact persons</p><span className="rounded-lg bg-slate-100 px-2 py-1 text-[9px] font-bold text-slate-500">{client.contacts.length}</span></div><div className="mt-3 grid gap-3 sm:grid-cols-2">{client.contacts.slice(0, 2).map((contact) => <div className="min-w-0" key={contact.id}><div className="flex items-center gap-2"><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white text-[9px] font-extrabold text-brand-blue shadow-sm">{initials(contact.name)}</span><p className="truncate text-xs font-bold text-slate-700">{contact.name}</p></div><div className="mt-2 space-y-1 pl-9"><a className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-slate-400 transition hover:text-brand-blue" href={`mailto:${contact.email}`}><Icon className="size-3 shrink-0" path="M4 4h16v16H4V4Zm0 2 8 7 8-7" /><span className="truncate">{contact.email}</span></a><a className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400 transition hover:text-brand-blue" href={`tel:${contact.phone}`}><Icon className="size-3 shrink-0" path="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1" /><span className="truncate">{contact.phone}</span></a></div></div>)}{client.contacts.length > 2 ? <p className="self-center text-[10px] font-bold text-slate-400">+{client.contacts.length - 2} more contact{client.contacts.length > 3 ? 's' : ''}</p> : null}</div></div>
 
-    <div className="mt-auto flex items-end justify-between gap-3 pt-4"><div><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Transaction summary</p><div className="mt-1.5 flex items-baseline gap-2"><p className="text-sm font-extrabold text-brand-blue">{formatPeso(totals.total)}</p><span className="text-[10px] font-semibold text-slate-400">{totals.count} records</span></div></div><button className="group/profile inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-brand-blue transition hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-blue-50" type="button" onClick={onView}>View profile<Icon className="size-3.5 transition-transform group-hover/profile:translate-x-0.5" path="m9 18 6-6-6-6" /></button></div>
+    <div className="mt-auto flex items-end justify-between gap-3 pt-4"><div><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Approved sales</p><div className="mt-1.5 flex items-baseline gap-2"><p className="text-sm font-extrabold text-brand-blue">{formatPeso(summary.salesValue)}</p><span className="text-[10px] font-semibold text-slate-400">{summary.recordCount} linked records</span></div></div><button className="group/profile inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-brand-blue transition hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-blue-50" type="button" onClick={onView}>View profile<Icon className="size-3.5 transition-transform group-hover/profile:translate-x-0.5" path="m9 18 6-6-6-6" /></button></div>
   </article>
 }
 
@@ -243,9 +291,6 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
   const [isClientDialogOpen, setIsClientDialogOpen] = useState(false)
   const [editingClientId, setEditingClientId] = useState<string | null>(null)
   const [clientDraft, setClientDraft] = useState<ClientDraft>(createEmptyClient)
-  const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false)
-  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
-  const [transactionDraft, setTransactionDraft] = useState<TransactionDraft>(createEmptyTransaction)
   const [formError, setFormError] = useState('')
   const [photoError, setPhotoError] = useState('')
   const [storageError, setStorageError] = useState('')
@@ -259,6 +304,8 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
   const industries = activeIndustries
   const industryFilterOptions = [{ value: 'All industries' }, ...Array.from(new Set([...industryOptions.map((option) => option.name), ...clients.map((client) => client.industry)])).sort().map((value) => ({ value }))]
   const usedIndustries = useMemo(() => new Set(clients.map((client) => client.industry)), [clients])
+  const clientTimelines = useMemo(() => new Map(clients.map((client) => [client.id, loadClientTimeline(client)])), [clients])
+  const clientSummaries = useMemo(() => new Map(clients.map((client) => [client.id, summarizeClientTimeline(clientTimelines.get(client.id) ?? [])])), [clientTimelines, clients])
   const matchingClients = useMemo(() => {
     const query = search.trim().toLowerCase()
     return clients.filter((client) => (!query || [client.name, client.address, client.industry, ...client.contacts.flatMap((contact) => [contact.name, contact.email, contact.phone])].some((value) => value.toLowerCase().includes(query))) && (industryFilter === 'All industries' || client.industry === industryFilter))
@@ -267,7 +314,7 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
     { value: 'name', label: 'Name A-Z', getValue: (client: Client) => client.name, direction: 'asc' as const },
     { value: 'newest', label: 'Newest clients', getValue: (client: Client) => client.clientSince, direction: 'desc' as const },
     { value: 'industry', label: 'Industry A-Z', getValue: (client: Client) => client.industry, direction: 'asc' as const },
-    { value: 'value', label: 'Highest value', getValue: (client: Client) => client.transactions.reduce((total, transaction) => total + transaction.amount, 0), direction: 'desc' as const },
+    { value: 'value', label: 'Highest sales value', getValue: (client: Client) => clientSummaries.get(client.id)?.salesValue ?? 0, direction: 'desc' as const },
   ]
   const clientTable = useTableView({ rows: matchingClients, storageKey: 'clients.directory', sortOptions: clientSortOptions, pageSizeOptions: [12, 24, 48] })
   const visibleClients = clientTable.pageRows
@@ -295,11 +342,11 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
   }, [toast])
 
   useEffect(() => {
-    if (!isClientDialogOpen && !isTransactionDialogOpen) return
+    if (!isClientDialogOpen) return
     const overflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = overflow }
-  }, [isClientDialogOpen, isTransactionDialogOpen])
+  }, [isClientDialogOpen])
 
   function openProfile(client: Client) {
     window.history.pushState({ adielClientProfile: true }, '', `/clients/${client.id}`)
@@ -346,7 +393,7 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
     const previous = editingClientId ? clients.find((client) => client.id === editingClientId) : undefined
     const contacts = clientDraft.contacts.map((contact) => ({ ...contact, name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone.trim() }))
     const primaryContact = contacts[0]
-    const values: Client = { id: previous?.id ?? crypto.randomUUID(), ...clientDraft, name: clientDraft.name.trim(), contactPerson: primaryContact?.name ?? '', email: primaryContact?.email ?? '', phone: primaryContact?.phone ?? '', address: clientDraft.address.trim(), industry: clientDraft.industry.trim(), contacts, transactions: previous?.transactions ?? [], createdAt: previous?.createdAt ?? now, updatedAt: now }
+    const values: Client = { id: previous?.id ?? crypto.randomUUID(), ...clientDraft, name: clientDraft.name.trim(), contactPerson: primaryContact?.name ?? '', email: primaryContact?.email ?? '', phone: primaryContact?.phone ?? '', address: clientDraft.address.trim(), industry: clientDraft.industry.trim(), contacts, createdAt: previous?.createdAt ?? now, updatedAt: now }
     setClients((current) => previous ? current.map((client) => client.id === previous.id ? values : client) : [...current, values].sort((left, right) => left.name.localeCompare(right.name)))
     appendSystemLog({ recordId: values.id, module: 'Clients', action: previous ? 'Updated' : 'Created', entity: values.name, description: previous ? 'Client profile was updated.' : 'Client was added to the directory.', actor: currentUsername, tone: previous ? 'info' : 'success', status: values.status })
     setIsClientDialogOpen(false)
@@ -438,38 +485,7 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
     if (industryFilter === option.name) setIndustryFilter('All industries')
   }
 
-  function openAddTransaction() {
-    setEditingTransactionId(null)
-    setTransactionDraft(createEmptyTransaction())
-    setFormError('')
-    setIsTransactionDialogOpen(true)
-  }
-
-  function openEditTransaction(transaction: ClientTransaction) {
-    setEditingTransactionId(transaction.id)
-    setTransactionDraft({ date: transaction.date, type: transaction.type, referenceNumber: transaction.referenceNumber, amount: String(transaction.amount), status: transaction.status, notes: transaction.notes })
-    setFormError('')
-    setIsTransactionDialogOpen(true)
-  }
-
-  function saveTransaction(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!selectedClient || !transactionDraft.date || !transactionDraft.referenceNumber.trim() || Number(transactionDraft.amount) <= 0) { setFormError('Enter a date, reference number, and positive transaction amount.'); return }
-    const transaction: ClientTransaction = { id: editingTransactionId ?? crypto.randomUUID(), ...transactionDraft, referenceNumber: transactionDraft.referenceNumber.trim(), amount: Number(transactionDraft.amount), notes: transactionDraft.notes.trim() }
-    setClients((current) => current.map((client) => client.id === selectedClient.id ? { ...client, transactions: editingTransactionId ? client.transactions.map((entry) => entry.id === editingTransactionId ? transaction : entry) : [...client.transactions, transaction], updatedAt: new Date().toISOString() } : client))
-    appendSystemLog({ recordId: selectedClient.id, module: 'Clients', action: 'Updated', entity: selectedClient.name, description: `${editingTransactionId ? 'Updated' : 'Added'} ${transaction.type.toLowerCase()} ${transaction.referenceNumber}.`, actor: currentUsername, tone: 'info', amount: transaction.amount, status: transaction.status })
-    setIsTransactionDialogOpen(false)
-    setToast(editingTransactionId ? 'Transaction updated' : 'Transaction added')
-  }
-
-  function deleteTransaction(transaction: ClientTransaction) {
-    if (!selectedClient) return
-    setClients((current) => current.map((client) => client.id === selectedClient.id ? { ...client, transactions: client.transactions.filter((entry) => entry.id !== transaction.id), updatedAt: new Date().toISOString() } : client))
-    appendSystemLog({ recordId: selectedClient.id, module: 'Clients', action: 'Updated', entity: selectedClient.name, description: `Removed transaction ${transaction.referenceNumber}.`, actor: currentUsername, tone: 'warning', amount: transaction.amount, status: transaction.status })
-    setToast('Transaction removed')
-  }
-
-  const totalPortfolio = clients.reduce((sum, client) => sum + clientTotals(client).total, 0)
+  const totalPortfolio = clients.reduce((sum, client) => sum + (clientSummaries.get(client.id)?.salesValue ?? 0), 0)
   const stats = [
     { label: 'Total clients', value: clients.length, color: 'text-brand-blue', dot: 'bg-brand-blue' },
     { label: 'Active clients', value: clients.filter((client) => client.status === 'Active').length, color: 'text-emerald-600', dot: 'bg-emerald-500' },
@@ -477,15 +493,19 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
     { label: 'Portfolio value', value: formatPeso(totalPortfolio), color: 'text-brand-orange', dot: 'bg-brand-orange' },
   ]
 
-  if (selectedClient) return <><ClientProfile client={selectedClient} onBack={closeProfile} onEdit={() => openEditClient(selectedClient)} onAddTransaction={openAddTransaction} onEditTransaction={openEditTransaction} onDeleteTransaction={deleteTransaction} />{renderDialogs()}<SuccessToast message={toast} /></>
+  if (selectedClient) {
+    const timeline = clientTimelines.get(selectedClient.id) ?? []
+    const summary = clientSummaries.get(selectedClient.id) ?? summarizeClientTimeline(timeline)
+    return <><ClientProfile client={selectedClient} timeline={timeline} summary={summary} onBack={closeProfile} onEdit={() => openEditClient(selectedClient)} />{renderDialogs()}<SuccessToast message={toast} /></>
+  }
 
   return <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
     <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Client summary"><div><div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Client records</p></div><h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Clients</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Keep client contacts, transactions, notes, and account history in one place.</p></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">{stats.map((stat, index) => <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-[linear-gradient(145deg,rgba(248,250,252,0.9),rgba(255,255,255,0.96))] px-3 py-3.5 shadow-[0_9px_24px_-22px_rgba(0,20,76,0.48)] ring-1 ring-inset ring-white/70 transition hover:-translate-y-0.5 animate-[po-card-enter_340ms_cubic-bezier(0.22,1,0.36,1)_both] sm:min-w-32 sm:px-4" style={{ animationDelay: `${index * 45}ms` }} key={stat.label}><div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${stat.dot}`} /><p className="truncate text-[11px] font-bold uppercase tracking-[0.06em] text-slate-500">{stat.label}</p></div><p className={`mt-2 truncate text-xl font-bold tracking-[-0.04em] ${stat.color}`}>{stat.value}</p></article>)}</div></SummarySurface>
 
     <TableControls tableId="client-directory" storageKey="clients.directory" columns={[]} sortKey={clientTable.sortKey} sortOptions={clientSortOptions} onSortChange={clientTable.setSortKey} page={clientTable.page} pageCount={clientTable.pageCount} pageSize={clientTable.pageSize} pageSizeOptions={[12, 24, 48]} onPageChange={clientTable.setPage} onPageSizeChange={clientTable.setPageSize} total={clientTable.total} />
 
-    <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="border-b border-slate-100 p-4 sm:p-5"><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div><h3 className="text-base font-bold text-brand-blue">All clients</h3><p className="mt-1 text-[11px] text-slate-400">{visibleClients.length} of {clients.length} relationships</p></div><div className="ml-auto flex w-full flex-col gap-2 sm:flex-row xl:max-w-3xl"><label className="relative flex-1"><span className="sr-only">Search clients</span><Icon className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /><input className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-4 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-400 focus:border-brand-blue/30 focus:bg-white" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search client, contact, industry, or location" /></label><div className="sm:w-48"><AnimatedDropdown size="filter" value={industryFilter} options={industryFilterOptions} onChange={setIndustryFilter} ariaLabel="Filter clients by industry" /></div><button className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => setIsIndustrySettingsOpen(true)} aria-label="Open client industry settings" title="Industry settings"><Icon className="size-4" path="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></button><button className="group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5" type="button" onClick={openAddClient}><Icon className="size-4 transition-transform group-hover:rotate-90" path="M12 5v14M5 12h14" />Add client</button></div></div>{storageError ? <p className="mt-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">{storageError}</p> : null}</div>
-      {visibleClients.length ? <div className="supplier-readable-cards grid gap-3 p-4 lg:grid-cols-2 2xl:grid-cols-3 sm:p-5">{visibleClients.map((client, index) => <ClientDirectoryCard client={client} index={index} onEdit={() => openEditClient(client)} onView={() => openProfile(client)} key={client.id} />)}</div> : <div className="grid min-h-72 place-items-center p-8 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-slate-100 text-slate-300"><Icon className="size-6" path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8" /></span><h3 className="mt-4 text-lg font-bold text-brand-blue">{clients.length ? 'No matching clients' : 'Build your client directory'}</h3><p className="mt-2 text-xs text-slate-400">{clients.length ? 'Clear the filters or try a different search.' : 'Add the first client to begin tracking relationships and transactions.'}</p><button className="mt-4 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={clients.length ? () => { setSearch(''); setIndustryFilter('All industries') } : openAddClient}>{clients.length ? 'Clear filters' : 'Add first client'}</button></div></div>}
+    <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="border-b border-slate-100 p-4 sm:p-5"><div className="flex flex-col gap-3 xl:flex-row xl:items-center"><div><h3 className="text-base font-bold text-brand-blue">All clients</h3><p className="mt-1 text-[11px] text-slate-400">{visibleClients.length} of {clients.length} relationships</p></div><div className="ml-auto flex w-full flex-col gap-2 sm:flex-row xl:max-w-3xl"><label className="relative flex-1"><span className="sr-only">Search clients</span><Icon className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /><input className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-4 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-400 focus:border-brand-blue/30 focus:bg-white" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search client, contact, industry, or location" /></label><div className="sm:w-48"><AnimatedDropdown size="filter" value={industryFilter} options={industryFilterOptions} onChange={setIndustryFilter} ariaLabel="Filter clients by industry" /></div><button className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => navigateToBusinessSettings('client-industries')} aria-label="Open client industry settings" title="Industry settings"><Icon className="size-4" path="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></button><button className="group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5" type="button" onClick={openAddClient}><Icon className="size-4 transition-transform group-hover:rotate-90" path="M12 5v14M5 12h14" />Add client</button></div></div>{storageError ? <p className="mt-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">{storageError}</p> : null}</div>
+      {visibleClients.length ? <div className="supplier-readable-cards grid gap-3 p-4 lg:grid-cols-2 2xl:grid-cols-3 sm:p-5">{visibleClients.map((client, index) => <ClientDirectoryCard client={client} summary={clientSummaries.get(client.id) ?? summarizeClientTimeline([])} index={index} onEdit={() => openEditClient(client)} onView={() => openProfile(client)} key={client.id} />)}</div> : <div className="grid min-h-72 place-items-center p-8 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-slate-100 text-slate-300"><Icon className="size-6" path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8" /></span><h3 className="mt-4 text-lg font-bold text-brand-blue">{clients.length ? 'No matching clients' : 'Build your client directory'}</h3><p className="mt-2 text-xs text-slate-400">{clients.length ? 'Clear the filters or try a different search.' : 'Add the first client to begin building an automatically linked account history.'}</p><button className="mt-4 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={clients.length ? () => { setSearch(''); setIndustryFilter('All industries') } : openAddClient}>{clients.length ? 'Clear filters' : 'Add first client'}</button></div></div>}
     </section>
     {renderDialogs()}
     <SuccessToast message={toast} />
@@ -496,7 +516,6 @@ export function ClientsPage({ currentUsername }: ClientsPageProps) {
       {isIndustrySettingsOpen ? <ClientIndustrySettingsDialog options={industryOptions} usedIndustries={usedIndustries} onAdd={addIndustry} onRename={renameIndustry} onMove={moveIndustry} onToggle={toggleIndustry} onDelete={deleteIndustry} onClose={() => setIsIndustrySettingsOpen(false)} /> : null}
       {isClientDialogOpen ? <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm animate-[supplier-backdrop-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="client-form-title"><button className="absolute inset-0" type="button" onClick={() => setIsClientDialogOpen(false)} aria-label="Close client form" /><form className="relative my-6 w-full max-w-4xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)]" onSubmit={saveClient}><div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">Relationship record</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="client-form-title">{editingClientId ? 'Edit client' : 'Add a client'}</h2><p className="mt-1 text-sm text-slate-500">Contact and relationship information</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsClientDialogOpen(false)}><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="max-h-[calc(100svh-12rem)] overflow-y-auto px-6 py-5">{formError ? <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">{formError}</p> : null}<div className="grid gap-5 lg:grid-cols-[13rem_1fr]"><aside><p className={labelClassName}>Client picture</p><div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-center"><div className="flex justify-center"><ClientPhoto client={{ photo: clientDraft.photo, name: clientDraft.name || 'Client' }} size="profile" /></div><input className="sr-only" ref={photoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhotoChange} /><button className="mt-4 h-9 w-full rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-brand-blue transition hover:border-brand-blue/20" type="button" onClick={() => photoInputRef.current?.click()}>{clientDraft.photo ? 'Replace picture' : 'Upload picture'}</button>{clientDraft.photo ? <button className="mt-2 text-[10px] font-bold text-red-500" type="button" onClick={() => setClientDraft((current) => ({ ...current, photo: '' }))}>Remove picture</button> : null}{photoError ? <p className="mt-2 text-[10px] text-red-600">{photoError}</p> : <p className="mt-3 text-[10px] leading-4 text-slate-400">PNG, JPG, or WebP<br />up to 5 MB</p>}</div></aside><div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><label className={labelClassName} htmlFor="client-name">Client / company name</label><input className={fieldClassName} id="client-name" value={clientDraft.name} onChange={(event) => setClientDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Client or organization" autoFocus required /></div><div><label className={labelClassName}>Status</label><AnimatedDropdown value={clientDraft.status} options={statusOptions} onChange={(status) => setClientDraft((current) => ({ ...current, status }))} ariaLabel="Client status" /></div><div><label className={labelClassName}>Industry</label><AnimatedDropdown value={clientDraft.industry} options={industries.map((value) => ({ value }))} onChange={(industry) => setClientDraft((current) => ({ ...current, industry }))} ariaLabel="Client industry" /></div><div><label className={labelClassName}>Client since</label><AnimatedDatePicker value={clientDraft.clientSince} onChange={(clientSince) => setClientDraft((current) => ({ ...current, clientSince }))} ariaLabel="Client since date" required /></div><div className="sm:col-span-2"><label className={labelClassName} htmlFor="client-address">Address</label><textarea className="min-h-20 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-medium leading-5 text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="client-address" value={clientDraft.address} onChange={(event) => setClientDraft((current) => ({ ...current, address: event.target.value }))} placeholder="Complete client address" required /></div><section className="border-t border-slate-100 pt-4 sm:col-span-2"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-extrabold text-brand-blue">Contact persons</h3><p className="mt-1 text-[10px] text-slate-400">Add the people your team coordinates with for this client.</p></div><button className="group inline-flex h-9 items-center gap-1.5 rounded-xl border border-brand-blue/10 bg-blue-50 px-3 text-[11px] font-bold text-brand-blue transition hover:-translate-y-0.5 hover:bg-blue-100" type="button" onClick={addClientContact}><Icon className="size-3.5 transition-transform group-hover:rotate-90" path="M12 5v14M5 12h14" />Add contact</button></div><div className="mt-3 space-y-2.5">{clientDraft.contacts.map((contact, index) => <div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/55 p-3 animate-[supplier-card-enter_220ms_ease-out] sm:grid-cols-[1fr_1.15fr_0.8fr_auto]" key={contact.id}><div><label className={labelClassName} htmlFor={`client-contact-name-${contact.id}`}>Name</label><input className={fieldClassName} id={`client-contact-name-${contact.id}`} value={contact.name} onChange={(event) => updateClientContact(contact.id, 'name', event.target.value)} placeholder={`Contact ${index + 1}`} required /></div><div><label className={labelClassName} htmlFor={`client-contact-email-${contact.id}`}>Email</label><input className={fieldClassName} id={`client-contact-email-${contact.id}`} type="email" value={contact.email} onChange={(event) => updateClientContact(contact.id, 'email', event.target.value)} placeholder="name@company.com" required /></div><div><label className={labelClassName} htmlFor={`client-contact-phone-${contact.id}`}>Number</label><input className={fieldClassName} id={`client-contact-phone-${contact.id}`} value={contact.phone} onChange={(event) => updateClientContact(contact.id, 'phone', event.target.value)} placeholder="Contact number" required /></div><button className="grid size-11 place-items-center self-end rounded-xl text-slate-300 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30" type="button" onClick={() => removeClientContact(contact.id)} disabled={clientDraft.contacts.length === 1} aria-label={`Remove ${contact.name || `contact ${index + 1}`}`}><Icon path="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6" /></button></div>)}</div></section></div></div></div><div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingClientId ? deleteClientArmed ? <div className="flex items-center gap-2"><span className="text-[11px] font-bold text-red-600">Delete this client?</span><button className="h-9 rounded-xl px-3 text-xs font-bold text-slate-500" type="button" onClick={() => setDeleteClientArmed(false)}>Cancel</button><button className="h-9 rounded-xl bg-red-600 px-3 text-xs font-bold text-white" type="button" onClick={deleteClient}>Delete</button></div> : <button className="h-10 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={() => setDeleteClientArmed(true)}>Delete client</button> : <span />}<div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsClientDialogOpen(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{editingClientId ? 'Save changes' : 'Create client'}</button></div></div></form></div> : null}
 
-      {isTransactionDialogOpen && selectedClient ? <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="transaction-form-title"><button className="absolute inset-0" type="button" onClick={() => setIsTransactionDialogOpen(false)} aria-label="Close transaction form" /><form className="relative my-6 w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.38)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)]" onSubmit={saveTransaction}><div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">{selectedClient.name}</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="transaction-form-title">{editingTransactionId ? 'Edit transaction' : 'Add transaction'}</h2></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 hover:bg-slate-100" type="button" onClick={() => setIsTransactionDialogOpen(false)}><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="px-6 py-5">{formError ? <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">{formError}</p> : null}<div className="grid gap-4 sm:grid-cols-2"><div><label className={labelClassName}>Date</label><AnimatedDatePicker value={transactionDraft.date} onChange={(date) => setTransactionDraft((current) => ({ ...current, date }))} ariaLabel="Transaction date" required /></div><div><label className={labelClassName}>Type</label><AnimatedDropdown value={transactionDraft.type} options={transactionTypeOptions} onChange={(type) => setTransactionDraft((current) => ({ ...current, type }))} ariaLabel="Transaction type" /></div><div><label className={labelClassName} htmlFor="transaction-reference">Reference number</label><input className={`${fieldClassName} font-mono`} id="transaction-reference" value={transactionDraft.referenceNumber} onChange={(event) => setTransactionDraft((current) => ({ ...current, referenceNumber: event.target.value }))} placeholder="INV-2026-001" required /></div><div><label className={labelClassName} htmlFor="transaction-amount">Amount</label><input className={fieldClassName} id="transaction-amount" type="number" min="0.01" step="0.01" value={transactionDraft.amount} onChange={(event) => setTransactionDraft((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" required /></div><div><label className={labelClassName}>Status</label><AnimatedDropdown value={transactionDraft.status} options={transactionStatusOptions} onChange={(status) => setTransactionDraft((current) => ({ ...current, status }))} ariaLabel="Transaction status" /></div><div className="sm:col-span-2"><label className={labelClassName} htmlFor="transaction-notes">Notes</label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 text-brand-blue outline-none focus:border-brand-blue/40" id="transaction-notes" value={transactionDraft.notes} onChange={(event) => setTransactionDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional context or remarks" /></div></div></div><div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setIsTransactionDialogOpen(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{editingTransactionId ? 'Save changes' : 'Add transaction'}</button></div></form></div> : null}
     </>
   }
 }

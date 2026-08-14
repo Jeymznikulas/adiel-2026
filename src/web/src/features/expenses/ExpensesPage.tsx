@@ -8,6 +8,7 @@ import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
 import { appendSystemLog } from '../../services/activityLog'
+import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 type DateFilterMode = 'all' | 'month' | 'range'
 type ExpenseStatus = 'Paid' | 'Verifying' | 'To pay' | 'Overdue' | 'Cancelled'
@@ -570,7 +571,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   function openSettings(tab: ExpenseOptionKind) {
     setSettingsTab(tab)
-    setIsSettingsOpen(true)
+    setIsSettingsOpen(false)
+    navigateToBusinessSettings(tab === 'categories' ? 'expense-categories' : 'payment-methods')
   }
 
   function openExpenseDialog() {

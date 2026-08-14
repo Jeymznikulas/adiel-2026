@@ -16,6 +16,8 @@ export type DocumentDefaults = {
   pdfFooter: string
 }
 
+export type BusinessSettingsTab = 'expense-categories' | 'payment-methods' | 'client-industries' | 'item-categories'
+
 const companyProfileStorageKey = 'adiel.company-profile'
 const legacyCompanyProfileStorageKey = 'adiel.po-company-profile'
 const documentDefaultsStorageKey = 'adiel.document-defaults'
@@ -88,4 +90,10 @@ export function loadDocumentDefaults(): DocumentDefaults {
 export function saveDocumentDefaults(defaults: DocumentDefaults) {
   window.localStorage.setItem(documentDefaultsStorageKey, JSON.stringify(defaults))
   window.dispatchEvent(new Event('adiel:settings-changed'))
+}
+
+export function navigateToBusinessSettings(tab: BusinessSettingsTab) {
+  window.history.pushState(null, '', `/settings?section=options&tab=${tab}`)
+  window.dispatchEvent(new Event('adiel:navigate'))
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }

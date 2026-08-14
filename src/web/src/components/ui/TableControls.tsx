@@ -37,7 +37,7 @@ export function useTableView<T>({ rows, storageKey, sortOptions, pageSizeOptions
   return { pageRows, page: safePage, pageCount, pageSize, setPage, setPageSize, sortKey, setSortKey, total: rows.length }
 }
 
-export function TableControls({ tableId, storageKey, columns, sortKey, sortOptions, onSortChange, page, pageCount, pageSize, pageSizeOptions = [10, 20, 50], onPageChange, onPageSizeChange, total }: {
+export function TableControls({ tableId, storageKey, columns, sortKey, sortOptions, onSortChange, page, pageCount, pageSize, pageSizeOptions = [10, 20, 50], itemLabel = 'rows', onPageChange, onPageSizeChange, total }: {
   tableId: string
   storageKey: string
   columns: Array<{ index: number; label: string; required?: boolean }>
@@ -48,6 +48,7 @@ export function TableControls({ tableId, storageKey, columns, sortKey, sortOptio
   pageCount: number
   pageSize: number
   pageSizeOptions?: number[]
+  itemLabel?: string
   onPageChange: (page: number) => void
   onPageSizeChange: (size: number) => void
   total: number
@@ -77,7 +78,7 @@ export function TableControls({ tableId, storageKey, columns, sortKey, sortOptio
     <div className="flex flex-wrap items-center gap-2">
       <div className="min-w-40"><AnimatedDropdown size="compact" value={sortKey} options={sortOptions} onChange={onSortChange} ariaLabel="Sort table" /></div>
       {columns.length ? <div className="relative"><button className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-600 transition hover:border-brand-blue/15 hover:text-brand-blue" type="button" onClick={() => setIsColumnsOpen((current) => !current)} aria-expanded={isColumnsOpen}><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 5h16v14H4V5Zm5 0v14m6-14v14" /></svg>Columns</button>{isColumnsOpen ? <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-[0_18px_42px_-18px_rgba(0,20,76,0.35)] animate-[status-menu-enter_160ms_cubic-bezier(0.22,1,0.36,1)]">{columns.map((column) => <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50" type="button" onClick={() => toggleColumn(column.index)} disabled={column.required} key={column.index}><span className={`grid size-4 place-items-center rounded border ${!hiddenColumns.includes(column.index) ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-300 text-transparent'}`}><svg className="size-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="m5 12 4 4L19 6" /></svg></span>{column.label}</button>)}</div> : null}</div> : null}
-      <select className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-bold text-slate-600 outline-none" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} aria-label="Rows per page">{pageSizeOptions.map((size) => <option value={size} key={size}>{size} rows</option>)}</select>
+      <select className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-bold text-slate-600 outline-none" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} aria-label={`${itemLabel} per page`}>{pageSizeOptions.map((size) => <option value={size} key={size}>{size} {itemLabel}</option>)}</select>
       <div className="flex items-center gap-1"><button className="grid size-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-brand-blue disabled:opacity-30" type="button" onClick={() => onPageChange(page - 1)} disabled={page <= 1} aria-label="Previous page"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg></button><span className="min-w-12 text-center text-[10px] font-bold text-slate-500">{page}/{pageCount}</span><button className="grid size-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-brand-blue disabled:opacity-30" type="button" onClick={() => onPageChange(page + 1)} disabled={page >= pageCount} aria-label="Next page"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg></button></div>
     </div>
   </div>
