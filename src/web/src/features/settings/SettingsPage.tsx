@@ -3,13 +3,15 @@ import { useEffect, useState } from 'react'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { BusinessOptionsSettings } from './BusinessOptionsSettings'
-import { loadCompanyProfile, loadDocumentDefaults, saveCompanyProfile, saveDocumentDefaults, type BusinessSettingsTab, type CompanyProfile, type DocumentDefaults } from './settingsStorage'
+import { DocumentNumberingSettings } from './DocumentNumberingSettings'
+import type { LateChargePolicy, LateChargeType } from '../statement-of-account/statementOfAccountTypes'
+import { loadCompanyProfile, loadDocumentDefaults, loadLateChargePolicy, saveCompanyProfile, saveDocumentDefaults, saveLateChargePolicy, type BusinessSettingsTab, type CompanyProfile, type DocumentDefaults } from './settingsStorage'
 
-type SettingsSection = 'company' | 'documents' | 'options'
+type SettingsSection = 'company' | 'documents' | 'numbering' | 'payments' | 'options'
 
 function initialSection(): SettingsSection {
   const section = new URLSearchParams(window.location.search).get('section')
-  return section === 'documents' || section === 'options' ? section : 'company'
+  return section === 'documents' || section === 'numbering' || section === 'payments' || section === 'options' ? section : 'company'
 }
 
 function initialBusinessTab(): BusinessSettingsTab {
@@ -21,6 +23,10 @@ const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white 
 const textAreaClassName = 'min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-medium leading-6 text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'
 const labelClassName = 'mb-2 block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500'
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value)
+}
+
 function Icon({ path, className = 'size-4' }: { path: string; className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={path} /></svg>
 }
@@ -29,6 +35,7 @@ export function SettingsPage() {
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection)
   const [company, setCompany] = useState(loadCompanyProfile)
   const [documents, setDocuments] = useState(loadDocumentDefaults)
+  const [latePolicy, setLatePolicy] = useState(loadLateChargePolicy)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
 
@@ -81,16 +88,34 @@ export function SettingsPage() {
     }
   }
 
+  function savePayments(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (latePolicy.enabled && latePolicy.value <= 0) {
+      setError('Enter a default interest rate or fixed charge greater than zero, or turn late charges off.')
+      return
+    }
+    const normalized: LateChargePolicy = { ...latePolicy, graceDays: Math.max(0, Math.min(90, Math.round(latePolicy.graceDays))), value: Math.max(0, latePolicy.value) }
+    try {
+      saveLateChargePolicy(normalized)
+      setLatePolicy(normalized)
+      setToast('Payment and late-charge defaults saved')
+    } catch {
+      setError('Payment defaults could not be saved in browser storage.')
+    }
+  }
+
   return <div className="space-y-5 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
     <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Settings summary">
       <div>
         <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">System configuration</p></div>
         <h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Settings</h2>
-        <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Manage company details, document wording, and reusable entry options shared across the system.</p>
+        <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Manage company details, document defaults, numbering, and reusable entry options shared across the system.</p>
       </div>
-      <nav className="grid grid-cols-1 gap-2 sm:grid-cols-3" aria-label="Settings sections">
+      <nav className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5" aria-label="Settings sections">
         <button className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200 sm:min-w-40 ${activeSection === 'company' ? 'border-brand-blue/20 bg-blue-50/70 text-brand-blue shadow-[0_10px_24px_-20px_rgba(0,20,76,0.55)]' : 'border-slate-200/80 bg-white text-slate-500 hover:-translate-y-0.5 hover:border-brand-blue/15 hover:text-brand-blue'}`} type="button" onClick={() => selectSection('company')} aria-current={activeSection === 'company' ? 'page' : undefined}><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${activeSection === 'company' ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" /></span><span className="min-w-0"><span className="block truncate text-xs font-bold">Company</span><span className="mt-0.5 block truncate text-[9px] text-slate-400">Business identity</span></span></button>
         <button className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200 sm:min-w-40 ${activeSection === 'documents' ? 'border-brand-blue/20 bg-blue-50/70 text-brand-blue shadow-[0_10px_24px_-20px_rgba(0,20,76,0.55)]' : 'border-slate-200/80 bg-white text-slate-500 hover:-translate-y-0.5 hover:border-brand-blue/15 hover:text-brand-blue'}`} type="button" onClick={() => selectSection('documents')} aria-current={activeSection === 'documents' ? 'page' : undefined}><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${activeSection === 'documents' ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2-2V8l-6-6M14 2v6h6M8 13h8M8 17h5" /></span><span className="min-w-0"><span className="block truncate text-xs font-bold">Documents</span><span className="mt-0.5 block truncate text-[9px] text-slate-400">Export defaults</span></span></button>
+        <button className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200 sm:min-w-40 ${activeSection === 'numbering' ? 'border-brand-blue/20 bg-blue-50/70 text-brand-blue shadow-[0_10px_24px_-20px_rgba(0,20,76,0.55)]' : 'border-slate-200/80 bg-white text-slate-500 hover:-translate-y-0.5 hover:border-brand-blue/15 hover:text-brand-blue'}`} type="button" onClick={() => selectSection('numbering')} aria-current={activeSection === 'numbering' ? 'page' : undefined}><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${activeSection === 'numbering' ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path="M4 4h16v16H4V4Zm4 5h8M8 13h5" /></span><span className="min-w-0"><span className="block truncate text-xs font-bold">Numbering</span><span className="mt-0.5 block truncate text-[9px] text-slate-400">Prefixes and sequences</span></span></button>
+        <button className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200 sm:min-w-40 ${activeSection === 'payments' ? 'border-brand-blue/20 bg-blue-50/70 text-brand-blue shadow-[0_10px_24px_-20px_rgba(0,20,76,0.55)]' : 'border-slate-200/80 bg-white text-slate-500 hover:-translate-y-0.5 hover:border-brand-blue/15 hover:text-brand-blue'}`} type="button" onClick={() => selectSection('payments')} aria-current={activeSection === 'payments' ? 'page' : undefined}><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${activeSection === 'payments' ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></span><span className="min-w-0"><span className="block truncate text-xs font-bold">Payments</span><span className="mt-0.5 block truncate text-[9px] text-slate-400">Grace and charges</span></span></button>
         <button className={`flex min-w-0 items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200 sm:min-w-40 ${activeSection === 'options' ? 'border-brand-blue/20 bg-blue-50/70 text-brand-blue shadow-[0_10px_24px_-20px_rgba(0,20,76,0.55)]' : 'border-slate-200/80 bg-white text-slate-500 hover:-translate-y-0.5 hover:border-brand-blue/15 hover:text-brand-blue'}`} type="button" onClick={() => selectSection('options')} aria-current={activeSection === 'options' ? 'page' : undefined}><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${activeSection === 'options' ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path="M4 5h16v14H4V5Zm4 4h8M8 13h5" /></span><span className="min-w-0"><span className="block truncate text-xs font-bold">Options</span><span className="mt-0.5 block truncate text-[9px] text-slate-400">Reusable lists</span></span></button>
       </nav>
     </SummarySurface>
@@ -121,6 +146,13 @@ export function SettingsPage() {
         <section className="rounded-2xl border border-slate-200 bg-slate-50/45 p-4"><label className={labelClassName} htmlFor="settings-pdf-footer">PDF footer</label><textarea className={textAreaClassName} id="settings-pdf-footer" value={documents.pdfFooter} onChange={(event) => updateDocuments('pdfFooter', event.target.value)} /></section>
       </div>
       <footer className="flex justify-end border-t border-slate-100 bg-slate-50/60 px-5 py-4 sm:px-6"><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit"><Icon path="m5 12 4 4L19 6" />Save document defaults</button></footer>
+    </form> : activeSection === 'numbering' ? <DocumentNumberingSettings /> : activeSection === 'payments' ? <form className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_18px_48px_-36px_rgba(0,20,76,0.45)]" onSubmit={savePayments}>
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6"><div><h3 className="text-base font-extrabold text-brand-blue">Payments and Late Charges</h3><p className="mt-1 text-xs text-slate-400">Defaults for new SOAs. Each overdue charge remains editable before it is applied.</p></div><label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5"><input className="size-4 accent-brand-blue" type="checkbox" checked={latePolicy.enabled} onChange={(event) => setLatePolicy((current) => ({ ...current, enabled: event.target.checked }))} /><span className="text-xs font-bold text-brand-blue">Enable by default</span></label></header>
+      <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_0.8fr]">
+        <section className="rounded-2xl border border-slate-200 bg-slate-50/45 p-5"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-red-50 text-red-600"><Icon path="M12 9v4M12 17h.01M10.3 3.7 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z" /></span><div><h4 className="text-sm font-extrabold text-brand-blue">Default overdue rule</h4><p className="text-[10px] text-slate-400">Used when a new SOA is created</p></div></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><div><label className={labelClassName} htmlFor="settings-grace-days">Grace period (days)</label><input className={fieldClassName} id="settings-grace-days" type="number" min="0" max="90" step="1" value={latePolicy.graceDays} onChange={(event) => setLatePolicy((current) => ({ ...current, graceDays: Number(event.target.value) }))} /></div><div><label className={labelClassName} htmlFor="settings-late-value">{latePolicy.type === 'Percentage' ? 'Default interest rate (%)' : 'Default fixed charge (PHP)'}</label><input className={fieldClassName} id="settings-late-value" type="number" min="0" step="0.01" value={latePolicy.value} onChange={(event) => setLatePolicy((current) => ({ ...current, value: Number(event.target.value) }))} /></div></div><div className="mt-4"><span className={labelClassName}>Default charge method</span><div className="grid grid-cols-2 gap-2">{(['Percentage', 'Fixed amount'] as LateChargeType[]).map((type) => <button className={`h-11 rounded-xl border text-xs font-bold transition ${latePolicy.type === type ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-brand-blue/20 hover:text-brand-blue'}`} type="button" key={type} onClick={() => setLatePolicy((current) => ({ ...current, type }))}>{type}</button>)}</div></div></section>
+        <aside className="rounded-2xl bg-[linear-gradient(145deg,#00113f,#073078)] p-5 text-white"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/45">How it works</p><ol className="mt-5 space-y-4 text-xs leading-5 text-white/75"><li><strong className="mr-2 text-brand-orange">1.</strong>An installment becomes overdue after its due date and {latePolicy.graceDays} grace day{latePolicy.graceDays === 1 ? '' : 's'}.</li><li><strong className="mr-2 text-brand-orange">2.</strong>Collections shows the suggested {latePolicy.type === 'Percentage' ? `${latePolicy.value || 0}%` : formatCurrency(latePolicy.value)} charge.</li><li><strong className="mr-2 text-brand-orange">3.</strong>Staff review the amount and may edit, apply, or waive it with a reason.</li><li><strong className="mr-2 text-brand-orange">4.</strong>New payments settle applied late charges first, then principal.</li></ol></aside>
+      </div>
+      <footer className="flex items-center justify-between gap-4 border-t border-slate-100 bg-slate-50/60 px-5 py-4 sm:px-6"><p className="text-[10px] font-semibold text-slate-400">Existing SOAs keep their original policy.</p><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white" type="submit"><Icon path="m5 12 4 4L19 6" />Save payment defaults</button></footer>
     </form> : <BusinessOptionsSettings initialTab={initialBusinessTab()} />}
     <SuccessToast message={toast} />
   </div>

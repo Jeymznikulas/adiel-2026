@@ -41,6 +41,7 @@ const navigationGroups: readonly NavigationGroup[] = [
   {
     label: 'Finance',
     items: [
+      { label: 'Collections', path: '/collections', icon: 'M3 6h18M6 12h12M9 18h6M18 3l3 3-3 3M6 15l-3 3 3 3' },
       { label: 'Expenses', path: '/expenses', icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
     ],
   },
@@ -48,6 +49,7 @@ const navigationGroups: readonly NavigationGroup[] = [
     label: 'System',
     items: [
       { label: 'Settings', path: '/settings', icon: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.63h.01A1.7 1.7 0 0 0 10.03 3.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.64a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.37 9v.01A1.7 1.7 0 0 0 20.9 10.03H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15Z' },
+      { label: 'Archive', path: '/archive', icon: 'M3 6h18M5 6l1 15h12l1-15M9 10v7M15 10v7M8 6l1-3h6l1 3' },
       { label: 'Activity Log', path: '/logs', icon: 'M4 4h16v16H4V4Zm4 5h8M8 13h8M8 17h5' },
     ],
   },
@@ -67,6 +69,7 @@ function getInitialSidebarState() {
 
 function normalizePath(pathname: string) {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (path === '/finance') return '/collections'
   if (/^\/items\/[^/]+$/.test(path)) return path
   if (/^\/clients\/[^/]+$/.test(path)) return path
   if (/^\/suppliers\/[^/]+$/.test(path)) return path
@@ -238,6 +241,8 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
               <li key={group.label}>
                 {isCollapsed ? (
                   groupIndex > 0 ? <div className="mx-auto mb-2.5 h-px w-7 bg-slate-200/90" aria-hidden="true" /> : null
+                ) : group.label === 'Finance' ? (
+                  <a className="mb-1.5 block rounded-lg px-3 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400 transition hover:bg-slate-100 hover:text-brand-blue" href="/collections" onClick={(event) => navigate(event, '/collections')}>{group.label}</a>
                 ) : (
                   <p className="mb-1.5 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">{group.label}</p>
                 )}

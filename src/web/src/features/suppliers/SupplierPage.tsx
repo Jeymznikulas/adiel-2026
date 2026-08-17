@@ -6,6 +6,7 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
+import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
 import { SupplierProfile, type SupplierPurchaseOrder, type SupplierRegisteredItem } from './SupplierProfile'
 
 type SupplierType = 'Contractor' | 'Distributor' | 'Manufacturer' | 'Service provider' | 'Other'
@@ -345,9 +346,10 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
     return () => window.removeEventListener('storage', syncLinkedRecords)
   }, [])
 
+  const activeSuppliers = useMemo(() => suppliers.filter(isActiveRecord), [suppliers])
   const matchingSuppliers = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return suppliers
+    return activeSuppliers
       .filter((supplier) => typeFilter === 'All suppliers' || supplier.type === typeFilter)
       .filter((supplier) => {
         if (!query) return true
@@ -365,7 +367,7 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
         ].some((value) => value.toLowerCase().includes(query))
       })
       .sort((left, right) => left.name.localeCompare(right.name))
-  }, [search, suppliers, typeFilter])
+  }, [activeSuppliers, search, typeFilter])
   const supplierSortOptions = [
     { value: 'name', label: 'Name A-Z', getValue: (supplier: Supplier) => supplier.name, direction: 'asc' as const },
     { value: 'type', label: 'Type A-Z', getValue: (supplier: Supplier) => supplier.type, direction: 'asc' as const },
@@ -375,8 +377,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   const supplierTable = useTableView({ rows: matchingSuppliers, storageKey: 'suppliers.directory', sortOptions: supplierSortOptions, pageSizeOptions: [12, 24, 48] })
   const visibleSuppliers = supplierTable.pageRows
 
-  const categoryCount = new Set(suppliers.flatMap((supplier) => supplier.categories.map((category) => category.toLowerCase()))).size
-  const activeSupplierCount = suppliers.filter((supplier) => supplier.status === 'Active').length
+  const categoryCount = new Set(activeSuppliers.flatMap((supplier) => supplier.categories.map((category) => category.toLowerCase()))).size
+  const activeSupplierCount = activeSuppliers.filter((supplier) => supplier.status === 'Active').length
   const isEditing = editingId !== null
   const selectedSupplier = selectedSupplierId === null ? null : suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null
   const selectedSupplierOrders = useMemo(() => selectedSupplier ? purchaseOrders.filter((order) => order.supplierId === selectedSupplier.id) : [], [purchaseOrders, selectedSupplier])
@@ -547,14 +549,15 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   function deleteSupplier() {
     if (!editingId) return
     const supplier = suppliers.find((item) => item.id === editingId)
-    setSuppliers((current) => current.filter((supplier) => supplier.id !== editingId))
-    setToast('Supplier removed')
+    setSuppliers((current) => current.map((entry) => entry.id === editingId ? withArchived(entry, currentUsername) : entry))
+    notifyLifecycleChanged()
+    setToast('Supplier archived')
     closeDialog()
-    if (supplier) appendSystemLog({ recordId: supplier.id, module: 'Suppliers', action: 'Deleted', entity: supplier.name, description: 'Supplier was removed from the directory.', actor: currentUsername, tone: 'danger', status: supplier.status })
+    if (supplier) appendSystemLog({ recordId: supplier.id, module: 'Suppliers', action: 'Archived', entity: supplier.name, description: 'Supplier was archived with purchasing history retained.', actor: currentUsername, tone: 'info', status: supplier.status })
   }
 
   const stats = [
-    { label: 'Total suppliers', value: suppliers.length, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
+    { label: 'Total suppliers', value: activeSuppliers.length, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
     { label: 'Active', value: activeSupplierCount, dot: 'bg-emerald-500', valueColor: 'text-emerald-600' },
     { label: 'Categories', value: categoryCount, dot: 'bg-violet-500', valueColor: 'text-violet-600' },
   ]
@@ -829,11 +832,11 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
                 <div className="flex flex-col gap-3 animate-[supplier-chip-enter_160ms_ease-out] sm:flex-row sm:items-center">
                   <p className="mr-auto text-xs font-semibold text-red-700">Remove this supplier permanently?</p>
                   <button className="h-9 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-white" type="button" onClick={() => setIsConfirmingDelete(false)}>Keep supplier</button>
-                  <button className="h-9 rounded-xl bg-red-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-red-700" type="button" onClick={deleteSupplier}>Yes, remove</button>
+                  <button className="h-9 rounded-xl bg-red-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-red-700" type="button" onClick={deleteSupplier}>Archive</button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  {isEditing ? <button className="mr-auto h-9 rounded-xl px-3 text-[10px] font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => setIsConfirmingDelete(true)}>Delete supplier</button> : <span className="mr-auto hidden text-[9px] font-semibold text-slate-300 sm:block">Fields marked by the browser are required</span>}
+                  {isEditing ? <button className="mr-auto h-9 rounded-xl px-3 text-[10px] font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => setIsConfirmingDelete(true)}>Archive supplier</button> : <span className="mr-auto hidden text-[9px] font-semibold text-slate-300 sm:block">Fields marked by the browser are required</span>}
                   <button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={closeDialog}>Cancel</button>
                   <button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.75)] transition hover:-translate-y-0.5 disabled:opacity-50" type="submit" disabled={isProcessingLogo}>{isEditing ? 'Save changes' : 'Add supplier'}</button>
                 </div>

@@ -3,7 +3,19 @@ import type { PaymentFrequency, PaymentScheduleEntry } from './statementOfAccoun
 export type ScheduleProgress = PaymentScheduleEntry & {
   amountPaid: number
   balance: number
-  status: 'Paid' | 'Partially paid' | 'Overdue' | 'Upcoming'
+  status: 'Paid' | 'Partially paid' | 'Due today' | 'Grace period' | 'Overdue' | 'Upcoming'
+  graceEndDate: string
+  daysLate: number
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function dayDifference(from: string, to: string) {
+  return Math.max(0, Math.floor((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86_400_000))
 }
 
 export function addFrequency(dateValue: string, frequency: PaymentFrequency, index: number) {
@@ -30,14 +42,16 @@ export function generatePaymentSchedule(totalAmount: number, count: number, firs
   }))
 }
 
-export function getScheduleProgress(schedule: PaymentScheduleEntry[], totalPayments: number, today = new Date().toISOString().slice(0, 10)): ScheduleProgress[] {
+export function getScheduleProgress(schedule: PaymentScheduleEntry[], totalPayments: number, today = new Date().toISOString().slice(0, 10), graceDays = 0): ScheduleProgress[] {
   let unappliedPayment = Math.max(0, totalPayments)
   return [...schedule].sort((left, right) => left.dueDate.localeCompare(right.dueDate)).map((entry) => {
     const amountPaid = Math.min(entry.amount, unappliedPayment)
     unappliedPayment = Math.max(0, unappliedPayment - amountPaid)
     const balance = Math.max(0, entry.amount - amountPaid)
-    const status = balance <= 0.009 ? 'Paid' : amountPaid > 0 ? 'Partially paid' : entry.dueDate < today ? 'Overdue' : 'Upcoming'
-    return { ...entry, amountPaid, balance, status }
+    const entryGraceDays = entry.lateChargePolicy?.graceDays ?? graceDays
+    const graceEndDate = addDays(entry.dueDate, Math.max(0, Math.round(entryGraceDays)))
+    const status = balance <= 0.009 ? 'Paid' : entry.dueDate === today ? 'Due today' : entry.dueDate < today && today <= graceEndDate ? 'Grace period' : graceEndDate < today ? 'Overdue' : amountPaid > 0 ? 'Partially paid' : 'Upcoming'
+    return { ...entry, amountPaid, balance, status, graceEndDate, daysLate: entry.dueDate < today ? dayDifference(entry.dueDate, today) : 0 }
   })
 }
 

@@ -29,7 +29,7 @@ type StoredRecord = Record<string, unknown>
 function readRecords(key: string): StoredRecord[] {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(key) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((value): value is StoredRecord => typeof value === 'object' && value !== null) : []
+    return Array.isArray(parsed) ? parsed.filter((value): value is StoredRecord => typeof value === 'object' && value !== null && isActiveRecord(value)) : []
   } catch {
     return []
   }
@@ -160,3 +160,4 @@ export function summarizeClientTimeline(entries: ClientTimelineEntry[]): ClientT
     paymentCount: entries.filter((entry) => entry.kind === 'Payment').length,
   }
 }
+import { isActiveRecord } from '../../services/recordLifecycle'

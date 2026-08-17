@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogEntry } from '../../services/activityLog'
+import { isActiveRecord } from '../../services/recordLifecycle'
 
 type DashboardQuotation = {
   id: string
@@ -46,6 +47,7 @@ type DashboardStatement = {
   dueDate: string
   balance: number
   status: string
+  payments: Array<{ date: string; amount: number }>
 }
 
 type DashboardPurchaseOrder = {
@@ -75,7 +77,7 @@ function Icon({ path, className = 'size-4' }: { path: string; className?: string
 function readArray(storageKey: string): unknown[] {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    return Array.isArray(parsed) ? parsed : []
+    return Array.isArray(parsed) ? parsed.filter(isActiveRecord) : []
   } catch {
     return []
   }
@@ -124,7 +126,12 @@ function loadDashboardData(): DashboardData {
     if (typeof value !== 'object' || value === null) return []
     const entry = value as Record<string, unknown>
     if (typeof entry.id !== 'string' || typeof entry.soaNumber !== 'string') return []
-    return [{ id: entry.id, soaNumber: entry.soaNumber, clientName: typeof entry.clientName === 'string' ? entry.clientName : 'Unknown client', dueDate: typeof entry.dueDate === 'string' ? entry.dueDate.slice(0, 10) : '', balance: Number(entry.balance) || 0, status: typeof entry.status === 'string' ? entry.status : 'Draft' }]
+    const payments = Array.isArray(entry.payments) ? entry.payments.flatMap((value): Array<{ date: string; amount: number }> => {
+      if (typeof value !== 'object' || value === null) return []
+      const payment = value as Record<string, unknown>
+      return typeof payment.date === 'string' ? [{ date: payment.date.slice(0, 10), amount: Number(payment.amount) || 0 }] : []
+    }) : []
+    return [{ id: entry.id, soaNumber: entry.soaNumber, clientName: typeof entry.clientName === 'string' ? entry.clientName : 'Unknown client', dueDate: typeof entry.dueDate === 'string' ? entry.dueDate.slice(0, 10) : '', balance: Number(entry.balance) || 0, status: typeof entry.status === 'string' ? entry.status : 'Draft', payments }]
   })
 
   const purchaseOrders = readArray('adiel.purchase-orders').flatMap((value): DashboardPurchaseOrder[] => {
@@ -249,7 +256,7 @@ function BusinessTrendChart({ data }: { data: TrendPoint[] }) {
   if (!hasData) return <div className="grid min-h-52 place-items-center rounded-xl bg-slate-50/55 text-center"><div><span className="mx-auto grid size-10 place-items-center rounded-xl bg-white text-slate-300 shadow-sm"><Icon path="M3 3v18h18M7 16l4-5 3 3 6-8" /></span><p className="mt-3 text-xs font-semibold text-slate-400">The chart will appear when sales or expenses are recorded.</p></div></div>
 
   return <div className="overflow-x-auto pb-1">
-    <svg className="h-auto min-w-[620px] animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]" viewBox={`0 0 ${width} 225`} role="img" aria-label={`Sales, expenses, and gross profit for the last ${data.length} months`}>
+    <svg className="h-auto min-w-[620px] animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]" viewBox={`0 0 ${width} 225`} role="img" aria-label={`Sales, expenses, and company net profit for the last ${data.length} months`}>
       {[0, 1, 2, 3, 4].map((line) => <line x1={left} x2={width - left} y1={top + (chartHeight / 4) * line} y2={top + (chartHeight / 4) * line} stroke="#e8edf4" strokeWidth="1" strokeDasharray="4 6" key={line} />)}
       <line x1={left} x2={width - left} y1={zeroY} y2={zeroY} stroke="#cbd5e1" strokeWidth="1" />
       {data.map((point, index) => {
@@ -265,7 +272,7 @@ function BusinessTrendChart({ data }: { data: TrendPoint[] }) {
       <polyline points={profitPoints} fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       {data.map((point, index) => {
         const center = left + groupWidth * (index + 0.5)
-        return <circle cx={center} cy={y(point.profit)} r="4" fill="white" stroke={point.profit >= 0 ? '#10b981' : '#dc2626'} strokeWidth="2.5" key={`profit-${point.key}`}><title>{`${point.label} gross profit: ${formatPeso(point.profit)}`}</title></circle>
+        return <circle cx={center} cy={y(point.profit)} r="4" fill="white" stroke={point.profit >= 0 ? '#10b981' : '#dc2626'} strokeWidth="2.5" key={`profit-${point.key}`}><title>{`${point.label} company net profit: ${formatPeso(point.profit)}`}</title></circle>
       })}
     </svg>
   </div>
@@ -313,10 +320,15 @@ export function DashboardPage({ username }: { username: string }) {
     const previousSales = sumPeriod(data.quotations, (entry) => entry.dateCreated, (entry) => entry.totalAmount, previousMonth.start, comparisonEnd)
     const previousExpenses = sumPeriod(data.expenses, (entry) => entry.date, (entry) => entry.amount, previousMonth.start, comparisonEnd)
     const monthQuotations = data.quotations.filter((entry) => isInRange(entry.dateCreated, ranges.month.start, ranges.month.end))
-    const monthQuotationIds = new Set(monthQuotations.map((entry) => entry.id))
     const actualRevenue = monthQuotations.reduce((total, entry) => total + entry.subtotalAmount, 0)
-    const recordedProjectCosts = data.expenses.filter((entry) => entry.quotationId && monthQuotationIds.has(entry.quotationId)).reduce((total, entry) => total + entry.amount, 0)
-    const actualProfit = actualRevenue - recordedProjectCosts
+    const monthExpenses = data.expenses.filter((entry) => isInRange(entry.date, ranges.month.start, ranges.month.end))
+    const projectExpenses = monthExpenses.filter((entry) => entry.quotationId).reduce((total, entry) => total + entry.amount, 0)
+    const operatingExpenses = monthExpenses.filter((entry) => !entry.quotationId).reduce((total, entry) => total + entry.amount, 0)
+    const projectProfit = actualRevenue - projectExpenses
+    const companyNetProfit = projectProfit - operatingExpenses
+    const collectionsReceived = data.statements.filter((statement) => statement.status !== 'Cancelled').flatMap((statement) => statement.payments).filter((payment) => isInRange(payment.date, ranges.month.start, ranges.month.end)).reduce((total, payment) => total + payment.amount, 0)
+    const paidExpenses = monthExpenses.filter((entry) => entry.status === 'Paid').reduce((total, entry) => total + entry.amount, 0)
+    const cashPosition = collectionsReceived - paidExpenses
     const trend: TrendPoint[] = Array.from({ length: trendMonths }, (_, index) => {
       const anchor = new Date()
       anchor.setDate(1)
@@ -328,7 +340,7 @@ export function DashboardPage({ username }: { username: string }) {
         label: new Intl.DateTimeFormat('en-PH', { month: 'short' }).format(anchor),
         sales: sumPeriod(data.quotations, (entry) => entry.dateCreated, (entry) => entry.totalAmount, start, end),
         expenses: sumPeriod(data.expenses, (entry) => entry.date, (entry) => entry.amount, start, end),
-        profit: sumPeriod(data.quotations, (entry) => entry.dateCreated, (entry) => entry.estimatedProfit, start, end),
+        profit: sumPeriod(data.quotations, (entry) => entry.dateCreated, (entry) => entry.subtotalAmount, start, end) - sumPeriod(data.expenses, (entry) => entry.date, (entry) => entry.amount, start, end),
       }
     })
     const salesByClient = new Map<string, { id: string; name: string; sales: number; orders: number }>()
@@ -367,7 +379,7 @@ export function DashboardPage({ username }: { username: string }) {
     const dueSoonStatements = openStatements.filter((statement) => statement.dueDate >= today && statement.dueDate <= dueSoonEnd)
     const activePurchaseOrders = data.purchaseOrders.filter((order) => order.status !== 'Cancelled' && order.status !== 'Delivered')
     return {
-      ranges, sales, expenses, grossProfit, actualProfit, actualRevenue, recordedProjectCosts, margin, trend, topClients, urgentTasks,
+      ranges, sales, expenses, grossProfit, actualRevenue, projectExpenses, operatingExpenses, projectProfit, companyNetProfit, collectionsReceived, paidExpenses, cashPosition, margin, trend, topClients, urgentTasks,
       salesChange: changePercent(sales.month, previousSales),
       expenseChange: changePercent(expenses.month, previousExpenses),
       activeClients: data.clients.filter((client) => client.status === 'Active').length,
@@ -392,7 +404,7 @@ export function DashboardPage({ username }: { username: string }) {
       <div><div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Business overview</p></div><h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">{greeting}, {username}.</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Here is what needs your attention and how the business is performing today.</p></div>
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-3.5 sm:min-w-32 sm:px-4"><p className="text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400">Month sales</p><p className="mt-2 truncate text-lg font-extrabold text-brand-blue" title={formatPeso(dashboard.sales.month)}>{formatCompactPeso(dashboard.sales.month)}</p></article>
-        <article className="min-w-0 rounded-2xl border border-emerald-100 bg-emerald-50/60 px-3 py-3.5 sm:min-w-32 sm:px-4"><p className="text-[10px] font-bold uppercase tracking-[0.07em] text-emerald-600">Est. profit</p><p className="mt-2 truncate text-lg font-extrabold text-emerald-700" title={formatPeso(dashboard.grossProfit)}>{formatCompactPeso(dashboard.grossProfit)}</p></article>
+        <article className="min-w-0 rounded-2xl border border-emerald-100 bg-emerald-50/60 px-3 py-3.5 sm:min-w-32 sm:px-4"><p className="text-[10px] font-bold uppercase tracking-[0.07em] text-emerald-600">Company net</p><p className="mt-2 truncate text-lg font-extrabold text-emerald-700" title={formatPeso(dashboard.companyNetProfit)}>{formatCompactPeso(dashboard.companyNetProfit)}</p></article>
         <article className="min-w-0 rounded-2xl border border-red-100 bg-red-50/55 px-3 py-3.5 sm:min-w-32 sm:px-4"><p className="text-[10px] font-bold uppercase tracking-[0.07em] text-red-500">Urgent tasks</p><p className="mt-2 text-lg font-extrabold text-red-600">{dashboard.urgentTaskCount}</p></article>
       </div>
     </SummarySurface>
@@ -411,19 +423,26 @@ export function DashboardPage({ username }: { username: string }) {
 
     <section className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]" aria-labelledby="business-trend-title">
       <header className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-        <div><h3 className="text-sm font-extrabold text-brand-blue" id="business-trend-title">Business trend</h3><p className="mt-1 text-[10px] text-slate-400">Sales, expenses, and estimated gross profit over time</p></div>
-        <div className="flex flex-wrap items-center gap-4"><div className="flex items-center gap-4 text-[10px] font-bold text-slate-500"><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm bg-[#0b397f]" />Sales</span><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm bg-[#fd7a3f]" />Expenses</span><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full border-2 border-emerald-500 bg-white" />Est. profit</span></div><div className="inline-flex rounded-lg bg-slate-100 p-0.5">{([6, 12] as const).map((months) => <button className={`rounded-md px-2.5 py-1.5 text-[9px] font-bold transition ${trendMonths === months ? 'bg-white text-brand-blue shadow-sm' : 'text-slate-400 hover:text-brand-blue'}`} type="button" onClick={() => setTrendMonths(months)} aria-pressed={trendMonths === months} key={months}>{months}M</button>)}</div></div>
+        <div><h3 className="text-sm font-extrabold text-brand-blue" id="business-trend-title">Business trend</h3><p className="mt-1 text-[10px] text-slate-400">Approved revenue, all expenses, and company net profit over time</p></div>
+        <div className="flex flex-wrap items-center gap-4"><div className="flex items-center gap-4 text-[10px] font-bold text-slate-500"><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm bg-[#0b397f]" />Sales</span><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm bg-[#fd7a3f]" />Expenses</span><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full border-2 border-emerald-500 bg-white" />Company net</span></div><div className="inline-flex rounded-lg bg-slate-100 p-0.5">{([6, 12] as const).map((months) => <button className={`rounded-md px-2.5 py-1.5 text-[9px] font-bold transition ${trendMonths === months ? 'bg-white text-brand-blue shadow-sm' : 'text-slate-400 hover:text-brand-blue'}`} type="button" onClick={() => setTrendMonths(months)} aria-pressed={trendMonths === months} key={months}>{months}M</button>)}</div></div>
       </header>
       <div className="px-4 pb-3 pt-4 sm:px-5"><BusinessTrendChart data={dashboard.trend} /></div>
     </section>
 
     <section className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]" aria-label="Profit and client metrics">
-      <article className="rounded-[1.4rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)] animate-[po-card-enter_300ms_50ms_cubic-bezier(0.22,1,0.36,1)_both]"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">This month</p><h3 className="mt-1 text-sm font-extrabold text-brand-blue">Profit overview</h3></div><span className="grid size-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><Icon path="M4 18 10 12l4 4 6-8M20 8h-5M20 8v5" /></span></div><div className="mt-5 grid grid-cols-2 gap-3"><div><p className="text-[10px] font-bold uppercase text-slate-400">Estimated</p><p className={`mt-2 text-xl font-extrabold tracking-[-0.04em] ${dashboard.grossProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatCompactPeso(dashboard.grossProfit)}</p></div><div className="border-l border-slate-100 pl-3"><p className="text-[10px] font-bold uppercase text-cyan-600">Actual</p><p className={`mt-2 text-xl font-extrabold tracking-[-0.04em] ${dashboard.actualProfit >= 0 ? 'text-cyan-700' : 'text-red-600'}`}>{formatCompactPeso(dashboard.actualProfit)}</p></div></div><div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50/75 px-3.5 py-3"><span className="text-xs font-semibold text-slate-500">Recorded project costs</span><strong className="text-sm text-violet-700">{formatCompactPeso(dashboard.recordedProjectCosts)}</strong></div><p className="mt-3 text-[10px] leading-4 text-slate-400">Actual profit uses expenses linked to this month’s approved quotations.</p></article>
+      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)] animate-[po-card-enter_300ms_50ms_cubic-bezier(0.22,1,0.36,1)_both]">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">This month</p><h3 className="mt-1 text-sm font-extrabold text-brand-blue">Company profit</h3></div><span className="grid size-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><Icon path="M4 18 10 12l4 4 6-8M20 8h-5M20 8v5" /></span></header>
+        <div className="p-5"><div className="grid grid-cols-2 gap-3"><div><p className="text-[9px] font-bold uppercase text-slate-400">Approved revenue</p><p className="mt-2 text-lg font-extrabold text-brand-blue">{formatCompactPeso(dashboard.actualRevenue)}</p></div><div className="border-l border-slate-100 pl-3"><p className="text-[9px] font-bold uppercase text-emerald-600">Company net profit</p><p className={`mt-2 text-lg font-extrabold ${dashboard.companyNetProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatCompactPeso(dashboard.companyNetProfit)}</p></div></div>
+          <div className="mt-4 space-y-2 rounded-xl bg-slate-50/75 p-3.5 text-xs"><div className="flex items-center justify-between"><span className="font-semibold text-slate-500">Project expenses</span><strong className="text-violet-700">−{formatCompactPeso(dashboard.projectExpenses)}</strong></div><div className="flex items-center justify-between"><span className="font-semibold text-slate-500">Operating expenses</span><strong className="text-orange-700">−{formatCompactPeso(dashboard.operatingExpenses)}</strong></div><div className="flex items-center justify-between border-t border-slate-200 pt-2"><span className="font-bold text-brand-blue">Project profit</span><strong className={dashboard.projectProfit >= 0 ? 'text-cyan-700' : 'text-red-600'}>{formatCompactPeso(dashboard.projectProfit)}</strong></div></div>
+          <div className="mt-3 grid grid-cols-2 gap-2"><div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3"><p className="text-[9px] font-bold uppercase text-blue-600">Collections</p><p className="mt-1 text-sm font-extrabold text-brand-blue">{formatCompactPeso(dashboard.collectionsReceived)}</p></div><div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-[9px] font-bold uppercase text-slate-400">Cash position</p><p className={`mt-1 text-sm font-extrabold ${dashboard.cashPosition >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{formatCompactPeso(dashboard.cashPosition)}</p></div></div>
+          <p className="mt-3 text-[10px] leading-4 text-slate-400">Net profit subtracts every non-cancelled expense once. Cash position subtracts only paid expenses.</p>
+        </div>
+      </article>
       <article className="rounded-[1.4rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)] animate-[po-card-enter_300ms_90ms_cubic-bezier(0.22,1,0.36,1)_both]"><div className="flex items-start justify-between gap-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Client metrics</h3><p className="mt-1 text-[10px] text-slate-400">Current client health and growth</p></div><button className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-bold text-brand-blue transition hover:bg-blue-50" type="button" onClick={() => navigate('/clients')}>View clients<Icon className="size-3" path="m9 18 6-6-6-6" /></button></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-slate-50/75 p-3"><p className="text-[10px] font-bold uppercase text-slate-400">Total</p><p className="mt-2 text-xl font-extrabold text-brand-blue">{data.clients.length}</p></div><div className="rounded-xl bg-emerald-50/60 p-3"><p className="text-[10px] font-bold uppercase text-emerald-600">Active</p><p className="mt-2 text-xl font-extrabold text-emerald-700">{dashboard.activeClients}</p></div><div className="rounded-xl bg-blue-50/65 p-3"><p className="text-[10px] font-bold uppercase text-sky-600">New this month</p><p className="mt-2 text-xl font-extrabold text-sky-700">{dashboard.newClients}</p></div><div className="rounded-xl bg-violet-50/65 p-3"><p className="text-[10px] font-bold uppercase text-violet-600">Repeat</p><p className="mt-2 text-xl font-extrabold text-violet-700">{dashboard.repeatClients}</p></div></div></article>
     </section>
 
     <section className="grid gap-4 lg:grid-cols-2" aria-label="Payments and purchase order alerts">
-      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-amber-50 text-amber-700"><Icon path="M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2" /></span><div><h3 className="text-sm font-extrabold text-brand-blue">Outstanding payments</h3><p className="mt-0.5 text-[10px] text-slate-400">Client balances that still need collection</p></div></div><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/statement-of-account')}>View statements</button></header><div className="grid grid-cols-3"><div className="px-4 py-4"><p className="text-[10px] font-bold uppercase text-slate-400">Outstanding</p><p className="mt-2 text-lg font-extrabold text-brand-blue">{formatCompactPeso(dashboard.outstandingBalance)}</p></div><div className="border-l border-slate-100 px-4 py-4"><p className="text-[10px] font-bold uppercase text-red-500">Overdue</p><p className="mt-2 text-lg font-extrabold text-red-600">{formatCompactPeso(dashboard.overdueBalance)}</p><p className="mt-1 text-[9px] text-slate-400">{dashboard.overdueStatementCount} statements</p></div><div className="border-l border-slate-100 px-4 py-4"><p className="text-[10px] font-bold uppercase text-amber-600">Due in 7 days</p><p className="mt-2 text-lg font-extrabold text-amber-700">{dashboard.dueSoonStatementCount}</p></div></div></article>
+      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-amber-50 text-amber-700"><Icon path="M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2" /></span><div><h3 className="text-sm font-extrabold text-brand-blue">Outstanding payments</h3><p className="mt-0.5 text-[10px] text-slate-400">Client balances that still need collection</p></div></div><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/collections')}>Open collections</button></header><div className="grid grid-cols-3"><div className="px-4 py-4"><p className="text-[10px] font-bold uppercase text-slate-400">Outstanding</p><p className="mt-2 text-lg font-extrabold text-brand-blue">{formatCompactPeso(dashboard.outstandingBalance)}</p></div><div className="border-l border-slate-100 px-4 py-4"><p className="text-[10px] font-bold uppercase text-red-500">Overdue</p><p className="mt-2 text-lg font-extrabold text-red-600">{formatCompactPeso(dashboard.overdueBalance)}</p><p className="mt-1 text-[9px] text-slate-400">{dashboard.overdueStatementCount} statements</p></div><div className="border-l border-slate-100 px-4 py-4"><p className="text-[10px] font-bold uppercase text-amber-600">Due in 7 days</p><p className="mt-2 text-lg font-extrabold text-amber-700">{dashboard.dueSoonStatementCount}</p></div></div></article>
       <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-violet-50 text-violet-700"><Icon path="M3 3h2l2.4 12.3a2 2 0 0 0 2 1.7h7.7a2 2 0 0 0 2-1.6L21 7H6" /></span><div><h3 className="text-sm font-extrabold text-brand-blue">Purchase-order alerts</h3><p className="mt-0.5 text-[10px] text-slate-400">Orders that need delivery, payment, or sending</p></div></div><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/purchase-orders')}>View orders</button></header><div className="grid grid-cols-3"><div className="px-4 py-4"><p className="text-[10px] font-bold uppercase text-violet-600">Waiting delivery</p><p className="mt-2 text-lg font-extrabold text-violet-700">{dashboard.waitingDeliveryCount}</p></div><div className="border-l border-slate-100 px-4 py-4"><p className="text-[10px] font-bold uppercase text-amber-600">For payment</p><p className="mt-2 text-lg font-extrabold text-amber-700">{dashboard.forPaymentCount}</p><p className="mt-1 truncate text-[9px] text-slate-400">{formatCompactPeso(dashboard.forPaymentTotal)}</p></div><div className="border-l border-slate-100 px-4 py-4"><p className="text-[10px] font-bold uppercase text-slate-400">Not yet sent</p><p className="mt-2 text-lg font-extrabold text-slate-600">{dashboard.notSentCount}</p></div></div></article>
     </section>
 

@@ -11,6 +11,7 @@ type QuotationProfileProps = {
   onBack: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
+  onArchive: () => void;
   onStatusChange: (status: QuotationStatus) => void;
 };
 
@@ -29,6 +30,11 @@ const statusOptions = [
     value: "Rejected" as const,
     dotClassName: "bg-red-500",
     toneClassName: "border-red-100 bg-red-50 text-red-600",
+  },
+  {
+    value: "Voided" as const,
+    dotClassName: "bg-slate-500",
+    toneClassName: "border-slate-200 bg-slate-100 text-slate-600",
   },
 ];
 
@@ -99,6 +105,7 @@ function statusTone(status: QuotationStatus) {
   if (status === "Approved")
     return "border-emerald-100 bg-emerald-50 text-emerald-700";
   if (status === "Rejected") return "border-red-100 bg-red-50 text-red-600";
+  if (status === "Voided") return "border-slate-200 bg-slate-100 text-slate-600";
   return "border-amber-100 bg-amber-50 text-amber-700";
 }
 
@@ -107,6 +114,7 @@ export function QuotationProfile({
   onBack,
   onEdit,
   onDuplicate,
+  onArchive,
   onStatusChange,
 }: QuotationProfileProps) {
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -196,6 +204,14 @@ export function QuotationProfile({
                 path="M8 8h11v11H8V8ZM5 16H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"
               />
               Duplicate
+            </button>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+              type="button"
+              onClick={onArchive}
+            >
+              <Icon className="size-3.5" path="M3 6h18M5 6l1 15h12l1-15M9 10v7M15 10v7" />
+              Archive
             </button>
             <button
               className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-12px_rgba(0,20,76,0.75)] transition hover:-translate-y-0.5"

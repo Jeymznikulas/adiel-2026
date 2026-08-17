@@ -2,17 +2,20 @@ import type { FormEvent } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
+import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
+import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { PurchaseOrderClientPickerDialog } from '../purchase-orders/PurchaseOrderClientPickerDialog'
+import { nextDocumentNumber } from '../settings/settingsStorage'
 import { QuotationPricingDialog, type QuotationFeeDraft } from './QuotationPricingDialog'
 import { QuotationPricingFormSectionPortal } from './QuotationPricingFormSection'
 import { QuotationProfile } from './QuotationProfile'
 import { QuotationApprovalDialog } from './QuotationApprovalDialog'
 
-export type QuotationStatus = 'For Approval' | 'Approved' | 'Rejected'
+export type QuotationStatus = 'For Approval' | 'Approved' | 'Rejected' | 'Voided'
 type ClientContact = { id: string; name: string; email: string; phone: string }
 type Client = { id: string; name: string; status: string; address: string; industry: string; contactPerson: string; email: string; phone: string; contacts: ClientContact[] }
 type CatalogVariant = { id: string; name: string; value: string; photo: string; productCode: string; unitOfMeasure: string; status: string; rawCost: number; sellingPrice: number }
@@ -69,13 +72,14 @@ type QuotationViewMode = 'table' | 'cards'
 const storageKey = 'adiel.quotations'
 const clientStorageKey = 'adiel.clients'
 const itemStorageKey = 'adiel.items'
-const statuses: QuotationStatus[] = ['For Approval', 'Approved', 'Rejected']
+const statuses: QuotationStatus[] = ['For Approval', 'Approved', 'Rejected', 'Voided']
 const statusOptions = [
   { value: 'For Approval' as const, dotClassName: 'bg-amber-500', toneClassName: 'border-amber-100 bg-amber-50 text-amber-700' },
   { value: 'Approved' as const, dotClassName: 'bg-emerald-500', toneClassName: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
   { value: 'Rejected' as const, dotClassName: 'bg-red-500', toneClassName: 'border-red-100 bg-red-50 text-red-600' },
+  { value: 'Voided' as const, dotClassName: 'bg-slate-500', toneClassName: 'border-slate-200 bg-slate-100 text-slate-600' },
 ]
-const formStatusOptions = statusOptions.filter((option) => option.value !== 'Approved')
+const formStatusOptions = statusOptions.filter((option) => option.value !== 'Approved' && option.value !== 'Voided')
 const filterOptions = [{ value: 'All statuses' }, ...statusOptions]
 const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'
 const labelClassName = 'mb-2 block text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500'
@@ -99,6 +103,7 @@ function formatDate(value: string) {
 function statusTone(status: QuotationStatus) {
   if (status === 'Approved') return 'border-emerald-100 bg-emerald-50 text-emerald-700'
   if (status === 'Rejected') return 'border-red-100 bg-red-50 text-red-600'
+  if (status === 'Voided') return 'border-slate-200 bg-slate-100 text-slate-600'
   return 'border-amber-100 bg-amber-50 text-amber-700'
 }
 
@@ -202,9 +207,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     const values = emptyDraft()
     if (!openNewOnLoad) return values
     const client = clients.find((entry) => entry.status === 'Active') ?? clients[0]
-    const prefix = `QT-${values.dateCreated.slice(0, 4)}-`
-    const highest = quotations.filter((quotation) => quotation.quotationNumber.startsWith(prefix)).reduce((maximum, quotation) => Math.max(maximum, Number(quotation.quotationNumber.slice(prefix.length)) || 0), 0)
-    values.quotationNumber = `${prefix}${String(highest + 1).padStart(3, '0')}`
+    values.quotationNumber = nextDocumentNumber('quotation', quotations.map((quotation) => quotation.quotationNumber), values.dateCreated)
     if (client) {
       values.clientId = client.id
       values.clientName = client.name
@@ -228,6 +231,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const [storageError, setStorageError] = useState('')
   const [toast, setToast] = useState('')
   const [approvalReviewId, setApprovalReviewId] = useState<string | null>(null)
+  const [pendingVoidQuotationId, setPendingVoidQuotationId] = useState<string | null>(null)
 
   useEffect(() => {
     if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
@@ -281,7 +285,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const selectedQuotation = selectedId ? quotations.find((quotation) => quotation.id === selectedId) : undefined
   const encodedRouteQuotationId = /^\/quotations\/([^/]+)$/.exec(currentPath)?.[1]
   const routeQuotationId = encodedRouteQuotationId ? decodeURIComponent(encodedRouteQuotationId) : undefined
-  const routeQuotation = routeQuotationId ? quotations.find((quotation) => quotation.id === routeQuotationId) : undefined
+  const routeQuotation = routeQuotationId ? quotations.find((quotation) => quotation.id === routeQuotationId && isActiveRecord(quotation)) : undefined
   const approvalQuotation = approvalReviewId ? quotations.find((quotation) => quotation.id === approvalReviewId) : undefined
   const contactOptions = selectedClient?.contacts.length ? selectedClient.contacts.map((contact) => ({ value: contact.id, label: `${contact.name}${contact.phone ? ` · ${contact.phone}` : ''}` })) : [{ value: '', label: 'No contacts registered' }]
   const availableItems = useMemo(() => catalogItems.filter((item) => item.status === 'Active'), [catalogItems])
@@ -295,11 +299,13 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const draftTotal = draftSubtotal + draftVatAmount + draftOtherChargesTotal
   const draftProfit = draft.items.reduce((total, line) => total + (Number(line.quantity) || 0) * ((Number(line.unitPrice) || 0) - line.unitCost), 0)
   const draftMargin = draftSubtotal ? (draftProfit / draftSubtotal) * 100 : 0
+  const activeQuotations = useMemo(() => quotations.filter(isActiveRecord), [quotations])
+  const financialQuotations = useMemo(() => activeQuotations.filter((quotation) => quotation.status !== 'Voided'), [activeQuotations])
 
   const filteredQuotations = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return quotations.filter((quotation) => (!query || [quotation.quotationNumber, quotation.clientName, quotation.contactPerson, quotation.subject, quotation.projectLocation].some((value) => value.toLowerCase().includes(query))) && (statusFilter === 'All statuses' || quotation.status === statusFilter)).sort((left, right) => right.dateCreated.localeCompare(left.dateCreated) || right.createdAt.localeCompare(left.createdAt))
-  }, [quotations, search, statusFilter])
+    return activeQuotations.filter((quotation) => (!query || [quotation.quotationNumber, quotation.clientName, quotation.contactPerson, quotation.subject, quotation.projectLocation].some((value) => value.toLowerCase().includes(query))) && (statusFilter === 'All statuses' || quotation.status === statusFilter)).sort((left, right) => right.dateCreated.localeCompare(left.dateCreated) || right.createdAt.localeCompare(left.createdAt))
+  }, [activeQuotations, search, statusFilter])
   const quotationSortOptions = [
     { value: 'newest', label: 'Newest first', getValue: (quotation: Quotation) => quotation.dateCreated, direction: 'desc' as const },
     { value: 'oldest', label: 'Oldest first', getValue: (quotation: Quotation) => quotation.dateCreated, direction: 'asc' as const },
@@ -311,10 +317,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const visibleQuotations = quotationTable.pageRows
 
   function makeQuotationNumber(date: string) {
-    const year = date.slice(0, 4)
-    const prefix = `QT-${year}-`
-    const highest = quotations.filter((quotation) => quotation.quotationNumber.startsWith(prefix)).reduce((maximum, quotation) => Math.max(maximum, Number(quotation.quotationNumber.slice(prefix.length)) || 0), 0)
-    return `${prefix}${String(highest + 1).padStart(3, '0')}`
+    return nextDocumentNumber('quotation', quotations.map((quotation) => quotation.quotationNumber), date)
   }
 
   function openNewQuotation() {
@@ -421,6 +424,14 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
 
   function updateStatus(quotation: Quotation, status: QuotationStatus) {
     if (quotation.status === status) return
+    if (status === 'Voided') {
+      if (quotation.status === 'Approved' && quotationIsInActiveStatement(quotation.id)) {
+        setToast('This quotation cannot be voided while it is included in an active SOA.')
+        return
+      }
+      setPendingVoidQuotationId(quotation.id)
+      return
+    }
     if (status === 'Approved') {
       setApprovalReviewId(quotation.id)
       return
@@ -441,6 +452,25 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Status changed', entity: quotation.quotationNumber, description: `All ${quotation.items.length} quotation items were verified, approved, and locked for ${quotation.clientName}.`, actor: currentUsername, tone: 'success', amount: quotation.totalAmount, status: 'Approved' })
     setApprovalReviewId(null)
     setToast('Quotation approved and locked successfully.')
+  }
+
+  function confirmVoidQuotation(reason: string, archiveAfterVoiding: boolean) {
+    const quotation = quotations.find((entry) => entry.id === pendingVoidQuotationId)
+    if (!quotation) return
+    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Voided' as const, approvedAt: '', updatedAt: new Date().toISOString() }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Voided' as const, approvedAt: '', updatedAt: new Date().toISOString() }, currentUsername, reason)) : entry))
+    notifyLifecycleChanged()
+    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Voided', entity: quotation.quotationNumber, description: `Quotation voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, tone: 'danger', amount: quotation.totalAmount, status: 'Voided' })
+    setPendingVoidQuotationId(null)
+    setToast(archiveAfterVoiding ? 'Quotation voided and archived' : 'Quotation voided')
+    if (archiveAfterVoiding) backToQuotationRegister()
+  }
+
+  function archiveQuotation(quotation: Quotation) {
+    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? withArchived(entry, currentUsername) : entry))
+    notifyLifecycleChanged()
+    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Archived', entity: quotation.quotationNumber, description: 'Quotation was archived with its client and SOA links retained.', actor: currentUsername, tone: 'info', amount: quotation.totalAmount, status: quotation.status })
+    setToast('Quotation archived')
+    backToQuotationRegister()
   }
 
   function removeUnapprovedQuotationItems(quotation: Quotation, itemIds: string[]) {
@@ -467,15 +497,15 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const approvalDialog = approvalQuotation ? <QuotationApprovalDialog quotation={approvalQuotation} onClose={() => setApprovalReviewId(null)} onEdit={() => { setApprovalReviewId(null); openEditQuotation(approvalQuotation) }} onApprove={() => approveQuotation(approvalQuotation)} onRemoveItems={(itemIds) => removeUnapprovedQuotationItems(approvalQuotation, itemIds)} /> : null
 
   const summaryCards = [
-    { label: 'Total quotations', value: quotations.length, color: 'text-brand-blue', dot: 'bg-brand-blue' },
-    { label: 'Quoted amount', value: formatPeso(quotations.reduce((total, quotation) => total + quotation.totalAmount, 0)), color: 'text-violet-700', dot: 'bg-violet-500' },
-    { label: 'Est. net profit', value: formatPeso(quotations.reduce((total, quotation) => total + quotation.estimatedProfit, 0)), color: 'text-emerald-700', dot: 'bg-emerald-500' },
-    { label: 'Approved', value: quotations.filter((quotation) => quotation.status === 'Approved').length, color: 'text-emerald-600', dot: 'bg-emerald-500' },
-    { label: 'For approval', value: quotations.filter((quotation) => quotation.status === 'For Approval').length, color: 'text-amber-600', dot: 'bg-amber-500' },
-    { label: 'Rejected', value: quotations.filter((quotation) => quotation.status === 'Rejected').length, color: 'text-red-600', dot: 'bg-red-500' },
+    { label: 'Total quotations', value: activeQuotations.length, color: 'text-brand-blue', dot: 'bg-brand-blue' },
+    { label: 'Quoted amount', value: formatPeso(financialQuotations.reduce((total, quotation) => total + quotation.totalAmount, 0)), color: 'text-violet-700', dot: 'bg-violet-500' },
+    { label: 'Est. net profit', value: formatPeso(financialQuotations.reduce((total, quotation) => total + quotation.estimatedProfit, 0)), color: 'text-emerald-700', dot: 'bg-emerald-500' },
+    { label: 'Approved', value: activeQuotations.filter((quotation) => quotation.status === 'Approved').length, color: 'text-emerald-600', dot: 'bg-emerald-500' },
+    { label: 'For approval', value: activeQuotations.filter((quotation) => quotation.status === 'For Approval').length, color: 'text-amber-600', dot: 'bg-amber-500' },
+    { label: 'Rejected', value: activeQuotations.filter((quotation) => quotation.status === 'Rejected').length, color: 'text-red-600', dot: 'bg-red-500' },
   ]
 
-  if (routeQuotation && !isFormOpen) return <><QuotationProfile quotation={routeQuotation} onBack={backToQuotationRegister} onEdit={() => openEditQuotation(routeQuotation)} onDuplicate={() => duplicateQuotation(routeQuotation)} onStatusChange={(status) => updateStatus(routeQuotation, status)} />{approvalDialog}<SuccessToast message={toast} /></>
+  if (routeQuotation && !isFormOpen) return <><QuotationProfile quotation={routeQuotation} onBack={backToQuotationRegister} onEdit={() => openEditQuotation(routeQuotation)} onDuplicate={() => duplicateQuotation(routeQuotation)} onArchive={() => archiveQuotation(routeQuotation)} onStatusChange={(status) => updateStatus(routeQuotation, status)} />{approvalDialog}{pendingVoidQuotationId ? <VoidRecordDialog recordLabel="quotation" onClose={() => setPendingVoidQuotationId(null)} onConfirm={confirmVoidQuotation} /> : null}<SuccessToast message={toast} /></>
 
   if (routeQuotationId && !routeQuotation && !isFormOpen) return <div className="grid min-h-[28rem] place-items-center text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-slate-100 text-slate-300"><Icon className="size-6" path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6" /></span><h2 className="mt-4 text-xl font-extrabold text-brand-blue">Quotation not found</h2><p className="mt-2 text-xs text-slate-400">This quotation may no longer be available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={backToQuotationRegister}>Back to quotations</button></div></div>
 

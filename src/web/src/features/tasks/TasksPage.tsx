@@ -8,6 +8,7 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
+import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
 
 type TaskStatus = 'To do' | 'In progress' | 'Completed'
 type TaskPriority = 'Low' | 'Medium' | 'High'
@@ -347,6 +348,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const [editDraft, setEditDraft] = useState(emptyDraft)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const selectedTask = selectedTaskId === null ? null : tasks.find((task) => task.id === selectedTaskId) ?? null
+  const activeTasks = useMemo(() => tasks.filter(isActiveRecord), [tasks])
 
   useEffect(() => {
     if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
@@ -369,20 +371,20 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     const nearDueCutoffKey = dateKey(nearDueCutoff)
 
     return {
-      total: tasks.length,
-      inProgress: tasks.filter((task) => task.status === 'In progress').length,
-      completed: tasks.filter((task) => task.status === 'Completed').length,
-      nearDue: tasks.filter((task) => task.status !== 'Completed' && task.dueDate >= todayKey && task.dueDate <= nearDueCutoffKey).length,
+      total: activeTasks.length,
+      inProgress: activeTasks.filter((task) => task.status === 'In progress').length,
+      completed: activeTasks.filter((task) => task.status === 'Completed').length,
+      nearDue: activeTasks.filter((task) => task.status !== 'Completed' && task.dueDate >= todayKey && task.dueDate <= nearDueCutoffKey).length,
     }
-  }, [tasks])
+  }, [activeTasks])
 
-  const assignees = useMemo(() => Array.from(new Set(tasks.map((task) => task.assignedTo))).sort(), [tasks])
+  const assignees = useMemo(() => Array.from(new Set(activeTasks.map((task) => task.assignedTo))).sort(), [activeTasks])
   const activeAdvancedFilterCount = Number(assigneeFilter !== 'All') + Number(priorityFilter !== 'All') + Number(dueDateFilter !== 'All')
 
   const matchingTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     const today = new Date().toISOString().slice(0, 10)
-    return tasks.filter((task) => {
+    return tasks.filter(isActiveRecord).filter((task) => {
       const matchesStatus = activeFilter === 'All' || task.status === activeFilter
       const matchesAssignee = assigneeFilter === 'All' || task.assignedTo === assigneeFilter
       const matchesPriority = priorityFilter === 'All' || task.priority === priorityFilter
@@ -465,10 +467,11 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
 
   function removeSelectedTask() {
     if (!selectedTask) return
-    setTasks((current) => current.filter((task) => task.id !== selectedTask.id))
-    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Deleted', entity: selectedTask.title, description: 'Task and its related subtasks were removed.', actor: currentUsername, tone: 'danger', status: selectedTask.status })
+    setTasks((current) => current.map((task) => task.id === selectedTask.id ? withArchived(task, currentUsername) : task))
+    notifyLifecycleChanged()
+    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Archived', entity: selectedTask.title, description: 'Task and its subtasks were archived.', actor: currentUsername, tone: 'info', status: selectedTask.status })
     closeTaskDetails()
-    setToast('Task deleted successfully')
+    setToast('Task archived successfully')
   }
 
   function addTask(event: FormEvent<HTMLFormElement>) {
@@ -738,9 +741,9 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                 </div>
                 <div className="border-t border-slate-100 bg-slate-50/60 px-6 py-4">
                   {isConfirmingDelete ? (
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-bold text-red-700">Remove this task?</p><p className="mt-0.5 text-xs text-red-500">This action cannot be undone.</p></div><div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="h-10 rounded-xl bg-red-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-red-700" type="button" onClick={removeSelectedTask}>Remove task</button></div></div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-bold text-red-700">Archive this task?</p><p className="mt-0.5 text-xs text-red-500">You can restore it from Archive.</p></div><div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="h-10 rounded-xl bg-red-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-red-700" type="button" onClick={removeSelectedTask}>Archive task</button></div></div>
                   ) : (
-                    <div className="flex items-center justify-between gap-3"><button className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50 hover:text-red-700" type="button" onClick={() => setIsConfirmingDelete(true)}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" /></svg>Remove</button><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-brand-blue px-5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5" type="button" onClick={beginEditingTask}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg>Edit task</button></div>
+                    <div className="flex items-center justify-between gap-3"><button className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50 hover:text-red-700" type="button" onClick={() => setIsConfirmingDelete(true)}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" /></svg>Archive</button><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-brand-blue px-5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5" type="button" onClick={beginEditingTask}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg>Edit task</button></div>
                   )}
                 </div>
               </>

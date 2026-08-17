@@ -4,7 +4,7 @@ import type {
   StatementOfAccount,
   StatementStatus,
 } from "../../features/statement-of-account/statementOfAccountTypes";
-import { loadDocumentDefaults, type CompanyProfile } from "../../features/settings/settingsStorage";
+import { loadDocumentDefaults, loadLateChargePolicy, type CompanyProfile } from "../../features/settings/settingsStorage";
 
 export type PurchaseOrderPdfLine = {
   id: string;
@@ -539,6 +539,7 @@ export async function createQuotationPdfBlob(
   profile: CompanyProfile,
 ) {
   const defaults = loadDocumentDefaults();
+  const latePolicy = loadLateChargePolicy();
   const context = await createDocument(
     "QUOTATION",
     quotation.quotationNumber,
@@ -598,6 +599,7 @@ export async function createQuotationPdfBlob(
     [
       quotation.leadTime && `Lead time: ${quotation.leadTime}.`,
       defaults.quotationTerms,
+      latePolicy.enabled && `Late-payment condition: overdue balances may incur ${latePolicy.type === "Percentage" ? `${latePolicy.value}% interest` : `${money(latePolicy.value)} as a fixed charge`} after ${latePolicy.graceDays} grace day${latePolicy.graceDays === 1 ? "" : "s"}. The applicable schedule is confirmed in the Statement of Account.`,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -766,6 +768,15 @@ export async function createStatementOfAccountPdfBlob(
       charge: quotation.totalAmount,
       payment: 0,
     })),
+    ...statement.lateCharges
+      .filter((lateCharge) => lateCharge.status === "Applied")
+      .map((lateCharge) => ({
+        date: lateCharge.appliedDate,
+        reference: "LATE CHARGE",
+        description: statement.paymentSchedule.find((entry) => entry.id === lateCharge.scheduleEntryId)?.label || "Overdue payment",
+        charge: lateCharge.amount,
+        payment: 0,
+      })),
     ...statement.payments.map((payment) => ({
       date: payment.date,
       reference: payment.referenceNumber || "PAYMENT",
@@ -812,15 +823,18 @@ export async function createStatementOfAccountPdfBlob(
     table(
       context,
       [
-        { label: "Installment", width: 86 },
-        { label: "Due date", width: 48 },
-        { label: "Amount", width: 48, align: "right" },
+        { label: "Installment", width: 50 },
+        { label: "Due date", width: 32 },
+        { label: "Amount", width: 36, align: "right" },
+        { label: "Late-payment rule", width: 64 },
       ],
-      statement.paymentSchedule.map((entry) => [
-        entry.label,
-        date(entry.dueDate),
-        money(entry.amount),
-      ]),
+      statement.paymentSchedule.map((entry) => {
+        const policy = entry.lateChargePolicy ?? statement.lateChargePolicy;
+        const rule = !policy.enabled
+          ? "No late charge"
+          : `${policy.type === "Percentage" ? `${policy.value}% interest` : `${money(policy.value)} fixed`} after ${policy.graceDays} grace day${policy.graceDays === 1 ? "" : "s"}`;
+        return [entry.label, date(entry.dueDate), money(entry.amount), rule];
+      }),
     );
   }
   note(

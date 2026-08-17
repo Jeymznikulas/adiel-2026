@@ -15,6 +15,7 @@ type StatementOfAccountProfileProps = {
   onBack: () => void;
   onEdit: () => void;
   onRecordPayment: () => void;
+  onArchive: () => void;
   onStatusChange: (status: StatementStatus) => void;
 };
 
@@ -102,6 +103,7 @@ export function StatementOfAccountProfile({
   onBack,
   onEdit,
   onRecordPayment,
+  onArchive,
   onStatusChange,
 }: StatementOfAccountProfileProps) {
   const [isExportOpen, setIsExportOpen] = useState(false);
@@ -185,6 +187,14 @@ export function StatementOfAccountProfile({
                 path="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"
               />
               Edit statement
+            </button>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+              type="button"
+              onClick={onArchive}
+            >
+              <Icon className="size-3.5" path="M3 6h18M5 6l1 15h12l1-15M9 10v7M15 10v7" />
+              Archive
             </button>
             <button
               className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-12px_rgba(0,20,76,0.75)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"

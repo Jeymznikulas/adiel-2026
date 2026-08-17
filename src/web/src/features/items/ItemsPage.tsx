@@ -7,6 +7,7 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
+import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 type ItemStatus = 'Active' | 'Inactive' | 'Discontinued'
@@ -533,7 +534,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   }, [isCategoryManagerOpen, isDialogOpen, isVariantDialogOpen, priceAdjustmentTarget])
 
   const supplierMap = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers])
-  const detailItem = detailItemId ? items.find((item) => item.id === detailItemId) : undefined
+  const detailItem = detailItemId ? items.find((item) => item.id === detailItemId && isActiveRecord(item)) : undefined
   const detailSupplier = detailItem ? supplierMap.get(detailItem.supplierId) : undefined
   const variantParentItem = variantParentItemId ? items.find((item) => item.id === variantParentItemId) : undefined
   const variantDialogIndex = editingVariantId ? Math.max(0, variantParentItem?.variants.findIndex((variant) => variant.id === editingVariantId) ?? 0) : variantParentItem?.variants.length ?? 0
@@ -544,6 +545,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     return options.length ? options : [{ value: '', label: 'No suppliers available' }]
   }, [draft.supplierId, suppliers])
   const categoryOptions = [{ value: 'All categories' }, ...categories.map((value) => ({ value }))]
+  const activeItems = useMemo(() => items.filter(isActiveRecord), [items])
   const categorySelectOptions = useMemo(() => {
     const options = categories.map((value) => ({ value }))
     if (draft.category && !options.some((option) => option.value === draft.category)) options.unshift({ value: draft.category })
@@ -551,14 +553,14 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   }, [categories, draft.category])
   const matchingItems = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return items.filter((item) => {
+    return activeItems.filter((item) => {
       const supplier = supplierMap.get(item.supplierId)
       const matchesSearch = !query || [item.name, item.category, item.subcategory, item.brand, item.productCode, item.barcode, item.description, ...item.variants.flatMap((variant) => [variant.name, variant.value, variant.productCode, variant.barcode, variant.unitOfMeasure, variant.status, ...variant.specifications.flatMap((specification) => [specification.name, specification.value])]), supplier?.name ?? '', supplier?.address ?? ''].some((value) => value.toLowerCase().includes(query))
       const matchesCategory = categoryFilter === 'All categories' || item.category === categoryFilter
       const matchesStatus = statusFilter === 'All statuses' || item.status === statusFilter
       return matchesSearch && matchesCategory && matchesStatus
     }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-  }, [categoryFilter, items, search, statusFilter, supplierMap])
+  }, [activeItems, categoryFilter, search, statusFilter, supplierMap])
   const itemSortOptions = [
     { value: 'updated', label: 'Recently updated', getValue: (item: Item) => item.updatedAt, direction: 'desc' as const },
     { value: 'name', label: 'Name A-Z', getValue: (item: Item) => item.name, direction: 'asc' as const },
@@ -568,10 +570,10 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const itemTable = useTableView({ rows: matchingItems, storageKey: 'items.table', sortOptions: itemSortOptions, pageSizeOptions: [12, 24, 48] })
   const visibleItems = itemTable.pageRows
 
-  const averageMargin = items.length ? items.reduce((sum, item) => sum + (item.sellingPrice > 0 ? ((item.sellingPrice - item.rawCost) / item.sellingPrice) * 100 : 0), 0) / items.length : 0
+  const averageMargin = activeItems.length ? activeItems.reduce((sum, item) => sum + (item.sellingPrice > 0 ? ((item.sellingPrice - item.rawCost) / item.sellingPrice) * 100 : 0), 0) / activeItems.length : 0
   const summaryCards = [
-    { label: 'Total items', value: items.length, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
-    { label: 'Active', value: items.filter((item) => item.status === 'Active').length, dot: 'bg-emerald-500', valueColor: 'text-emerald-600' },
+    { label: 'Total items', value: activeItems.length, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
+    { label: 'Active', value: activeItems.filter((item) => item.status === 'Active').length, dot: 'bg-emerald-500', valueColor: 'text-emerald-600' },
     { label: 'Categories', value: categories.length, dot: 'bg-violet-500', valueColor: 'text-violet-600' },
     { label: 'Avg. margin', value: `${averageMargin.toFixed(1)}%`, dot: 'bg-brand-orange', valueColor: 'text-brand-orange' },
   ]
@@ -934,10 +936,11 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     if (!editingId) return
     const item = items.find((entry) => entry.id === editingId)
     if (!item) return
-    setItems((current) => current.filter((entry) => entry.id !== editingId))
-    appendSystemLog({ recordId: item.id, module: 'Items', action: 'Deleted', entity: item.name, description: 'Item was removed from the product catalog.', actor: currentUsername, tone: 'danger', amount: item.sellingPrice, status: item.status })
+    setItems((current) => current.map((entry) => entry.id === editingId ? withArchived(entry, currentUsername) : entry))
+    notifyLifecycleChanged()
+    appendSystemLog({ recordId: item.id, module: 'Items', action: 'Archived', entity: item.name, description: 'Item was archived with quotation and purchasing history retained.', actor: currentUsername, tone: 'info', amount: item.sellingPrice, status: item.status })
     if (detailItemId === item.id) returnToItems()
-    setToast('Item removed')
+    setToast('Item archived')
     closeDialog()
   }
 
@@ -1021,7 +1024,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingId ? isConfirmingDelete ? <div className="flex items-center gap-2"><span className="text-xs font-bold text-red-600">Remove this item?</span><button className="h-9 rounded-xl px-3 text-xs font-bold text-slate-500" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="h-9 rounded-xl bg-red-600 px-3 text-xs font-bold text-white" type="button" onClick={deleteItem}>Remove</button></div> : <button className="h-9 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={() => setIsConfirmingDelete(true)}>Remove item</button> : <span />}<div className="ml-auto flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={closeDialog}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit" disabled={!suppliers.length}>{editingId ? 'Save changes' : 'Create item'}</button></div></div>
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingId ? isConfirmingDelete ? <div className="flex items-center gap-2"><span className="text-xs font-bold text-red-600">Archive this item?</span><button className="h-9 rounded-xl px-3 text-xs font-bold text-slate-500" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="h-9 rounded-xl bg-red-600 px-3 text-xs font-bold text-white" type="button" onClick={deleteItem}>Archive</button></div> : <button className="h-9 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={() => setIsConfirmingDelete(true)}>Archive item</button> : <span />}<div className="ml-auto flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={closeDialog}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit" disabled={!suppliers.length}>{editingId ? 'Save changes' : 'Create item'}</button></div></div>
       </form></div> : null}
 
       {isVariantDialogOpen ? <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_160ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="variant-dialog-title"><button className="absolute inset-0" type="button" onClick={() => setIsVariantDialogOpen(false)} aria-label="Close variant form" /><form className="relative my-6 w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.36)]" onSubmit={saveVariant}><div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Product option</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="variant-dialog-title">{editingVariantId ? 'Edit variant' : 'Add a new variant'}</h2><p className="mt-1 text-xs text-slate-400">Manage this option’s photo and individual pricing.</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsVariantDialogOpen(false)} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="px-6 py-5">{variantFormError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{variantFormError}</div> : null}{photoError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{photoError}</div> : null}<VariantEditor variant={variantDraft} index={variantDialogIndex} isProcessingPhoto={processingVariantPhotoId === variantDraft.id} onUpdate={updateVariant} onPhotoChange={(id, event) => void handleVariantPhotoChange(id, event)} onRemove={() => undefined} showRemove={false} /></div><div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingVariantId ? <button className="h-10 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={deleteVariant}>Remove variant</button> : <span />}<div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsVariantDialogOpen(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{editingVariantId ? 'Save changes' : 'Add variant'}</button></div></div></form></div> : null}

@@ -5,6 +5,7 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import type { StatementOfAccount, StatementStatus } from '../statement-of-account/statementOfAccountTypes'
+import { isActiveRecord } from '../../services/recordLifecycle'
 
 type SalesQuotation = {
   id: string
@@ -121,7 +122,7 @@ function loadApprovedQuotations(): SalesQuotation[] {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(quotationStorageKey) ?? '[]')
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
+      if (typeof value !== 'object' || value === null || !isActiveRecord(value)) return []
       const quotation = value as Partial<SalesQuotation>
       if (quotation.status !== 'Approved' || typeof quotation.id !== 'string' || typeof quotation.quotationNumber !== 'string') return []
       const items = Array.isArray(quotation.items) ? quotation.items.map((item) => ({ ...item, quantity: Number(item.quantity) || 0, unitCost: Number(item.unitCost) || 0 })) : []
@@ -154,7 +155,7 @@ function loadLinkedExpenses(): LinkedExpense[] {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
+      if (typeof value !== 'object' || value === null || !isActiveRecord(value)) return []
       const expense = value as Partial<LinkedExpense>
       if (typeof expense.id !== 'number' || typeof expense.quotationId !== 'string' || !expense.quotationId || expense.status === 'Cancelled') return []
       return [{ id: expense.id, quotationId: expense.quotationId, amount: Number(expense.amount) || 0, status: typeof expense.status === 'string' ? expense.status : 'To pay' }]
@@ -166,7 +167,7 @@ function loadStatements(): StatementOfAccount[] {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(statementStorageKey) ?? '[]')
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is StatementOfAccount => typeof value === 'object' && value !== null && typeof (value as Partial<StatementOfAccount>).id === 'string' && Array.isArray((value as Partial<StatementOfAccount>).quotations))
+    return parsed.filter((value): value is StatementOfAccount => typeof value === 'object' && value !== null && isActiveRecord(value) && typeof (value as Partial<StatementOfAccount>).id === 'string' && Array.isArray((value as Partial<StatementOfAccount>).quotations))
   } catch {
     return []
   }

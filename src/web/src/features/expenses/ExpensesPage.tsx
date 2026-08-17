@@ -3,11 +3,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
+import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
 import { appendSystemLog } from '../../services/activityLog'
+import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 type DateFilterMode = 'all' | 'month' | 'range'
@@ -360,6 +362,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [isAddingExpense, setIsAddingExpense] = useState(openNewOnLoad)
   const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null)
   const [toast, setToast] = useState('')
+  const [pendingVoidExpenseId, setPendingVoidExpenseId] = useState<number | null>(null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<ExpenseOptionKind>('categories')
   const categories = categoryOptions.filter((option) => option.isActive).map((option) => option.name)
@@ -373,7 +376,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
   }, [openNewOnLoad])
   const projectOptions = useMemo(() => [
-    { value: '', label: 'General expense / no project' },
+    { value: '', label: 'General operations (no project)' },
     ...approvedQuotations.map((quotation) => ({
       value: quotation.id,
       label: `${quotation.quotationNumber} · ${quotation.clientName}${quotation.subject ? ` — ${quotation.subject}` : ''}`,
@@ -422,7 +425,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   const matchingExpenses = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    return expenses
+    return expenses.filter(isActiveRecord)
       .filter((expense) => {
         const matchesSearch = !query || [expense.payee, expense.category, expense.description, expense.paymentMethod, expense.purchaser, expense.status, expense.notes, expense.quotationNumber, expense.projectName]
           .some((value) => value.toLowerCase().includes(query))
@@ -444,15 +447,18 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   ]
   const expenseTable = useTableView({ rows: matchingExpenses, storageKey: 'expenses.table', sortOptions: expenseSortOptions })
   const visibleExpenses = expenseTable.pageRows
-  const visibleTotal = useMemo(() => matchingExpenses.reduce((sum, expense) => sum + expense.amount, 0), [matchingExpenses])
+  const activeExpenses = useMemo(() => expenses.filter(isActiveRecord).filter((expense) => expense.status !== 'Cancelled'), [expenses])
+  const visibleTotal = useMemo(() => matchingExpenses.filter((expense) => expense.status !== 'Cancelled').reduce((sum, expense) => sum + expense.amount, 0), [matchingExpenses])
   const comparisonMonth = /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth : currentMonth
   const [comparisonYear = new Date().getFullYear(), comparisonMonthNumber = new Date().getMonth() + 1] = comparisonMonth.split('-').map(Number)
   const previousMonthDate = new Date(comparisonYear, comparisonMonthNumber - 2, 1)
   const previousMonth = `${previousMonthDate.getFullYear()}-${String(previousMonthDate.getMonth() + 1).padStart(2, '0')}`
-  const selectedMonthTotal = useMemo(() => expenses.filter((expense) => expense.date.startsWith(comparisonMonth)).reduce((sum, expense) => sum + expense.amount, 0), [comparisonMonth, expenses])
+  const selectedMonthTotal = useMemo(() => activeExpenses.filter((expense) => expense.date.startsWith(comparisonMonth)).reduce((sum, expense) => sum + expense.amount, 0), [activeExpenses, comparisonMonth])
+  const selectedMonthProjectTotal = useMemo(() => activeExpenses.filter((expense) => expense.date.startsWith(comparisonMonth) && expense.quotationId).reduce((sum, expense) => sum + expense.amount, 0), [activeExpenses, comparisonMonth])
+  const selectedMonthOperatingTotal = useMemo(() => activeExpenses.filter((expense) => expense.date.startsWith(comparisonMonth) && !expense.quotationId).reduce((sum, expense) => sum + expense.amount, 0), [activeExpenses, comparisonMonth])
   const selectedMonthCategories = useMemo<ExpenseCategoryPoint[]>(() => {
     const totalsByCategory = new Map<string, { total: number; count: number }>()
-    expenses.forEach((expense) => {
+    activeExpenses.forEach((expense) => {
       if (!expense.date.startsWith(comparisonMonth)) return
       const current = totalsByCategory.get(expense.category) ?? { total: 0, count: 0 }
       totalsByCategory.set(expense.category, { total: current.total + expense.amount, count: current.count + 1 })
@@ -460,14 +466,14 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
     return Array.from(totalsByCategory, ([name, values]) => ({ name, ...values }))
       .sort((left, right) => right.total - left.total || left.name.localeCompare(right.name))
-  }, [comparisonMonth, expenses])
-  const previousMonthTotal = useMemo(() => expenses.filter((expense) => expense.date.startsWith(previousMonth)).reduce((sum, expense) => sum + expense.amount, 0), [expenses, previousMonth])
+  }, [activeExpenses, comparisonMonth])
+  const previousMonthTotal = useMemo(() => activeExpenses.filter((expense) => expense.date.startsWith(previousMonth)).reduce((sum, expense) => sum + expense.amount, 0), [activeExpenses, previousMonth])
   const monthChangePercent = previousMonthTotal === 0 ? (selectedMonthTotal === 0 ? 0 : 100) : ((selectedMonthTotal - previousMonthTotal) / previousMonthTotal) * 100
   const selectedMonthLabel = new Intl.DateTimeFormat('en-PH', { month: 'short', year: 'numeric' }).format(new Date(`${comparisonMonth}-01T00:00:00`))
   const previousMonthLabel = new Intl.DateTimeFormat('en-PH', { month: 'short', year: 'numeric' }).format(previousMonthDate)
   const monthlyTrend = useMemo<ExpenseTrendPoint[]>(() => {
     const totalsByMonth = new Map<string, number>()
-    expenses.forEach((expense) => {
+    activeExpenses.forEach((expense) => {
       const month = expense.date.slice(0, 7)
       totalsByMonth.set(month, (totalsByMonth.get(month) ?? 0) + expense.amount)
     })
@@ -493,7 +499,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
         isSelected: key === comparisonMonth,
       }
     })
-  }, [comparisonMonth, expenses, trendRange])
+  }, [activeExpenses, comparisonMonth, trendRange])
   const activeFilterCount = Number(dateFilterMode !== 'all') + Number(categoryFilter !== 'All')
 
   function getOptions(kind: ExpenseOptionKind) {
@@ -617,9 +623,33 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   function updateExpenseStatus(id: number, status: ExpenseStatus) {
     const expense = expenses.find((item) => item.id === id)
+    if (status === 'Cancelled' && expense?.status !== 'Cancelled') {
+      setPendingVoidExpenseId(id)
+      return
+    }
     setExpenses((current) => current.map((expense) => expense.id === id ? { ...expense, status } : expense))
     setToast('Expense status updated')
     if (expense) appendSystemLog({ recordId: String(id), module: 'Expenses', action: 'Status changed', entity: expense.payee, description: `Expense status changed from ${expense.status} to ${status}.`, actor: currentUsername, tone: status === 'Paid' ? 'success' : status === 'Overdue' ? 'warning' : 'info', amount: expense.amount, status })
+  }
+
+  function confirmVoidExpense(reason: string, archiveAfterVoiding: boolean) {
+    const expense = expenses.find((entry) => entry.id === pendingVoidExpenseId)
+    if (!expense) return
+    setExpenses((current) => current.map((entry) => entry.id === expense.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Cancelled' as const }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Cancelled' as const }, currentUsername, reason)) : entry))
+    notifyLifecycleChanged()
+    appendSystemLog({ recordId: String(expense.id), module: 'Expenses', action: 'Voided', entity: expense.payee, description: `Expense voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, tone: 'danger', amount: expense.amount, status: 'Cancelled' })
+    setPendingVoidExpenseId(null)
+    setToast(archiveAfterVoiding ? 'Expense voided and archived' : 'Expense voided')
+  }
+
+  function archiveExpense(id: number) {
+    const expense = expenses.find((entry) => entry.id === id)
+    if (!expense) return
+    setExpenses((current) => current.map((entry) => entry.id === id ? withArchived(entry, currentUsername) : entry))
+    notifyLifecycleChanged()
+    appendSystemLog({ recordId: String(expense.id), module: 'Expenses', action: 'Archived', entity: expense.payee, description: 'Expense was archived with project and purchase-order links retained.', actor: currentUsername, tone: 'info', amount: expense.amount, status: expense.status })
+    closeExpenseDialog()
+    setToast('Expense archived')
   }
 
   function saveExpense(event: FormEvent<HTMLFormElement>) {
@@ -655,7 +685,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
 
   const summaryCards = [
     { label: `${selectedMonthLabel} total`, value: formatPeso(selectedMonthTotal), detail: 'Selected month', accent: 'bg-brand-orange', valueClass: 'text-brand-blue', trend: null, insight: 'categories' as const },
-    { label: `${previousMonthLabel} total`, value: formatPeso(previousMonthTotal), detail: 'Previous month', accent: 'bg-sky-500', valueClass: 'text-brand-blue', trend: null, insight: null },
+    { label: 'Project costs', value: formatPeso(selectedMonthProjectTotal), detail: selectedMonthLabel, accent: 'bg-violet-500', valueClass: 'text-violet-700', trend: null, insight: null },
+    { label: 'Operating expenses', value: formatPeso(selectedMonthOperatingTotal), detail: 'General operations', accent: 'bg-orange-500', valueClass: 'text-orange-700', trend: null, insight: null },
     {
       label: 'Month change',
       value: `${monthChangePercent > 0 ? '+' : ''}${monthChangePercent.toFixed(1)}%`,
@@ -677,7 +708,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
             <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Record expenses, attach invoices, and check spending by date.</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-3 sm:gap-3">
+          <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-2 sm:gap-3 xl:grid-cols-4">
             {summaryCards.map((card) => {
               const insight = card.insight
               const isOpen = openInsight === insight
@@ -769,7 +800,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
                     <td className="border-l-4 border-l-brand-orange px-5 py-4 text-xs font-semibold text-slate-600">{formatDate(expense.date)}</td>
                     <td className="px-4 py-4"><button className="group/payee flex max-w-full items-center gap-1.5 text-left" type="button" onClick={() => openEditExpense(expense)} title={`Edit ${expense.payee} expense`}><span className="truncate text-sm font-bold text-brand-blue transition group-hover/payee:text-brand-orange">{expense.payee}</span><svg className="size-3 shrink-0 text-slate-300 opacity-0 transition group-hover/payee:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg></button></td>
                     <td className="px-4 py-4"><span className="inline-flex max-w-full truncate rounded-lg bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-700" title={expense.category}>{expense.category}</span></td>
-                    <td className="px-4 py-4"><span className="block truncate text-xs font-medium text-slate-600" title={expense.description}>{expense.description}</span>{expense.quotationNumber ? <span className="mt-1 block truncate text-[9px] font-bold text-violet-600" title={`${expense.quotationNumber} · ${expense.projectName}`}>{expense.quotationNumber} · {expense.projectName}</span> : null}</td>
+                    <td className="px-4 py-4"><span className="block truncate text-xs font-medium text-slate-600" title={expense.description}>{expense.description}</span>{expense.quotationNumber ? <><span className="mt-1.5 inline-flex rounded-md bg-violet-50 px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-violet-700">Project cost</span><span className="mt-1 block truncate text-[9px] font-bold text-violet-600" title={`${expense.quotationNumber} · ${expense.projectName}`}>{expense.quotationNumber} · {expense.projectName}</span></> : <><span className="mt-1.5 inline-flex rounded-md bg-orange-50 px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-orange-700">Operating expense</span><span className="mt-1 block truncate text-[9px] text-slate-400">General operations</span></>}</td>
                     <td className="px-4 py-4 text-right text-sm font-extrabold tabular-nums text-brand-blue">{formatPeso(expense.amount)}</td>
                     <td className="px-4 py-4"><span className="inline-flex rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-600">{expense.paymentMethod}</span></td>
                     <td className="px-4 py-4"><span className="block truncate text-xs font-semibold text-slate-700" title={expense.purchaser}>{expense.purchaser}</span></td>
@@ -789,7 +820,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
             <div><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-50 text-slate-300"><svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg></span><h3 className="mt-4 text-sm font-bold text-brand-blue">{expenses.length ? 'No matching expenses' : 'No expenses recorded'}</h3><p className="mt-1 text-xs text-slate-400">{expenses.length ? 'Adjust the search or date filters to see more entries.' : 'Add your first expense to begin tracking company spending.'}</p>{expenses.length ? <button className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-500 transition hover:border-slate-300 hover:text-brand-blue" type="button" onClick={clearFilters}>Clear filters</button> : <button className="mt-4 rounded-xl bg-brand-blue px-4 py-2 text-xs font-bold text-white" type="button" onClick={openExpenseDialog}>Add first expense</button>}</div>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs font-semibold text-slate-400">Total for the current view</p><p className="text-lg font-extrabold tracking-[-0.025em] text-brand-blue">{formatPeso(visibleTotal)}</p></div>
+          <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs font-semibold text-slate-400">Non-cancelled total for the current view</p><p className="text-lg font-extrabold tracking-[-0.025em] text-brand-blue">{formatPeso(visibleTotal)}</p></div>
         )}
       </section>
 
@@ -804,15 +835,15 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-payee">Payee</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-payee" value={draft.payee} onChange={(event) => setDraft((current) => ({ ...current, payee: event.target.value }))} placeholder="Supplier or recipient" autoFocus required /></div>
               <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-category">Category</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('categories')}>Manage</button></div><AnimatedDropdown id="new-expense-category" value={draft.category ?? ''} options={draftCategories.filter((value): value is string => Boolean(value)).map((value) => ({ value }))} onChange={(category) => setDraft((current) => ({ ...current, category }))} ariaLabel="Expense category" /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-amount">Amount (PHP)</label><div className="relative"><span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">₱</span><input className="h-11 w-full rounded-xl border border-slate-200 pl-8 pr-3.5 text-sm font-semibold text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-amount" type="number" min="0.01" step="0.01" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" required /></div></div>
-              <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Project / approved quotation <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><AnimatedDropdown value={draft.quotationId} options={projectOptions} onChange={(quotationId) => { const quotation = approvedQuotations.find((item) => item.id === quotationId); setDraft((current) => ({ ...current, quotationId, quotationNumber: quotation?.quotationNumber ?? '', projectName: quotation ? (quotation.subject || quotation.clientName) : '' })) }} ariaLabel="Project or approved quotation" /><p className="mt-1.5 text-[10px] text-slate-400">Link project costs here so Sales Tracker can calculate actual profit.</p></div>
+              <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500">Expense allocation</label><AnimatedDropdown value={draft.quotationId} options={projectOptions} onChange={(quotationId) => { const quotation = approvedQuotations.find((item) => item.id === quotationId); setDraft((current) => ({ ...current, quotationId, quotationNumber: quotation?.quotationNumber ?? '', projectName: quotation ? (quotation.subject || quotation.clientName) : '' })) }} ariaLabel="Expense allocation" /><p className="mt-1.5 text-[10px] text-slate-400">Project costs reduce that project’s profit. General operations still reduce company net profit.</p></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-description">Brief description</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} placeholder="What was purchased or paid for?" required /></div>
               <div><div className="mb-2 flex items-center justify-between gap-2"><label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-method">Payment method</label><button className="text-[10px] font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => openSettings('paymentMethods')}>Manage</button></div><AnimatedDropdown id="new-expense-method" value={draft.paymentMethod ?? ''} options={draftPaymentMethods.filter((value): value is string => Boolean(value)).map((value) => ({ value }))} onChange={(paymentMethod) => setDraft((current) => ({ ...current, paymentMethod }))} ariaLabel="Payment method" /></div>
               <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-purchaser">Purchaser</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-purchaser" value={draft.purchaser} onChange={(event) => setDraft((current) => ({ ...current, purchaser: event.target.value }))} placeholder="Person who made the purchase" required /></div>
-              <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-status">Status</label><AnimatedDropdown id="new-expense-status" value={draft.status} options={expenseStatusOptions} onChange={(status) => setDraft((current) => ({ ...current, status }))} ariaLabel="Expense status" /></div>
+              <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-status">Status</label><AnimatedDropdown id="new-expense-status" value={draft.status} options={expenseStatusOptions.filter((option) => option.value !== 'Cancelled')} onChange={(status) => setDraft((current) => ({ ...current, status }))} ariaLabel="Expense status" /></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-invoice">Invoice link <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm font-medium text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-invoice" type="url" value={draft.invoiceLink} onChange={(event) => setDraft((current) => ({ ...current, invoiceLink: event.target.value }))} placeholder="https://drive.google.com/..." /></div>
               <div className="sm:col-span-2"><label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="new-expense-notes">Notes / remarks <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm leading-6 text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="new-expense-notes" value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Add approval details, receipt references, or other context..." /></div>
             </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={closeExpenseDialog}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{isEditingExpense ? 'Save changes' : 'Save expense'}</button></div>
+            <div className="flex items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{isEditingExpense && editingExpenseId !== null ? <button className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-500 hover:bg-slate-50" type="button" onClick={() => archiveExpense(editingExpenseId)}>Archive</button> : <span />}<div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={closeExpenseDialog}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{isEditingExpense ? 'Save changes' : 'Save expense'}</button></div></div>
           </form>
         </div>
       ) : null}
@@ -833,6 +864,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           onClose={() => setIsSettingsOpen(false)}
         />
       ) : null}
+      {pendingVoidExpenseId !== null ? <VoidRecordDialog recordLabel="expense" onClose={() => setPendingVoidExpenseId(null)} onConfirm={confirmVoidExpense} /> : null}
       <SuccessToast message={toast} />
     </div>
   )
