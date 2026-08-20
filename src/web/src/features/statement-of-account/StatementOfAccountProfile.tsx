@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatedDropdown } from "../../components/ui/AnimatedDropdown";
 import { DocumentExportDialog } from "../../components/ui/DocumentExportDialog";
 import { SummarySurface } from "../../components/ui/SummarySurface";
+import { WorkflowHeader } from "../../components/ui/WorkflowHeader";
 import { createStatementOfAccountPdfBlob } from "../../services/pdf/documentPdf";
 import { loadCompanyProfile } from "../settings/settingsStorage";
 import type {
@@ -125,7 +126,34 @@ export function StatementOfAccountProfile({
         />
         Back to statements
       </button>
-      <SummarySurface className="relative overflow-hidden">
+      <WorkflowHeader
+        eyebrow="Statement of account"
+        recordNumber={statement.soaNumber}
+        partyName={statement.clientName}
+        amount={formatPeso(statement.balance)}
+        createdLabel={`Statement date ${formatDate(statement.statementDate)}`}
+        status={effectiveStatus}
+        steps={["Draft", "Issued", "Due", "Partially Settled", "Settled"]}
+        currentStep={effectiveStatus === "Draft" ? 0 : effectiveStatus === "Issued" || effectiveStatus === "Overdue" ? 2 : effectiveStatus === "Partially Settled" ? 3 : effectiveStatus === "Settled" ? 4 : 0}
+        module="Statements of Account"
+        recordId={statement.id}
+        primaryAction={effectiveStatus === "Draft" ? { label: "Issue statement", onClick: () => onStatusChange("Issued") } : statement.balance > 0 && effectiveStatus !== "Cancelled" ? { label: "Record payment", onClick: onRecordPayment } : undefined}
+        menuActions={[
+          { label: "Edit", onClick: onEdit, disabled: effectiveStatus === "Cancelled" },
+          { label: "Preview & Export", onClick: () => setIsExportOpen(true) },
+          { label: "Archive", onClick: onArchive },
+          ...(effectiveStatus !== "Cancelled" ? [{ label: "Void", tone: "danger" as const, onClick: () => onStatusChange("Cancelled") }] : []),
+        ]}
+      >
+        <p className="text-sm text-slate-500">Account coverage: {formatDate(statement.coverageFrom)} – {formatDate(statement.coverageTo)}</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <article className="rounded-2xl border border-slate-200/80 bg-white p-4"><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Total charges</p><p className="mt-2 text-xl font-extrabold text-brand-blue">{formatPeso(statement.totalCharges)}</p></article>
+          <article className="rounded-2xl border border-emerald-100 bg-emerald-50/55 p-4"><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-emerald-600">Payments received</p><p className="mt-2 text-xl font-extrabold text-emerald-700">{formatPeso(statement.totalPayments)}</p></article>
+          <article className={`rounded-2xl border p-4 ${effectiveStatus === "Overdue" ? "border-red-100 bg-red-50/60" : "border-amber-100 bg-amber-50/55"}`}><p className={`text-[9px] font-bold uppercase tracking-[0.1em] ${effectiveStatus === "Overdue" ? "text-red-500" : "text-amber-600"}`}>Outstanding balance</p><p className={`mt-2 text-xl font-extrabold ${effectiveStatus === "Overdue" ? "text-red-600" : "text-amber-700"}`}>{formatPeso(statement.balance)}</p></article>
+          <article className="rounded-2xl border border-slate-200/80 bg-white p-4"><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Due date</p><p className="mt-2 text-base font-extrabold text-brand-blue">{formatDate(statement.dueDate)}</p></article>
+        </div>
+      </WorkflowHeader>
+      <SummarySurface className="hidden">
         <div
           className="pointer-events-none absolute inset-y-0 right-0 w-80 bg-[radial-gradient(circle_at_100%_0%,rgba(14,165,233,0.12),transparent_62%)]"
           aria-hidden="true"

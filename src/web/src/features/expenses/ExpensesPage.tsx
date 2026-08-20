@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { ChartLoadingState } from '../../components/charts/ChartSupport'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
@@ -7,10 +8,14 @@ import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
+import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
 import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
 import { appendSystemLog } from '../../services/activityLog'
 import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
+
+const ExpenseTrendRechart = lazy(() => import('./ExpenseCharts').then((module) => ({ default: module.ExpenseTrendRechart })))
+const ExpenseCategoryRechart = lazy(() => import('./ExpenseCharts').then((module) => ({ default: module.ExpenseCategoryRechart })))
 
 type DateFilterMode = 'all' | 'month' | 'range'
 type ExpenseStatus = 'Paid' | 'Verifying' | 'To pay' | 'Overdue' | 'Cancelled'
@@ -149,22 +154,13 @@ function formatDate(value: string) {
 }
 
 function getInvoiceUrl(value: string) {
-  if (!value) return null
+  if (!value) return ''
   try {
     const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : ''
   } catch {
-    return null
+    return ''
   }
-}
-
-function formatCompactPeso(amount: number) {
-  return new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: 'PHP',
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(amount)
 }
 
 type ExpenseTrendPoint = {
@@ -228,25 +224,9 @@ function ExpenseCategoryBreakdown({ categories, selectedMonthLabel, selectedMont
       </div>
 
       {categories.length ? (
-        <div className="mt-5 grid gap-x-8 gap-y-4 lg:grid-cols-2">
-          {categories.map((category, index) => {
-            const percentage = selectedMonthTotal > 0 ? (category.total / selectedMonthTotal) * 100 : 0
-            return (
-              <div className="min-w-0" key={category.name}>
-                <div className="mb-2 flex min-w-0 items-center gap-2">
-                  <span className={`grid size-5 shrink-0 place-items-center rounded-md text-[9px] font-extrabold ${index === 0 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500'}`}>{index + 1}</span>
-                  <span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-600" title={category.name}>{category.name}</span>
-                  <span className="shrink-0 text-right text-[10px] font-semibold text-slate-400">{category.count} {category.count === 1 ? 'entry' : 'entries'}</span>
-                  <span className="min-w-20 shrink-0 text-right text-xs font-extrabold tabular-nums text-brand-blue" title={formatPeso(category.total)}>{formatCompactPeso(category.total)}</span>
-                  <span className="w-10 shrink-0 text-right text-[10px] font-bold tabular-nums text-slate-500">{percentage.toFixed(1)}%</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label={`${category.name}: ${formatPeso(category.total)}, ${percentage.toFixed(1)} percent of ${selectedMonthLabel} expenses`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Number(percentage.toFixed(1))}>
-                  <div className={`h-full rounded-full transition-[width] duration-500 ${index === 0 ? 'bg-[linear-gradient(90deg,#fd4d00,#ff8a55)]' : 'bg-[linear-gradient(90deg,#00144c,#174785)]'}`} style={{ width: `${percentage}%`, minWidth: percentage > 0 ? '0.25rem' : undefined }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <Suspense fallback={<ChartLoadingState className="mt-5 h-64" />}>
+          <ExpenseCategoryRechart categories={categories} total={selectedMonthTotal} />
+        </Suspense>
       ) : (
         <div className="mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-6 text-center">
           <p className="text-xs font-bold text-brand-blue">No category spending for {selectedMonthLabel}</p>
@@ -269,8 +249,7 @@ type ExpenseTrendChartProps = {
 }
 
 function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLabel, selectedMonthTotal, previousMonthTotal, onRangeChange, onClose }: ExpenseTrendChartProps) {
-  const maxTotal = Math.max(0, ...points.map((point) => point.total))
-  const hasData = maxTotal > 0
+  const hasData = points.some((point) => point.total > 0)
   const amountChange = selectedMonthTotal - previousMonthTotal
 
   return (
@@ -297,29 +276,9 @@ function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLab
       {hasData ? (
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
           <figure className="min-w-0" aria-labelledby="expense-trend-caption">
-            <div className="overflow-x-auto rounded-2xl border border-slate-200/80">
-              <div className="relative h-64 bg-slate-50/60" style={{ minWidth: `${Math.max(560, points.length * 64)}px` }}>
-                <div className="pointer-events-none absolute inset-x-4 bottom-10 top-9 flex flex-col justify-between sm:inset-x-6" aria-hidden="true">
-                  {[0, 1, 2, 3].map((line) => <span className="block border-t border-dashed border-slate-200" key={line} />)}
-                </div>
-                <div className="relative grid h-full items-end gap-2 px-3 pb-3 pt-5 sm:gap-4 sm:px-5" style={{ gridTemplateColumns: `repeat(${points.length}, minmax(44px, 1fr))` }}>
-                  {points.map((point) => {
-                    const height = point.total > 0 ? Math.max((point.total / maxTotal) * 100, 4) : 1
-                    return (
-                      <div className="flex h-full min-w-0 flex-col items-center justify-end" key={point.key} title={`${point.fullLabel}: ${formatPeso(point.total)}`}>
-                        <span className={`mb-2 max-w-full truncate text-[9px] font-bold tabular-nums sm:text-[10px] ${point.isSelected ? 'text-brand-orange' : 'text-slate-500'}`}>{formatCompactPeso(point.total)}</span>
-                        <div className="flex min-h-0 w-full flex-1 items-end justify-center">
-                          <span className={`block w-full max-w-12 rounded-t-lg transition-[height] duration-500 ${point.isSelected ? 'bg-[linear-gradient(180deg,#ff7438,#fd4d00)] shadow-[0_8px_18px_-10px_rgba(253,77,0,0.9)]' : point.total > 0 ? 'bg-[linear-gradient(180deg,#174785,#00144c)]' : 'bg-slate-200'}`} style={{ height: `${height}%` }} aria-hidden="true" />
-                        </div>
-                        <span className={`mt-2 text-[10px] font-bold ${point.isSelected ? 'text-brand-orange' : 'text-slate-500'}`}>{point.monthLabel}</span>
-                        <span className="text-[8px] font-semibold text-slate-300">{point.yearLabel}</span>
-                        <span className="sr-only">{point.fullLabel}: {formatPeso(point.total)}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
+            <Suspense fallback={<ChartLoadingState className="h-64" />}>
+              <ExpenseTrendRechart points={points} />
+            </Suspense>
             <figcaption className="sr-only" id="expense-trend-caption">Monthly expense totals for the selected {expenseTrendRangeOptions.find((option) => option.value === range)?.description.toLowerCase()} range through {selectedMonthLabel}.</figcaption>
           </figure>
 
@@ -358,9 +317,12 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [categoryFilter, setCategoryFilter] = usePersistentState('expenses.category', 'All')
-  const openNewOnLoad = new URLSearchParams(window.location.search).get('new') === '1'
+  const initialQuery = new URLSearchParams(window.location.search)
+  const openNewOnLoad = initialQuery.get('new') === '1'
+  const linkedPoIdOnLoad = initialQuery.get('poId')
   const [isAddingExpense, setIsAddingExpense] = useState(openNewOnLoad)
   const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null)
+  const [selectedExpenseId, setSelectedExpenseId] = useState<number | null>(() => linkedPoIdOnLoad ? expenses.find((expense) => expense.notes.includes(`PO ID: ${linkedPoIdOnLoad}`))?.id ?? null : null)
   const [toast, setToast] = useState('')
   const [pendingVoidExpenseId, setPendingVoidExpenseId] = useState<number | null>(null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -373,8 +335,9 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const draftPaymentMethods = paymentMethods.includes(draft.paymentMethod) ? paymentMethods : [draft.paymentMethod, ...paymentMethods]
 
   useEffect(() => {
-    if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
-  }, [openNewOnLoad])
+    if (openNewOnLoad || linkedPoIdOnLoad) window.history.replaceState(null, '', window.location.pathname)
+  }, [linkedPoIdOnLoad, openNewOnLoad])
+  const selectedExpense = selectedExpenseId === null ? undefined : expenses.find((expense) => expense.id === selectedExpenseId && isActiveRecord(expense))
   const projectOptions = useMemo(() => [
     { value: '', label: 'General operations (no project)' },
     ...approvedQuotations.map((quotation) => ({
@@ -588,6 +551,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   }
 
   function openEditExpense(expense: Expense) {
+    setSelectedExpenseId(null)
     setEditingExpenseId(expense.id)
     setDraft({
       date: expense.date,
@@ -649,6 +613,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     notifyLifecycleChanged()
     appendSystemLog({ recordId: String(expense.id), module: 'Expenses', action: 'Archived', entity: expense.payee, description: 'Expense was archived with project and purchase-order links retained.', actor: currentUsername, tone: 'info', amount: expense.amount, status: expense.status })
     closeExpenseDialog()
+    setSelectedExpenseId(null)
     setToast('Expense archived')
   }
 
@@ -798,7 +763,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
                 return (
                   <tr className="border-b border-slate-100 transition-colors hover:bg-[#fbfcfe]" key={expense.id}>
                     <td className="border-l-4 border-l-brand-orange px-5 py-4 text-xs font-semibold text-slate-600">{formatDate(expense.date)}</td>
-                    <td className="px-4 py-4"><button className="group/payee flex max-w-full items-center gap-1.5 text-left" type="button" onClick={() => openEditExpense(expense)} title={`Edit ${expense.payee} expense`}><span className="truncate text-sm font-bold text-brand-blue transition group-hover/payee:text-brand-orange">{expense.payee}</span><svg className="size-3 shrink-0 text-slate-300 opacity-0 transition group-hover/payee:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg></button></td>
+                    <td className="px-4 py-4"><button className="group/payee flex max-w-full items-center gap-1.5 text-left" type="button" onClick={() => setSelectedExpenseId(expense.id)} title={`View ${expense.payee} expense`}><span className="truncate text-sm font-bold text-brand-blue transition group-hover/payee:text-brand-orange">{expense.payee}</span><svg className="size-3 shrink-0 text-slate-300 opacity-0 transition group-hover/payee:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></button></td>
                     <td className="px-4 py-4"><span className="inline-flex max-w-full truncate rounded-lg bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-700" title={expense.category}>{expense.category}</span></td>
                     <td className="px-4 py-4"><span className="block truncate text-xs font-medium text-slate-600" title={expense.description}>{expense.description}</span>{expense.quotationNumber ? <><span className="mt-1.5 inline-flex rounded-md bg-violet-50 px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-violet-700">Project cost</span><span className="mt-1 block truncate text-[9px] font-bold text-violet-600" title={`${expense.quotationNumber} · ${expense.projectName}`}>{expense.quotationNumber} · {expense.projectName}</span></> : <><span className="mt-1.5 inline-flex rounded-md bg-orange-50 px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-orange-700">Operating expense</span><span className="mt-1 block truncate text-[9px] text-slate-400">General operations</span></>}</td>
                     <td className="px-4 py-4 text-right text-sm font-extrabold tabular-nums text-brand-blue">{formatPeso(expense.amount)}</td>
@@ -823,6 +788,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs font-semibold text-slate-400">Non-cancelled total for the current view</p><p className="text-lg font-extrabold tracking-[-0.025em] text-brand-blue">{formatPeso(visibleTotal)}</p></div>
         )}
       </section>
+
+      {selectedExpense ? <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="expense-detail-title"><button className="fixed inset-0" type="button" onClick={() => setSelectedExpenseId(null)} aria-label="Close expense details" /><div className="relative mx-auto my-6 w-full max-w-4xl space-y-4"><div className="flex justify-end"><button className="grid size-9 place-items-center rounded-xl bg-white text-slate-400 shadow-sm hover:text-brand-blue" type="button" onClick={() => setSelectedExpenseId(null)} aria-label="Close expense details"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></div><WorkflowHeader eyebrow="Expense" recordNumber={`EXP-${selectedExpense.id}`} partyName={selectedExpense.payee} amount={formatPeso(selectedExpense.amount)} createdLabel={`Recorded ${formatDate(selectedExpense.date)}`} status={selectedExpense.status} steps={["Recorded", "Verifying", "To Pay", "Paid"]} currentStep={selectedExpense.status === 'Verifying' ? 1 : selectedExpense.status === 'To pay' || selectedExpense.status === 'Overdue' ? 2 : selectedExpense.status === 'Paid' ? 3 : 0} module="Expenses" recordId={String(selectedExpense.id)} primaryAction={selectedExpense.status === 'Verifying' ? { label: 'Mark To Pay', onClick: () => updateExpenseStatus(selectedExpense.id, 'To pay') } : selectedExpense.status === 'To pay' || selectedExpense.status === 'Overdue' ? { label: 'Mark Paid', onClick: () => updateExpenseStatus(selectedExpense.id, 'Paid') } : undefined} secondaryActions={selectedExpense.status === 'To pay' ? [{ label: 'Mark Overdue', tone: 'danger', onClick: () => updateExpenseStatus(selectedExpense.id, 'Overdue') }] : []} menuActions={[{ label: 'Edit', onClick: () => openEditExpense(selectedExpense), disabled: selectedExpense.status === 'Cancelled' }, ...(getInvoiceUrl(selectedExpense.invoiceLink) ? [{ label: 'Open invoice', onClick: () => window.open(getInvoiceUrl(selectedExpense.invoiceLink), '_blank', 'noopener,noreferrer') }] : []), { label: 'Archive', onClick: () => archiveExpense(selectedExpense.id) }, ...(selectedExpense.status !== 'Cancelled' ? [{ label: 'Void', tone: 'danger' as const, onClick: () => setPendingVoidExpenseId(selectedExpense.id) }] : [])]}><p className="text-sm leading-6 text-slate-500">{selectedExpense.description}</p></WorkflowHeader><section className="grid gap-3 rounded-[1.5rem] border border-slate-200 bg-white p-5 sm:grid-cols-2"><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Category</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.category}</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Payment method</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.paymentMethod}</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Allocation</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.quotationNumber ? `${selectedExpense.quotationNumber} · ${selectedExpense.projectName}` : 'General operations'}</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Purchased by</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.purchaser}</p></div>{selectedExpense.notes ? <div className="rounded-xl bg-blue-50/55 p-4 sm:col-span-2"><p className="text-[9px] font-bold uppercase tracking-wider text-brand-blue">Notes</p><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{selectedExpense.notes}</p></div> : null}</section></div></div> : null}
 
       {isAddingExpense ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="expense-form-title">

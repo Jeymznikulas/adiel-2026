@@ -74,6 +74,7 @@ function normalizePath(pathname: string) {
   if (/^\/clients\/[^/]+$/.test(path)) return path
   if (/^\/suppliers\/[^/]+$/.test(path)) return path
   if (path.startsWith('/quotations/')) return path
+  if (path.startsWith('/purchase-orders/')) return path
   if (path.startsWith('/statement-of-account/')) return path
   return navigationItems.some((item) => item.path === path) ? path : '/dashboard'
 }
@@ -102,6 +103,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
     ?? (activePath.startsWith('/clients/') ? navigationItems.find((item) => item.path === '/clients') : undefined)
     ?? (activePath.startsWith('/suppliers/') ? navigationItems.find((item) => item.path === '/suppliers') : undefined)
     ?? (activePath.startsWith('/quotations/') ? navigationItems.find((item) => item.path === '/quotations') : undefined)
+    ?? (activePath.startsWith('/purchase-orders/') ? navigationItems.find((item) => item.path === '/purchase-orders') : undefined)
     ?? (activePath.startsWith('/statement-of-account/') ? navigationItems.find((item) => item.path === '/statement-of-account') : undefined)
     ?? defaultNavigationItem
   const activeSection = activeItem.label
@@ -139,7 +141,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
       const target = event.target
       if (!(target instanceof HTMLElement)) return
       const form = target.closest('form')
-      if (form?.closest('[role="dialog"]')) form.dataset.dirty = 'true'
+      if (form?.closest('[role="dialog"], [data-document-form-page]')) form.dataset.dirty = 'true'
     }
     const clearSaving = (form: HTMLFormElement) => {
       window.setTimeout(() => {
@@ -159,7 +161,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
     const handleClosingClick = (event: globalThis.MouseEvent) => {
       const target = event.target
       if (!(target instanceof HTMLElement)) return
-      const dialog = target.closest<HTMLElement>('[role="dialog"], [role="alertdialog"]')
+      const dialog = target.closest<HTMLElement>('[role="dialog"], [role="alertdialog"], [data-document-form-page]')
       const form = dialog?.querySelector<HTMLFormElement>('form[data-dirty="true"]')
       if (!form) return
       const button = target.closest<HTMLButtonElement>('button')
@@ -201,6 +203,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   function navigate(event: MouseEvent<HTMLAnchorElement>, path: string) {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
+    if (path !== activePath && document.querySelector('form[data-dirty="true"]') && !window.confirm('Discard your unsaved changes?')) return
     if (path !== activePath) {
       window.history.pushState(null, '', path)
       setActivePath(path)
@@ -210,6 +213,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   }
 
   function navigateTo(path: string) {
+    if (path !== activePath && document.querySelector('form[data-dirty="true"]') && !window.confirm('Discard your unsaved changes?')) return
     if (path !== activePath) {
       window.history.pushState(null, '', path)
       setActivePath(normalizePath(path))
@@ -323,6 +327,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
         </header>
 
         <main className="mx-auto max-w-[100rem] p-4 sm:p-6 lg:p-8">
+          <div className="app-page-transition" key={activePath}>
           {activeSection === 'Dashboard' ? children : sectionContent?.[activeSection] ?? (
             <section className="grid min-h-[calc(100svh-9rem)] place-items-center animate-[content-enter_320ms_ease-out]">
               <div className="max-w-md text-center">
@@ -334,6 +339,7 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
               </div>
             </section>
           )}
+          </div>
         </main>
       </div>
     </div>

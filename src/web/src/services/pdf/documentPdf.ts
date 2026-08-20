@@ -57,9 +57,9 @@ const muted: [number, number, number] = [104, 119, 139];
 const border: [number, number, number] = [220, 227, 237];
 const soft: [number, number, number] = [248, 250, 252];
 const pageWidth = 210;
-const margin = 14;
+const margin = 17;
 const contentWidth = pageWidth - margin * 2;
-const bottomLimit = 278;
+const bottomLimit = 277;
 
 function clean(value: string | number | undefined | null) {
   return String(value ?? "")
@@ -84,6 +84,10 @@ function wrapText(
 
 function money(value: number) {
   return `PHP ${new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0)}`;
+}
+
+function amount(value: number) {
+  return new Intl.NumberFormat("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
 }
 
 function date(value: string) {
@@ -166,50 +170,71 @@ async function createDocument(
     creator: "ADIEL Operations System",
   });
 
-  doc.setFillColor(...navy);
-  doc.rect(margin, 9, contentWidth * 0.78, 2.2, "F");
   doc.setFillColor(...orange);
-  doc.rect(margin + contentWidth * 0.78, 9, contentWidth * 0.22, 2.2, "F");
+  doc.rect(margin, 10, 18, 1.2, "F");
 
   const logo = await loadLogo();
-  if (logo) doc.addImage(logo, "PNG", margin, 15, 24, 24, undefined, "FAST");
-  else {
+  const logoBoxWidth = 22;
+  const logoBoxHeight = 20;
+  const logoX = margin;
+  const logoY = 15;
+  if (logo) {
+    const properties = doc.getImageProperties(logo);
+    const sourceWidth = Number(properties.width) || 1;
+    const sourceHeight = Number(properties.height) || 1;
+    const scale = Math.min(
+      logoBoxWidth / sourceWidth,
+      logoBoxHeight / sourceHeight,
+    );
+    const logoWidth = sourceWidth * scale;
+    const logoHeight = sourceHeight * scale;
+    doc.addImage(
+      logo,
+      "PNG",
+      logoX + (logoBoxWidth - logoWidth) / 2,
+      logoY + (logoBoxHeight - logoHeight) / 2,
+      logoWidth,
+      logoHeight,
+      undefined,
+      "FAST",
+    );
+  } else {
     doc.setFillColor(...navy);
-    doc.roundedRect(margin, 15, 24, 24, 2, 2, "F");
+    doc.roundedRect(logoX + 1, logoY, 20, 20, 1.5, 1.5, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("ADIEL", margin + 12, 29, { align: "center" });
+    doc.setFontSize(10);
+    doc.text("ADIEL", logoX + logoBoxWidth / 2, 27, { align: "center" });
   }
 
-  const companyX = margin + 29;
+  const companyX = margin + logoBoxWidth + 5;
   doc.setTextColor(...navy);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
+  doc.setFontSize(12);
   doc.text(
     clean(profile.companyName || "ADIEL CONSTRUCTION SUPPLIES"),
     companyX,
-    19,
-    { maxWidth: 88 },
+    18.5,
+    { maxWidth: 92 },
   );
   doc.setTextColor(...muted);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.2);
+  doc.setFontSize(7.1);
   const addressLines = wrapText(
     doc,
     profile.address || "Company address not configured",
-    88,
+    92,
     2,
   );
-  doc.text(addressLines, companyX, 24);
-  doc.setFontSize(6.5);
+  doc.text(addressLines, companyX, 23.2, { lineHeightFactor: 1.1 });
+  doc.setFontSize(6.8);
   const contactLines = wrapText(
     doc,
     companyContactLine(profile) || "Contact numbers not configured",
-    88,
+    92,
     2,
   );
-  doc.text(contactLines, companyX, 30.5, { lineHeightFactor: 1.05 });
+  doc.text(contactLines, companyX, 29.5, { lineHeightFactor: 1.08 });
   doc.text(
     clean(
       [profile.email, profile.tin && `TIN: ${profile.tin}`]
@@ -217,41 +242,40 @@ async function createDocument(
         .join("  |  ") || "Company email and TIN not configured",
     ),
     companyX,
-    38.5,
-    { maxWidth: 88 },
+    36,
+    { maxWidth: 92 },
   );
 
-  doc.setDrawColor(...orange);
-  doc.setLineWidth(1.2);
-  doc.line(145, 15, 145, 40);
-  doc.setTextColor(...orange);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  doc.text(kind, 150, 19);
   doc.setTextColor(...navy);
-  doc.setFontSize(15);
-  const kindLines = wrapText(doc, kind, 44);
-  doc.text(kindLines, 150, 26);
-  doc.setFontSize(8);
-  doc.text(clean(reference), 150, 38);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(kind === "STATEMENT OF ACCOUNT" ? 14 : 18);
+  const kindLines = wrapText(doc, kind, 48, 2);
+  doc.text(kindLines, pageWidth - margin, 20, { align: "right" });
+  const kindHeight = Math.max(1, kindLines.length) * 5.2;
+  doc.setTextColor(...muted);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.2);
+  doc.text(clean(reference), pageWidth - margin, 21.5 + kindHeight, { align: "right" });
 
   doc.setDrawColor(...border);
-  doc.setLineWidth(0.35);
-  doc.line(margin, 45, pageWidth - margin, 45);
-  return { doc, kind, reference, y: 51 };
+  doc.setLineWidth(0.3);
+  doc.line(margin, 43, pageWidth - margin, 43);
+  return { doc, kind, reference, y: 49 };
 }
 
 function drawContinuationHeader(context: PdfContext) {
   const { doc, kind, reference } = context;
-  doc.setFillColor(...navy);
-  doc.rect(margin, 10, contentWidth, 10, "F");
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(...navy);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text(kind, margin + 4, 16.4);
+  doc.setFontSize(8.5);
+  doc.text(kind, margin, 16);
   doc.setFont("helvetica", "normal");
-  doc.text(clean(reference), pageWidth - margin - 4, 16.4, { align: "right" });
-  context.y = 27;
+  doc.setTextColor(...muted);
+  doc.text(clean(reference), pageWidth - margin, 16, { align: "right" });
+  doc.setDrawColor(...border);
+  doc.setLineWidth(0.3);
+  doc.line(margin, 21, pageWidth - margin, 21);
+  context.y = 28;
 }
 
 function ensureSpace(context: PdfContext, height: number) {
@@ -261,93 +285,130 @@ function ensureSpace(context: PdfContext, height: number) {
 }
 
 function sectionTitle(context: PdfContext, title: string) {
-  ensureSpace(context, 10);
+  ensureSpace(context, 11);
   const { doc } = context;
-  doc.setFillColor(...orange);
-  doc.roundedRect(margin, context.y + 1.1, 12, 1.7, 0.8, 0.8, "F");
   doc.setTextColor(...navy);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text(clean(title).toUpperCase(), margin + 16, context.y + 3.2);
-  context.y += 8;
+  doc.setFontSize(9.2);
+  doc.text(clean(title), margin, context.y + 3.5);
+  doc.setDrawColor(...border);
+  doc.setLineWidth(0.25);
+  doc.line(margin, context.y + 7, pageWidth - margin, context.y + 7);
+  context.y += 11;
 }
 
-function infoGrid(
+type DetailEntry = { label: string; value: string };
+
+function detailColumns(
   context: PdfContext,
-  entries: Array<{ label: string; value: string }>,
-  columns = 2,
+  left: { title: string; entries: DetailEntry[] },
+  right: { title: string; entries: DetailEntry[] },
 ) {
   const { doc } = context;
-  const gap = 3;
-  const cellWidth = (contentWidth - gap * (columns - 1)) / columns;
-  const rows = Math.ceil(entries.length / columns);
-  for (let row = 0; row < rows; row += 1) {
-    const slice = entries.slice(row * columns, row * columns + columns);
-    const heights = slice.map((entry) =>
-      Math.max(
-        15,
-        wrapText(doc, entry.value || "Not provided", cellWidth - 8).length *
-          3.8 +
-          10,
-      ),
-    );
-    const rowHeight = Math.max(...heights);
-    ensureSpace(context, rowHeight + 3);
-    slice.forEach((entry, column) => {
-      const x = margin + column * (cellWidth + gap);
-      doc.setFillColor(...soft);
-      doc.setDrawColor(...border);
-      doc.roundedRect(x, context.y, cellWidth, rowHeight, 2, 2, "FD");
+  const gap = 14;
+  const columnWidth = (contentWidth - gap) / 2;
+  const columnHeight = (entries: DetailEntry[]) => entries.reduce((total, entry) => total + Math.max(13, wrapText(doc, entry.value || "Not provided", columnWidth).length * 4 + 8), 9);
+  const height = Math.max(columnHeight(left.entries), columnHeight(right.entries));
+  ensureSpace(context, height + 5);
+  const startY = context.y;
+
+  [left, right].forEach((column, columnIndex) => {
+    const x = margin + columnIndex * (columnWidth + gap);
+    let y = startY;
+    doc.setFillColor(...orange);
+    doc.rect(x, y, 10, 1, "F");
+    doc.setTextColor(...navy);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.2);
+    doc.text(clean(column.title), x, y + 6);
+    y += 10;
+    column.entries.forEach((entry) => {
+      const lines = wrapText(doc, entry.value || "Not provided", columnWidth);
+      const entryHeight = Math.max(13, lines.length * 4 + 8);
       doc.setTextColor(...muted);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(6.5);
-      doc.text(clean(entry.label).toUpperCase(), x + 4, context.y + 5);
+      doc.setFontSize(6.7);
+      doc.text(clean(entry.label).toUpperCase(), x, y + 3.5);
       doc.setTextColor(...ink);
-      doc.setFontSize(8.5);
-      doc.text(
-        wrapText(doc, entry.value || "Not provided", cellWidth - 8),
-        x + 4,
-        context.y + 10,
-      );
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.7);
+      doc.text(lines, x, y + 8.5, { lineHeightFactor: 1.06 });
+      doc.setDrawColor(...border);
+      doc.setLineWidth(0.2);
+      doc.line(x, y + entryHeight - 1, x + columnWidth, y + entryHeight - 1);
+      y += entryHeight;
     });
-    context.y += rowHeight + 3;
-  }
+  });
+  context.y = startY + height + 5;
+}
+
+function amountDueSummary(context: PdfContext, amount: number, dueDate: string, status: string) {
+  const { doc } = context;
+  const height = 22;
+  ensureSpace(context, height + 5);
+  doc.setFillColor(244, 247, 251);
+  doc.rect(margin, context.y, contentWidth, height, "F");
+  doc.setFillColor(...orange);
+  doc.rect(margin, context.y, 1.5, height, "F");
+  doc.setTextColor(...muted);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6.8);
+  doc.text("BALANCE DUE", margin + 6, context.y + 6);
+  doc.setTextColor(...navy);
+  doc.setFontSize(15);
+  doc.text(money(amount), margin + 6, context.y + 15);
+  doc.setTextColor(...muted);
+  doc.setFontSize(6.8);
+  doc.text("DUE DATE", pageWidth - margin - 48, context.y + 6);
+  doc.setTextColor(...ink);
+  doc.setFontSize(8.8);
+  doc.text(date(dueDate), pageWidth - margin - 48, context.y + 12);
+  doc.setTextColor(...muted);
+  doc.setFontSize(6.8);
+  doc.text("STATUS", pageWidth - margin, context.y + 6, { align: "right" });
+  doc.setTextColor(...navy);
+  doc.setFontSize(8.8);
+  doc.text(clean(status), pageWidth - margin, context.y + 12, { align: "right" });
+  context.y += height + 5;
 }
 
 function subjectBox(context: PdfContext, label: string, value: string) {
   if (!value) return;
   const { doc } = context;
-  const lines = wrapText(doc, value, contentWidth - 13);
-  const height = Math.max(13, lines.length * 4 + 8);
+  const lines = wrapText(doc, value, contentWidth);
+  const height = Math.max(14, lines.length * 4.2 + 9);
   ensureSpace(context, height + 3);
-  doc.setFillColor(255, 247, 237);
-  doc.setDrawColor(254, 215, 170);
-  doc.roundedRect(margin, context.y, contentWidth, height, 2, 2, "FD");
-  doc.setFillColor(...orange);
-  doc.rect(margin, context.y, 2.2, height, "F");
-  doc.setTextColor(154, 52, 18);
+  doc.setDrawColor(...border);
+  doc.setLineWidth(0.25);
+  doc.line(margin, context.y + height, pageWidth - margin, context.y + height);
+  doc.setTextColor(...muted);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(7);
-  doc.text(clean(label).toUpperCase(), margin + 6, context.y + 5);
+  doc.setFontSize(6.8);
+  doc.text(clean(label).toUpperCase(), margin, context.y + 4);
   doc.setTextColor(...ink);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text(lines, margin + 6, context.y + 10);
+  doc.setFontSize(9);
+  doc.text(lines, margin, context.y + 9);
   context.y += height + 3;
 }
 
 function table(context: PdfContext, columns: TableColumn[], rows: string[][]) {
   const { doc } = context;
-  const headerHeight = 8;
+  const suppliedWidth = columns.reduce((total, column) => total + column.width, 0) || contentWidth;
+  const layoutColumns = columns.map((column) => ({ ...column, width: column.width * (contentWidth / suppliedWidth) }));
+  const headerHeight = 9;
   const drawHeader = () => {
     ensureSpace(context, headerHeight + 9);
-    doc.setFillColor(...navy);
+    doc.setFillColor(...soft);
     doc.rect(margin, context.y, contentWidth, headerHeight, "F");
+    doc.setDrawColor(...border);
+    doc.setLineWidth(0.3);
+    doc.line(margin, context.y + headerHeight, pageWidth - margin, context.y + headerHeight);
     let x = margin;
-    columns.forEach((column) => {
-      doc.setTextColor(255, 255, 255);
+    layoutColumns.forEach((column) => {
+      doc.setTextColor(...navy);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(6.3);
+      doc.setFontSize(6.8);
       const textX =
         column.align === "right"
           ? x + column.width - 2.5
@@ -365,12 +426,12 @@ function table(context: PdfContext, columns: TableColumn[], rows: string[][]) {
   drawHeader();
   rows.forEach((row, rowIndex) => {
     const cellLines = row.map((cell, index) => {
-      const column = columns[index] ?? columns[columns.length - 1]!;
+      const column = layoutColumns[index] ?? layoutColumns[layoutColumns.length - 1]!;
       return wrapText(doc, cell, column.width - 5, 4);
     });
     const rowHeight = Math.max(
-      9,
-      ...cellLines.map((lines) => lines.length * 3.7 + 4),
+      10,
+      ...cellLines.map((lines) => lines.length * 4 + 4.5),
     );
     if (context.y + rowHeight > bottomLimit) {
       context.doc.addPage();
@@ -378,7 +439,7 @@ function table(context: PdfContext, columns: TableColumn[], rows: string[][]) {
       drawHeader();
     }
     if (rowIndex % 2 === 1) {
-      doc.setFillColor(...soft);
+      doc.setFillColor(251, 252, 254);
       doc.rect(margin, context.y, contentWidth, rowHeight, "F");
     }
     doc.setDrawColor(...border);
@@ -391,20 +452,20 @@ function table(context: PdfContext, columns: TableColumn[], rows: string[][]) {
     );
     let x = margin;
     cellLines.forEach((lines, index) => {
-      const column = columns[index] ?? columns[columns.length - 1]!;
+      const column = layoutColumns[index] ?? layoutColumns[layoutColumns.length - 1]!;
       doc.setTextColor(...(index === cellLines.length - 1 ? navy : ink));
       doc.setFont(
         "helvetica",
         index === 1 || index === cellLines.length - 1 ? "bold" : "normal",
       );
-      doc.setFontSize(7.2);
+      doc.setFontSize(7.8);
       const textX =
         column.align === "right"
           ? x + column.width - 2.5
           : column.align === "center"
             ? x + column.width / 2
             : x + 2.5;
-      doc.text(lines, textX, context.y + 5, { align: column.align ?? "left" });
+      doc.text(lines, textX, context.y + 5.8, { align: column.align ?? "left", lineHeightFactor: 1.05 });
       x += column.width;
     });
     context.y += rowHeight;
@@ -422,45 +483,48 @@ function totals(
   }>,
 ) {
   const { doc } = context;
-  const width = 78;
+  const width = 76;
   const x = pageWidth - margin - width;
   const height = entries.reduce(
-    (sum, entry) => sum + (entry.grand ? 14 : 9),
+    (sum, entry) => sum + (entry.grand ? 15 : 8.5),
     0,
   );
   ensureSpace(context, height + 5);
   let y = context.y;
   entries.forEach((entry) => {
-    const rowHeight = entry.grand ? 14 : 9;
+    const rowHeight = entry.grand ? 15 : 8.5;
     if (entry.grand) {
-      doc.setFillColor(...navy);
+      doc.setFillColor(239, 244, 250);
       doc.rect(x, y, width, rowHeight, "F");
-      doc.setTextColor(255, 255, 255);
+      doc.setDrawColor(...navy);
+      doc.setLineWidth(0.8);
+      doc.line(x, y, x + width, y);
+      doc.setTextColor(...navy);
     } else {
-      doc.setFillColor(...soft);
       doc.setDrawColor(...border);
-      doc.rect(x, y, width, rowHeight, "FD");
+      doc.setLineWidth(0.2);
+      doc.line(x, y + rowHeight, x + width, y + rowHeight);
       doc.setTextColor(...muted);
     }
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(entry.grand ? 8 : 7.2);
+    doc.setFontSize(entry.grand ? 8.2 : 7.4);
     doc.text(
       clean(entry.label).toUpperCase(),
       x + 4,
-      y + (entry.grand ? 8.7 : 5.8),
+      y + (entry.grand ? 9.3 : 5.6),
     );
     doc.setTextColor(
       ...(entry.grand
-        ? ([255, 255, 255] as [number, number, number])
+        ? navy
         : entry.negative
           ? ([5, 150, 105] as [number, number, number])
           : navy),
     );
-    doc.setFontSize(entry.grand ? 11 : 8);
+    doc.setFontSize(entry.grand ? 11.5 : 8.2);
     doc.text(
       `${entry.negative ? "- " : ""}${money(entry.value)}`,
       x + width - 4,
-      y + (entry.grand ? 8.7 : 5.8),
+      y + (entry.grand ? 9.3 : 5.6),
       { align: "right" },
     );
     y += rowHeight;
@@ -469,39 +533,44 @@ function totals(
 }
 
 function note(context: PdfContext, label: string, value: string) {
+  if (!value.trim()) return;
   const { doc } = context;
-  const lines = wrapText(doc, value || "None", contentWidth - 10);
-  const height = Math.max(14, lines.length * 4 + 10);
+  const lines = wrapText(doc, value, contentWidth);
+  const height = Math.max(15, lines.length * 4.2 + 10);
   ensureSpace(context, height + 4);
   doc.setDrawColor(...border);
-  doc.roundedRect(margin, context.y, contentWidth, height, 2, 2, "S");
+  doc.setLineWidth(0.25);
+  doc.line(margin, context.y, pageWidth - margin, context.y);
   doc.setTextColor(...muted);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.5);
-  doc.text(clean(label).toUpperCase(), margin + 4, context.y + 5);
+  doc.setFontSize(6.8);
+  doc.text(clean(label).toUpperCase(), margin, context.y + 5);
   doc.setTextColor(...ink);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.text(lines, margin + 4, context.y + 10);
+  doc.setFontSize(8.2);
+  doc.text(lines, margin, context.y + 10);
   context.y += height + 4;
 }
 
-function terms(context: PdfContext, value: string) {
+function terms(context: PdfContext, value: string, title = "Terms and conditions") {
   const entries = value
     .split(/\r?\n/)
     .map((entry) => entry.trim())
     .filter(Boolean);
   if (!entries.length) return;
-  sectionTitle(context, "Terms and conditions");
+  const firstEntryLines = wrapText(context.doc, `1. ${clean(entries[0])}`, contentWidth - 3);
+  const firstEntryHeight = firstEntryLines.length * 4.1 + 2.5;
+  ensureSpace(context, 11 + firstEntryHeight);
+  sectionTitle(context, title);
   entries.forEach((entry, index) => {
     const { doc } = context;
-    const lines = wrapText(doc, `${index + 1}. ${clean(entry)}`, contentWidth - 5);
-    const height = lines.length * 3.7 + 2;
+    const lines = wrapText(doc, `${index + 1}. ${clean(entry)}`, contentWidth - 3);
+    const height = lines.length * 4.1 + 2.5;
     ensureSpace(context, height);
     doc.setTextColor(...ink);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.2);
-    doc.text(lines, margin + 2, context.y + 3);
+    doc.setFontSize(8);
+    doc.text(lines, margin, context.y + 3.5, { lineHeightFactor: 1.08 });
     context.y += height;
   });
 }
@@ -511,24 +580,24 @@ function finalize(context: PdfContext, footerText: string) {
   const pages = doc.getNumberOfPages();
   for (let page = 1; page <= pages; page += 1) {
     doc.setPage(page);
-    doc.setDrawColor(...navy);
-    doc.setLineWidth(0.8);
-    doc.line(margin, 285, pageWidth - margin, 285);
+    doc.setDrawColor(...border);
+    doc.setLineWidth(0.3);
+    doc.line(margin, 284, pageWidth - margin, 284);
     doc.setTextColor(...muted);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.text(
       clean(footerText || "Generated electronically by the ADIEL Operations System."),
       margin,
-      290,
-      { maxWidth: 105 },
+      289,
+      { maxWidth: 100 },
     );
-    doc.setFont("helvetica", "bold");
+    doc.setFont("helvetica", "normal");
     doc.setTextColor(...navy);
     doc.text(
       `${clean(reference)}  |  ${kind}  |  Page ${page} of ${pages}`,
       pageWidth - margin,
-      290,
+      289,
       { align: "right" },
     );
   }
@@ -545,21 +614,25 @@ export async function createQuotationPdfBlob(
     quotation.quotationNumber,
     profile,
   );
-  sectionTitle(context, "Quotation details");
-  infoGrid(context, [
-    { label: "Quotation number", value: quotation.quotationNumber },
-    { label: "Date issued", value: date(quotation.dateCreated) },
-    { label: "Prepared for", value: quotation.clientName },
+  detailColumns(
+    context,
     {
-      label: "Contact person",
-      value: quotation.contactPerson || "Not provided",
+      title: "Prepared for",
+      entries: [
+        { label: "Client", value: quotation.clientName },
+        { label: "Contact person", value: quotation.contactPerson || "Not provided" },
+        { label: "Project location", value: quotation.projectLocation || "Not provided" },
+      ],
     },
     {
-      label: "Project location",
-      value: quotation.projectLocation || "Not provided",
+      title: "Document details",
+      entries: [
+        { label: "Quotation number", value: quotation.quotationNumber },
+        { label: "Date issued", value: date(quotation.dateCreated) },
+        { label: "Lead time", value: quotation.leadTime || "Not provided" },
+      ],
     },
-    { label: "Lead time", value: quotation.leadTime || "Not provided" },
-  ]);
+  );
   subjectBox(context, "Subject", quotation.subject);
   sectionTitle(context, "Quoted items");
   table(
@@ -569,8 +642,8 @@ export async function createQuotationPdfBlob(
       { label: "Description", width: 68 },
       { label: "Unit", width: 24 },
       { label: "Qty", width: 18, align: "right" },
-      { label: "Unit price", width: 30, align: "right" },
-      { label: "Amount", width: 32, align: "right" },
+      { label: "Unit price (PHP)", width: 30, align: "right" },
+      { label: "Amount (PHP)", width: 32, align: "right" },
     ],
     quotation.items.map((line, index) => [
       String(index + 1),
@@ -579,8 +652,8 @@ export async function createQuotationPdfBlob(
         .join(" - "),
       line.unitOfMeasure,
       String(line.quantity),
-      money(line.unitPrice),
-      money(line.quantity * line.unitPrice),
+      amount(line.unitPrice),
+      amount(line.quantity * line.unitPrice),
     ]),
   );
   totals(context, [
@@ -594,16 +667,8 @@ export async function createQuotationPdfBlob(
     })),
     { label: "Grand total", value: quotation.totalAmount, grand: true },
   ]);
-  terms(
-    context,
-    [
-      quotation.leadTime && `Lead time: ${quotation.leadTime}.`,
-      defaults.quotationTerms,
-      latePolicy.enabled && `Late-payment condition: overdue balances may incur ${latePolicy.type === "Percentage" ? `${latePolicy.value}% interest` : `${money(latePolicy.value)} as a fixed charge`} after ${latePolicy.graceDays} grace day${latePolicy.graceDays === 1 ? "" : "s"}. The applicable schedule is confirmed in the Statement of Account.`,
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  );
+  note(context, "Notes / remarks", quotation.notes);
+  terms(context, [quotation.terms, latePolicy.enabled && `Late-payment condition: overdue balances may incur ${latePolicy.type === "Percentage" ? `${latePolicy.value}% interest` : `${money(latePolicy.value)} as a fixed charge`} after ${latePolicy.graceDays} grace day${latePolicy.graceDays === 1 ? "" : "s"}. The applicable schedule is confirmed in the Statement of Account.`].filter(Boolean).join("\n"));
   finalize(context, defaults.pdfFooter);
   return context.doc.output("blob");
 }
@@ -632,33 +697,27 @@ export async function createPurchaseOrderPdfBlob(
     order.poNumber,
     profile,
   );
-  sectionTitle(context, "Order details");
-  infoGrid(context, [
-    { label: "PO number", value: order.poNumber },
-    { label: "Order date", value: date(order.date) },
-    { label: "Payment mode", value: order.modeOfPayment || "Not provided" },
-    { label: "Payment terms", value: order.paymentTerm || "Not provided" },
-    { label: "Delivery mode", value: order.modeOfDelivery || "Not provided" },
+  detailColumns(
+    context,
     {
-      label: "Delivery location",
-      value: order.deliveryLocation || "Not provided",
+      title: "Supplier",
+      entries: [
+        { label: "Company name", value: supplier.name },
+        { label: "Contact person", value: supplier.contactPerson || "Not provided" },
+        { label: "Address", value: supplier.address || "Not provided" },
+        { label: "Contact details", value: [supplier.phone, supplier.email].filter(Boolean).join(" | ") || "Not provided" },
+      ],
     },
-  ]);
-  sectionTitle(context, "Supplier");
-  infoGrid(context, [
-    { label: "Company name", value: supplier.name },
     {
-      label: "Contact person",
-      value: supplier.contactPerson || "Not provided",
+      title: "Order details",
+      entries: [
+        { label: "PO number", value: order.poNumber },
+        { label: "Order date", value: date(order.date) },
+        { label: "Payment", value: [order.modeOfPayment, order.paymentTerm].filter(Boolean).join(" | ") || "Not provided" },
+        { label: "Delivery", value: [order.modeOfDelivery, order.deliveryLocation].filter(Boolean).join(" | ") || "Not provided" },
+      ],
     },
-    { label: "Address", value: supplier.address || "Not provided" },
-    {
-      label: "Contact details",
-      value:
-        [supplier.phone, supplier.email].filter(Boolean).join(" | ") ||
-        "Not provided",
-    },
-  ]);
+  );
   subjectBox(context, "Subject", order.subject);
   sectionTitle(context, "Order items");
   table(
@@ -668,8 +727,8 @@ export async function createPurchaseOrderPdfBlob(
       { label: "Description", width: 68 },
       { label: "Unit", width: 24 },
       { label: "Qty", width: 18, align: "right" },
-      { label: "Unit cost", width: 30, align: "right" },
-      { label: "Amount", width: 32, align: "right" },
+      { label: "Unit cost (PHP)", width: 30, align: "right" },
+      { label: "Amount (PHP)", width: 32, align: "right" },
     ],
     order.items.map((line, index) => [
       String(index + 1),
@@ -678,8 +737,8 @@ export async function createPurchaseOrderPdfBlob(
         .join(" - "),
       line.unitOfMeasure,
       String(line.quantity),
-      money(line.unitCost),
-      money(line.quantity * line.unitCost),
+      amount(line.unitCost),
+      amount(line.quantity * line.unitCost),
     ]),
   );
   totals(context, [
@@ -730,24 +789,26 @@ export async function createStatementOfAccountPdfBlob(
     statement.soaNumber,
     profile,
   );
-  sectionTitle(context, "Account details");
-  infoGrid(context, [
-    { label: "SOA number", value: statement.soaNumber },
-    { label: "Statement date", value: date(statement.statementDate) },
-    { label: "Client", value: statement.clientName },
+  detailColumns(
+    context,
     {
-      label: "Contact person",
-      value: statement.contactPerson || "Not provided",
+      title: "Client account",
+      entries: [
+        { label: "Client", value: statement.clientName },
+        { label: "Contact person", value: statement.contactPerson || "Not provided" },
+        { label: "Coverage period", value: `${date(statement.coverageFrom)} - ${date(statement.coverageTo)}` },
+      ],
     },
     {
-      label: "Coverage period",
-      value: `${date(statement.coverageFrom)} - ${date(statement.coverageTo)}`,
+      title: "Statement details",
+      entries: [
+        { label: "SOA number", value: statement.soaNumber },
+        { label: "Statement date", value: date(statement.statementDate) },
+        { label: "Payment arrangement", value: statement.paymentArrangement },
+      ],
     },
-    {
-      label: "Due date / Status",
-      value: `${date(statement.dueDate)} / ${effectiveStatus}`,
-    },
-  ]);
+  );
+  amountDueSummary(context, statement.balance, statement.dueDate, effectiveStatus);
   sectionTitle(context, "Account activity");
   const activity = [
     ...(statement.openingBalance > 0
@@ -792,9 +853,9 @@ export async function createStatementOfAccountPdfBlob(
       { label: "Date", width: 25 },
       { label: "Reference", width: 29 },
       { label: "Description", width: 56 },
-      { label: "Charge", width: 24, align: "right" },
-      { label: "Payment", width: 24, align: "right" },
-      { label: "Balance", width: 24, align: "right" },
+      { label: "Charge (PHP)", width: 24, align: "right" },
+      { label: "Payment (PHP)", width: 24, align: "right" },
+      { label: "Balance (PHP)", width: 24, align: "right" },
     ],
     activity.map((entry) => {
       runningBalance += entry.charge - entry.payment;
@@ -802,9 +863,9 @@ export async function createStatementOfAccountPdfBlob(
         date(entry.date),
         entry.reference,
         entry.description,
-        entry.charge ? money(entry.charge) : "-",
-        entry.payment ? money(entry.payment) : "-",
-        money(runningBalance),
+        entry.charge ? amount(entry.charge) : "-",
+        entry.payment ? amount(entry.payment) : "-",
+        amount(runningBalance),
       ];
     }),
   );
@@ -825,7 +886,7 @@ export async function createStatementOfAccountPdfBlob(
       [
         { label: "Installment", width: 50 },
         { label: "Due date", width: 32 },
-        { label: "Amount", width: 36, align: "right" },
+        { label: "Amount (PHP)", width: 36, align: "right" },
         { label: "Late-payment rule", width: 64 },
       ],
       statement.paymentSchedule.map((entry) => {
@@ -833,17 +894,12 @@ export async function createStatementOfAccountPdfBlob(
         const rule = !policy.enabled
           ? "No late charge"
           : `${policy.type === "Percentage" ? `${policy.value}% interest` : `${money(policy.value)} fixed`} after ${policy.graceDays} grace day${policy.graceDays === 1 ? "" : "s"}`;
-        return [entry.label, date(entry.dueDate), money(entry.amount), rule];
+        return [entry.label, date(entry.dueDate), amount(entry.amount), rule];
       }),
     );
   }
-  note(
-    context,
-    "Notes / payment instructions",
-    [defaults.statementPaymentInstructions, statement.notes]
-      .filter(Boolean)
-      .join("\n\n"),
-  );
+  note(context, "Notes / remarks", statement.notes);
+  terms(context, statement.terms);
   finalize(context, defaults.pdfFooter);
   return context.doc.output("blob");
 }

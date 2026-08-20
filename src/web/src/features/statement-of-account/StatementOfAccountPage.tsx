@@ -1,7 +1,9 @@
 import type { FormEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { DocumentContentFormSectionPortal } from '../../components/ui/DocumentContentFields'
+import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
@@ -10,7 +12,7 @@ import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
 import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { PurchaseOrderClientPickerDialog } from '../purchase-orders/PurchaseOrderClientPickerDialog'
-import { loadLateChargePolicy, nextDocumentNumber } from '../settings/settingsStorage'
+import { loadDocumentDefaults, loadLateChargePolicy, nextDocumentNumber } from '../settings/settingsStorage'
 import { effectiveStatementStatus, lateChargeProgress, normalizeLateChargePolicy, paymentAllocation, principalPayments, scheduleLateChargePolicy, statementFinancials, statementScheduleProgress, suggestedLateCharge } from './latePayment'
 import { PaymentArrangementDialog, type PaymentArrangementValues } from './PaymentArrangementDialog'
 import { PaymentScheduleOverview } from './PaymentScheduleOverview'
@@ -73,6 +75,7 @@ type StatementDraft = {
   paymentSchedule: PaymentScheduleEntry[]
   status: StatementStatus
   notes: string
+  terms: string
 }
 
 type PaymentDraft = {
@@ -225,6 +228,7 @@ export function loadStatements(): StatementOfAccount[] {
         lateCharges,
         status: statuses.includes(saved.status as StatementStatus) ? saved.status as StatementStatus : 'Draft',
         notes: saved.notes ?? '',
+        terms: typeof saved.terms === 'string' ? saved.terms : loadDocumentDefaults().statementPaymentInstructions,
         createdAt: saved.createdAt ?? new Date().toISOString(),
         updatedAt: saved.updatedAt ?? new Date().toISOString(),
       }]
@@ -246,16 +250,34 @@ function statusTone(status: StatementStatus) {
   return 'bg-slate-100 text-slate-600'
 }
 
+function statementDraftFrom(statement: StatementOfAccount): StatementDraft {
+  return { soaNumber: statement.soaNumber, statementDate: statement.statementDate, coverageFrom: statement.coverageFrom, coverageTo: statement.coverageTo, dueDate: statement.dueDate, clientId: statement.clientId, contactPerson: statement.contactPerson, quotationIds: statement.quotations.map((quotation) => quotation.id), openingBalance: String(statement.openingBalance), paymentArrangement: statement.paymentArrangement, paymentFrequency: statement.paymentFrequency, paymentSchedule: statement.paymentSchedule, status: statement.status, notes: statement.notes, terms: statement.terms }
+}
+
 export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPageProps) {
   const [statements, setStatements] = useState<StatementOfAccount[]>(loadStatements)
   const [clients, setClients] = useState<Client[]>(loadClients)
   const [quotations, setQuotations] = useState<SourceQuotation[]>(loadQuotations)
+  const initialQuery = new URLSearchParams(window.location.search)
+  const openNewFromQuery = initialQuery.get('new') === '1'
+  const openNewOnLoad = openNewFromQuery || window.location.pathname === '/statement-of-account/new'
+  const quotationIdOnLoad = initialQuery.get('quotationId')
+  const editStatementIdOnLoad = /^\/statement-of-account\/([^/]+)\/edit$/.exec(window.location.pathname)?.[1]
+  const editStatementOnLoad = editStatementIdOnLoad ? statements.find((statement) => statement.id === decodeURIComponent(editStatementIdOnLoad)) : undefined
   const [search, setSearch] = usePersistentState('statements.search', '')
   const [statusFilter, setStatusFilter] = usePersistentState<string>('statements.status', 'All statuses')
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [isFormOpen, setIsFormOpen] = useState(openNewOnLoad || Boolean(editStatementOnLoad))
   const [isClientPickerOpen, setIsClientPickerOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [draft, setDraft] = useState<StatementDraft>(() => emptyDraft([], []))
+  const [editingId, setEditingId] = useState<string | null>(editStatementOnLoad?.id ?? null)
+  const [draft, setDraft] = useState<StatementDraft>(() => {
+    if (editStatementOnLoad) return statementDraftFrom(editStatementOnLoad)
+    const values = emptyDraft(statements, clients)
+    if (!openNewOnLoad || !quotationIdOnLoad) return values
+    const quotation = quotations.find((entry) => entry.id === quotationIdOnLoad && entry.status === 'Approved')
+    if (!quotation) return values
+    const client = clients.find((entry) => entry.id === quotation.clientId)
+    return { ...values, clientId: quotation.clientId, contactPerson: client?.contactPerson ?? '', quotationIds: [quotation.id] }
+  })
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
   const [toast, setToast] = useState('')
@@ -280,6 +302,7 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
   const [lateChargeError, setLateChargeError] = useState('')
   const [isPaymentArrangementOpen, setIsPaymentArrangementOpen] = useState(false)
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const statementSubmitIntent = useRef<'draft' | 'issue' | 'preserve'>('draft')
 
   function makeNumber(date: string) {
     return nextDocumentNumber('statementOfAccount', statements.map((statement) => statement.soaNumber), date)
@@ -288,12 +311,20 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
   function emptyDraft(statementList = statements, clientList = clients): StatementDraft {
     const today = new Date().toISOString().slice(0, 10)
     const firstClient = clientList.find((client) => client.status === 'Active')
-    return { soaNumber: nextDocumentNumber('statementOfAccount', statementList.map((statement) => statement.soaNumber), today), statementDate: today, coverageFrom: today, coverageTo: today, dueDate: datePlusDays(today, 30), clientId: firstClient?.id ?? '', contactPerson: firstClient?.contactPerson ?? '', quotationIds: [], openingBalance: '0', paymentArrangement: 'Full payment', paymentFrequency: 'Custom', paymentSchedule: [], status: 'Draft', notes: '' }
+    return { soaNumber: nextDocumentNumber('statementOfAccount', statementList.map((statement) => statement.soaNumber), today), statementDate: today, coverageFrom: today, coverageTo: today, dueDate: datePlusDays(today, 30), clientId: firstClient?.id ?? '', contactPerson: firstClient?.contactPerson ?? '', quotationIds: [], openingBalance: '0', paymentArrangement: 'Full payment', paymentFrequency: 'Custom', paymentSchedule: [], status: 'Draft', notes: '', terms: '' }
   }
 
   function emptyPayment(): PaymentDraft {
     return { date: new Date().toISOString().slice(0, 10), amount: '', method: 'Bank transfer', referenceNumber: '', notes: '' }
   }
+
+  useEffect(() => {
+    if (openNewFromQuery) {
+      window.history.replaceState(null, '', '/statement-of-account/new')
+      setCurrentPath('/statement-of-account/new')
+      window.dispatchEvent(new Event('adiel:navigate'))
+    }
+  }, [openNewFromQuery])
 
   useEffect(() => {
     function refreshData() {
@@ -326,6 +357,19 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     const timeout = window.setTimeout(() => setToast(''), 2800)
     return () => window.clearTimeout(timeout)
   }, [toast])
+
+  useEffect(() => {
+    if (!paymentStatementId) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusFrame = window.requestAnimationFrame(() => {
+      document.getElementById('payment-amount')?.focus()
+    })
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [paymentStatementId])
 
   const routeMatch = currentPath.match(/^\/statement-of-account\/([^/]+)$/)
   const profileId = routeMatch?.[1]
@@ -368,20 +412,31 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     window.dispatchEvent(new Event('adiel:navigate'))
   }
 
+  function closeStatementFormPage() {
+    setIsFormOpen(false)
+    setIsClientPickerOpen(false)
+    setIsPaymentArrangementOpen(false)
+    window.history.replaceState(null, '', '/statement-of-account')
+    setCurrentPath('/statement-of-account')
+    window.dispatchEvent(new Event('adiel:navigate'))
+  }
+
   function openNew() {
     setEditingId(null)
     setDraft(emptyDraft())
     setIsPaymentArrangementOpen(false)
     setFormError('')
     setIsFormOpen(true)
+    navigate('/statement-of-account/new')
   }
 
   function openEdit(statement: StatementOfAccount) {
     setEditingId(statement.id)
-    setDraft({ soaNumber: statement.soaNumber, statementDate: statement.statementDate, coverageFrom: statement.coverageFrom, coverageTo: statement.coverageTo, dueDate: statement.dueDate, clientId: statement.clientId, contactPerson: statement.contactPerson, quotationIds: statement.quotations.map((quotation) => quotation.id), openingBalance: String(statement.openingBalance), paymentArrangement: statement.paymentArrangement, paymentFrequency: statement.paymentFrequency, paymentSchedule: statement.paymentSchedule, status: statement.status, notes: statement.notes })
+    setDraft(statementDraftFrom(statement))
     setFormError('')
     setIsPaymentArrangementOpen(false)
     setIsFormOpen(true)
+    navigate(`/statement-of-account/${encodeURIComponent(statement.id)}/edit`)
   }
 
   function selectClient(clientId: string) {
@@ -412,6 +467,9 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
 
   function saveStatement(event: FormEvent) {
     event.preventDefault()
+    const submitter = (event.nativeEvent as SubmitEvent).submitter
+    const intent = submitter instanceof HTMLButtonElement ? submitter.dataset.intent : undefined
+    statementSubmitIntent.current = intent === 'issue' ? 'issue' : intent === 'preserve' ? 'preserve' : 'draft'
     const client = clients.find((entry) => entry.id === draft.clientId)
     if (!client || !draft.quotationIds.length || !draft.statementDate || !draft.coverageFrom || !draft.coverageTo || !draft.dueDate || draft.coverageFrom > draft.coverageTo || Number(draft.openingBalance) < 0) {
       setFormError('Select a client and at least one approved quotation, then check the coverage dates and opening balance.')
@@ -447,17 +505,17 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     const totalLateChargePayments = payments.reduce((total, payment) => total + payment.lateChargeAmount, 0)
     const activeLateCharges = lateCharges.filter((charge) => charge.status === 'Applied').reduce((total, charge) => total + charge.amount, 0)
     const balance = Math.max(0, openingBalance + totalCharges - totalPrincipalPayments) + Math.max(0, activeLateCharges - totalLateChargePayments)
-    let status = draft.status
+    let status: StatementStatus = statementSubmitIntent.current === 'issue' ? 'Issued' : statementSubmitIntent.current === 'draft' ? 'Draft' : draft.status
     if (status !== 'Cancelled' && status !== 'Draft' && totalPayments > 0) status = balance <= 0 ? 'Settled' : 'Partially Settled'
     const nextPayment = getNextScheduleEntry(arrangementValues.paymentSchedule, totalPrincipalPayments)
-    const statementValues: StatementOfAccount = { id: editingStatement?.id ?? crypto.randomUUID(), soaNumber: editingStatement?.soaNumber ?? makeNumber(draft.statementDate), statementDate: draft.statementDate, coverageFrom: draft.coverageFrom, coverageTo: draft.coverageTo, dueDate: nextPayment?.dueDate ?? arrangementValues.paymentSchedule.at(-1)?.dueDate ?? draft.dueDate, clientId: client.id, clientName: client.name, contactPerson: draft.contactPerson.trim() || client.contactPerson, quotations: quotationSnapshots, openingBalance, totalCharges, payments, totalPayments, balance, paymentArrangement: arrangementValues.paymentArrangement, paymentFrequency: arrangementValues.paymentFrequency, paymentSchedule: arrangementValues.paymentSchedule, lateChargePolicy, lateCharges, status, notes: draft.notes.trim(), createdAt: editingStatement?.createdAt ?? now, updatedAt: now }
+    const statementValues: StatementOfAccount = { id: editingStatement?.id ?? crypto.randomUUID(), soaNumber: editingStatement?.soaNumber ?? makeNumber(draft.statementDate), statementDate: draft.statementDate, coverageFrom: draft.coverageFrom, coverageTo: draft.coverageTo, dueDate: nextPayment?.dueDate ?? arrangementValues.paymentSchedule.at(-1)?.dueDate ?? draft.dueDate, clientId: client.id, clientName: client.name, contactPerson: draft.contactPerson.trim() || client.contactPerson, quotations: quotationSnapshots, openingBalance, totalCharges, payments, totalPayments, balance, paymentArrangement: arrangementValues.paymentArrangement, paymentFrequency: arrangementValues.paymentFrequency, paymentSchedule: arrangementValues.paymentSchedule, lateChargePolicy, lateCharges, status, notes: draft.notes.trim(), terms: draft.terms.trim(), createdAt: editingStatement?.createdAt ?? now, updatedAt: now }
     setStatements((current) => editingStatement ? current.map((statement) => statement.id === editingStatement.id ? statementValues : statement) : [statementValues, ...current])
     appendSystemLog({ module: 'Statements of Account', action: editingStatement ? 'Updated' : 'Created', recordId: statementValues.id, entity: statementValues.soaNumber, description: `${editingStatement ? 'Updated' : 'Created'} for ${statementValues.clientName} with a ${statementValues.paymentArrangement.toLowerCase()} arrangement.`, actor: currentUsername, amount: statementValues.balance, status: statementValues.status, tone: editingStatement ? 'info' : 'success' })
     setDraft((current) => ({ ...current, ...arrangementValues, dueDate: statementValues.dueDate }))
     setIsPaymentArrangementOpen(false)
-    setIsFormOpen(false)
+    closeStatementFormPage()
     setEditingId(null)
-    setToast(editingStatement ? 'Statement and payment arrangement updated.' : 'Statement created with its payment arrangement.')
+    setToast(statementSubmitIntent.current === 'issue' ? 'Statement reviewed and issued.' : editingStatement ? 'Statement and payment arrangement updated.' : 'Statement saved as draft with its payment arrangement.')
     if (profileStatement) navigate(`/statement-of-account/${statementValues.id}`)
   }
 
@@ -600,7 +658,7 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
   function renderPaymentDialog() {
     const statement = statements.find((entry) => entry.id === paymentStatementId)
     if (!statement) return null
-    return <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="payment-dialog-title"><button className="absolute inset-0" type="button" onClick={() => setPaymentStatementId(null)} aria-label="Close payment form" /><form className="relative my-6 w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]" onSubmit={recordPayment}><header className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-600">Account payment</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="payment-dialog-title">Record payment</h2><p className="mt-1 text-xs text-slate-400">{statement.soaNumber} · Balance {formatPeso(statement.balance)}</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 hover:bg-slate-100" type="button" onClick={() => setPaymentStatementId(null)}><Icon path="M18 6 6 18M6 6l12 12" /></button></header><div className="space-y-4 px-6 py-5">{paymentError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{paymentError}</div> : null}<div className="grid gap-4 sm:grid-cols-2"><div><label className={labelClassName}>Payment date</label><AnimatedDatePicker value={paymentDraft.date} onChange={(date) => setPaymentDraft((current) => ({ ...current, date }))} ariaLabel="Payment date" required /></div><div><label className={labelClassName} htmlFor="payment-amount">Amount</label><input className={fieldClassName} id="payment-amount" type="number" min="0.01" max={statement.balance} step="0.01" value={paymentDraft.amount} onChange={(event) => setPaymentDraft((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" required /></div><div><label className={labelClassName}>Payment method</label><AnimatedDropdown value={paymentDraft.method} options={paymentMethodOptions} onChange={(method) => setPaymentDraft((current) => ({ ...current, method }))} ariaLabel="Payment method" /></div><div><label className={labelClassName} htmlFor="payment-reference">Reference number</label><input className={fieldClassName} id="payment-reference" value={paymentDraft.referenceNumber} onChange={(event) => setPaymentDraft((current) => ({ ...current, referenceNumber: event.target.value }))} placeholder="Check or transaction number" /></div></div><div><label className={labelClassName} htmlFor="payment-notes">Notes</label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-white p-3.5 text-sm text-brand-blue outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="payment-notes" value={paymentDraft.notes} onChange={(event) => setPaymentDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional internal payment note" /></div></div><footer className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setPaymentStatementId(null)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white" type="submit">Record payment</button></footer></form></div>
+    return <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-labelledby="payment-dialog-title"><button className="absolute inset-0" type="button" onClick={() => setPaymentStatementId(null)} aria-label="Close payment form" /><form className="relative my-auto max-h-[calc(100svh-2rem)] w-full max-w-xl overflow-y-auto rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]" onSubmit={recordPayment}><header className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-600">Account payment</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="payment-dialog-title">Record payment</h2><p className="mt-1 text-xs text-slate-400">{statement.soaNumber} · Balance {formatPeso(statement.balance)}</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 hover:bg-slate-100" type="button" onClick={() => setPaymentStatementId(null)}><Icon path="M18 6 6 18M6 6l12 12" /></button></header><div className="space-y-4 px-6 py-5">{paymentError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{paymentError}</div> : null}<div className="grid gap-4 sm:grid-cols-2"><div><label className={labelClassName}>Payment date</label><AnimatedDatePicker value={paymentDraft.date} onChange={(date) => setPaymentDraft((current) => ({ ...current, date }))} ariaLabel="Payment date" required /></div><div><label className={labelClassName} htmlFor="payment-amount">Amount</label><input className={fieldClassName} id="payment-amount" type="number" min="0.01" max={statement.balance} step="0.01" value={paymentDraft.amount} onChange={(event) => setPaymentDraft((current) => ({ ...current, amount: event.target.value }))} placeholder="0.00" required /></div><div><label className={labelClassName}>Payment method</label><AnimatedDropdown value={paymentDraft.method} options={paymentMethodOptions} onChange={(method) => setPaymentDraft((current) => ({ ...current, method }))} ariaLabel="Payment method" /></div><div><label className={labelClassName} htmlFor="payment-reference">Reference number</label><input className={fieldClassName} id="payment-reference" value={paymentDraft.referenceNumber} onChange={(event) => setPaymentDraft((current) => ({ ...current, referenceNumber: event.target.value }))} placeholder="Check or transaction number" /></div></div><div><label className={labelClassName} htmlFor="payment-notes">Notes</label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 bg-white p-3.5 text-sm text-brand-blue outline-none focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="payment-notes" value={paymentDraft.notes} onChange={(event) => setPaymentDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Optional internal payment note" /></div></div><footer className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setPaymentStatementId(null)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white" type="submit">Record payment</button></footer></form></div>
   }
 
   function renderLateChargeDialog() {
@@ -645,6 +703,8 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     {isClientPickerOpen ? <PurchaseOrderClientPickerDialog clients={clients} selectedClientId={draft.clientId} onSelect={selectClient} onClose={() => setIsClientPickerOpen(false)} /> : null}
     {renderPaymentDialog()}
     {renderLateChargeDialog()}
+    {isFormOpen ? <DocumentContentFormSectionPortal dialogTitleId="soa-form-title" hideExistingFieldId="soa-notes" idPrefix="soa-document" notes={draft.notes} terms={draft.terms} defaultTerms={loadDocumentDefaults().statementPaymentInstructions} notesPlaceholder="Add account-specific notes or remarks..." termsPlaceholder="Add one condition or payment instruction per line..." onNotesChange={(notes) => setDraft((current) => ({ ...current, notes }))} onTermsChange={(terms) => setDraft((current) => ({ ...current, terms }))} /> : null}
+    {isFormOpen ? <DocumentFormScaffold dialogTitleId="soa-form-title" breakdown={[{ label: 'Opening balance', value: formatPeso(draftOpeningBalance), muted: draftOpeningBalance === 0 }, { label: 'Charges', value: formatPeso(draftQuotationTotal) }]} totalLabel="Total" totalValue={formatPeso(draftTotal)} helperText="The final action opens payment scheduling, where late interest remains optional." backLabel="Back to statements" onCancel={closeStatementFormPage} actions={editingId ? [{ label: 'Save changes', intent: 'preserve' }, ...(draft.status === 'Draft' ? [{ label: 'Review & Issue', intent: 'issue', tone: 'primary' as const }] : [])] : [{ label: 'Save Draft', intent: 'draft' }, { label: 'Review & Issue', intent: 'issue', tone: 'primary', disabled: !clients.length }]} /> : null}
     <SuccessToast message={toast} />
   </div>
 }

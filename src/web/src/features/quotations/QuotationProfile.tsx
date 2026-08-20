@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { AnimatedDropdown } from "../../components/ui/AnimatedDropdown";
 import { DocumentExportDialog } from "../../components/ui/DocumentExportDialog";
-import { SummarySurface } from "../../components/ui/SummarySurface";
+import { WorkflowHeader } from "../../components/ui/WorkflowHeader";
 import { createQuotationPdfBlob } from "../../services/pdf/documentPdf";
 import { loadCompanyProfile } from "../settings/settingsStorage";
 import type { Quotation, QuotationStatus } from "./QuotationsPage";
@@ -13,30 +12,8 @@ type QuotationProfileProps = {
   onDuplicate: () => void;
   onArchive: () => void;
   onStatusChange: (status: QuotationStatus) => void;
+  onCreateStatement: () => void;
 };
-
-const statusOptions = [
-  {
-    value: "For Approval" as const,
-    dotClassName: "bg-amber-500",
-    toneClassName: "border-amber-100 bg-amber-50 text-amber-700",
-  },
-  {
-    value: "Approved" as const,
-    dotClassName: "bg-emerald-500",
-    toneClassName: "border-emerald-100 bg-emerald-50 text-emerald-700",
-  },
-  {
-    value: "Rejected" as const,
-    dotClassName: "bg-red-500",
-    toneClassName: "border-red-100 bg-red-50 text-red-600",
-  },
-  {
-    value: "Voided" as const,
-    dotClassName: "bg-slate-500",
-    toneClassName: "border-slate-200 bg-slate-100 text-slate-600",
-  },
-];
 
 function Icon({
   path,
@@ -101,14 +78,6 @@ function formatTimestamp(value: string) {
   return `${new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(date)} · ${new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(date)}`;
 }
 
-function statusTone(status: QuotationStatus) {
-  if (status === "Approved")
-    return "border-emerald-100 bg-emerald-50 text-emerald-700";
-  if (status === "Rejected") return "border-red-100 bg-red-50 text-red-600";
-  if (status === "Voided") return "border-slate-200 bg-slate-100 text-slate-600";
-  return "border-amber-100 bg-amber-50 text-amber-700";
-}
-
 export function QuotationProfile({
   quotation,
   onBack,
@@ -116,6 +85,7 @@ export function QuotationProfile({
   onDuplicate,
   onArchive,
   onStatusChange,
+  onCreateStatement,
 }: QuotationProfileProps) {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const totalCost = quotation.items.reduce(
@@ -143,90 +113,29 @@ export function QuotationProfile({
         />
         Back to quotations
       </button>
-      <SummarySurface className="relative overflow-hidden">
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-72 bg-[radial-gradient(circle_at_100%_0%,rgba(82,56,168,0.12),transparent_62%)]"
-          aria-hidden="true"
-        />
-        <div className="relative flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold ${statusTone(quotation.status)}`}
-              >
-                <span
-                  className={`size-1.5 rounded-full ${quotation.status === "Approved" ? "bg-emerald-500" : quotation.status === "Rejected" ? "bg-red-500" : "bg-amber-500"}`}
-                />
-                {quotation.status}
-              </span>
-              <span className="text-[10px] font-semibold text-slate-400">
-                Created {formatDate(quotation.dateCreated)}
-              </span>
-            </div>
-            <h2 className="mt-4 font-mono text-2xl font-extrabold tracking-[-0.035em] text-brand-blue sm:text-3xl">
-              {quotation.quotationNumber}
-            </h2>
-            <p className="mt-2 truncate text-base font-extrabold text-slate-700">
-              {quotation.clientName}
-            </p>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-              {quotation.subject}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <AnimatedDropdown
-              className="min-w-44"
-              size="filter"
-              fullWidth={false}
-              value={quotation.status}
-              options={statusOptions}
-              onChange={onStatusChange}
-              ariaLabel="Quotation status"
-            />
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-orange-200 bg-white px-4 text-xs font-bold text-orange-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-orange-50"
-              type="button"
-              onClick={() => setIsExportOpen(true)}
-            >
-              <Icon
-                className="size-3.5"
-                path="M12 3v12M7 10l5 5 5-5M5 21h14"
-              />
-              Preview & Export
-            </button>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-brand-blue shadow-sm transition hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-blue-50"
-              type="button"
-              onClick={onDuplicate}
-            >
-              <Icon
-                className="size-3.5"
-                path="M8 8h11v11H8V8ZM5 16H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"
-              />
-              Duplicate
-            </button>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
-              type="button"
-              onClick={onArchive}
-            >
-              <Icon className="size-3.5" path="M3 6h18M5 6l1 15h12l1-15M9 10v7M15 10v7" />
-              Archive
-            </button>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-12px_rgba(0,20,76,0.75)] transition hover:-translate-y-0.5"
-              type="button"
-              onClick={onEdit}
-            >
-              <Icon
-                className="size-3.5"
-                path="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"
-              />
-              Edit quotation
-            </button>
-          </div>
-        </div>
-        <div className="relative mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <WorkflowHeader
+        eyebrow="Quotation"
+        recordNumber={quotation.quotationNumber}
+        partyName={quotation.clientName}
+        amount={formatPeso(quotation.totalAmount)}
+        createdLabel={`Created ${formatDate(quotation.dateCreated)}`}
+        status={quotation.status}
+        steps={["Draft", "For Approval", "Approved", "SOA Created"]}
+        currentStep={quotation.status === "Draft" ? 0 : quotation.status === "Approved" ? 2 : 1}
+        module="Quotations"
+        recordId={quotation.id}
+        primaryAction={quotation.status === "Draft" ? { label: "Submit for Approval", onClick: () => onStatusChange("For Approval") } : quotation.status === "For Approval" ? { label: "Review & Approve", onClick: () => onStatusChange("Approved") } : quotation.status === "Approved" ? { label: "Create SOA", onClick: onCreateStatement } : quotation.status === "Rejected" ? { label: "Edit quotation", onClick: onEdit } : undefined}
+        secondaryActions={quotation.status === "For Approval" ? [{ label: "Reject", tone: "danger", onClick: () => onStatusChange("Rejected") }] : []}
+        menuActions={[
+          { label: "Edit", onClick: onEdit, disabled: quotation.status === "Approved" || quotation.status === "Voided" },
+          { label: "Preview & Export", onClick: () => setIsExportOpen(true) },
+          { label: "Duplicate", onClick: onDuplicate },
+          { label: "Archive", onClick: onArchive },
+          ...(quotation.status !== "Voided" ? [{ label: "Void", tone: "danger" as const, onClick: () => onStatusChange("Voided") }] : []),
+        ]}
+      >
+        <p className="text-sm leading-6 text-slate-500">{quotation.subject}</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <article className="rounded-2xl border border-slate-200/80 bg-white p-4">
             <p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">
               Grand total
@@ -262,7 +171,7 @@ export function QuotationProfile({
             </p>
           </article>
         </div>
-      </SummarySurface>
+      </WorkflowHeader>
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
         <section className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_40px_-32px_rgba(0,20,76,0.35)]">
           <div className="flex items-center gap-3">

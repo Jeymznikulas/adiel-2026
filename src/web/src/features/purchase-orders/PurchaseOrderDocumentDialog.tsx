@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { DocumentExportDialog } from '../../components/ui/DocumentExportDialog'
 import { createPurchaseOrderPdfBlob } from '../../services/pdf/documentPdf'
-import { loadCompanyProfile, loadDocumentDefaults, type CompanyProfile } from '../settings/settingsStorage'
+import { loadCompanyProfile, type CompanyProfile } from '../settings/settingsStorage'
 
 type DocumentLine = { id: string; itemName: string; variantLabel: string; productCode: string; unitOfMeasure: string; quantity: number; unitCost: number }
 type DocumentCharge = { id: string; label: string; amount: number }
@@ -29,7 +29,7 @@ function profileIsComplete(profile: CompanyProfile) {
 export function PurchaseOrderDocumentDialog({ order, supplier, onSaveOrderContent, onClose }: PurchaseOrderDocumentDialogProps) {
   const [profile] = useState(loadCompanyProfile)
   const [notes, setNotes] = useState(order.notes)
-  const [terms, setTerms] = useState(() => order.terms || loadDocumentDefaults().purchaseOrderTerms)
+  const [terms, setTerms] = useState(order.terms)
   const [error, setError] = useState('')
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const isProfileComplete = profileIsComplete(profile)

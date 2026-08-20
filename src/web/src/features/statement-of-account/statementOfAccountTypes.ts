@@ -98,6 +98,7 @@ export type StatementOfAccount = {
   lateCharges: StatementLateCharge[]
   status: StatementStatus
   notes: string
+  terms: string
   createdAt: string
   updatedAt: string
 }

@@ -1,5 +1,6 @@
 import type { ChangeEvent, FormEvent } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { ChartLoadingState } from '../../components/charts/ChartSupport'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { ClientIndustrySettingsDialog, type ClientIndustryOption } from './ClientIndustrySettingsDialog'
@@ -11,6 +12,8 @@ import { appendSystemLog } from '../../services/activityLog'
 import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 import { loadClientTimeline, summarizeClientTimeline, type ClientTimelineEntry, type ClientTimelineSummary } from './clientTimeline'
+
+const ActivityValueChart = lazy(() => import('../../components/charts/ActivityValueChart'))
 
 type ClientStatus = 'Active' | 'Inactive'
 
@@ -170,7 +173,6 @@ function ClientProfile({ client, timeline, summary, onBack, onEdit }: ClientProf
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('All')
   const [visibleTimelineCount, setVisibleTimelineCount] = useState(10)
   const activity = monthlyActivity(timeline)
-  const maxActivity = Math.max(...activity.map((point) => point.amount), 1)
   const latestEntry = timeline[0]
   const filteredTimeline = timeline.filter((entry) => timelineFilter === 'All'
     || (timelineFilter === 'Sales' && (entry.kind === 'Sale' || entry.kind === 'Quotation'))
@@ -222,7 +224,7 @@ function ClientProfile({ client, timeline, summary, onBack, onEdit }: ClientProf
     <section className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
       <article className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_36px_-30px_rgba(0,20,76,0.35)]">
         <div><h3 className="text-base font-extrabold text-brand-blue">Sales overview</h3><p className="mt-1 text-xs text-slate-400">Approved sales value during the last six months</p></div>
-        <div className="mt-5 flex h-40 items-end gap-2 rounded-2xl bg-slate-50/70 px-3 pb-3 pt-5">{activity.map((point) => <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" key={point.key}><span className="mb-2 text-[9px] font-bold text-slate-400">{point.count || ''}</span><span className={`w-full max-w-10 rounded-t-lg transition-[height] duration-500 ${point.amount ? 'bg-[linear-gradient(180deg,#174785,#00144c)] shadow-[0_8px_18px_-12px_rgba(0,20,76,0.7)]' : 'bg-slate-200'}`} style={{ height: `${point.amount ? Math.max((point.amount / maxActivity) * 100, 10) : 4}%` }} title={`${point.label}: ${formatPeso(point.amount)}`} /><span className="mt-2 text-[10px] font-bold text-slate-400">{point.label}</span></div>)}</div>
+        <Suspense fallback={<ChartLoadingState className="mt-5 h-44" />}><ActivityValueChart data={activity} ariaLabel="Approved client sales during the last six months" emptyTitle="No recent sales activity" emptyDetail="Approved sales from the last six months will appear here." itemLabel="sale" /></Suspense>
       </article>
       <article className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_12px_36px_-30px_rgba(0,20,76,0.35)]">
         <div className="flex items-start justify-between gap-3"><div><h3 className="text-base font-extrabold text-brand-blue">Relationship overview</h3><p className="mt-1 text-xs text-slate-400">Automatically calculated from linked records</p></div><span className="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-brand-blue">{client.industry}</span></div>

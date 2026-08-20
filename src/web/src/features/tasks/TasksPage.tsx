@@ -7,6 +7,7 @@ import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
+import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
 import { appendSystemLog } from '../../services/activityLog'
 import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
 
@@ -337,9 +338,12 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const [assigneeFilter, setAssigneeFilter] = usePersistentState('tasks.assignee', 'All')
   const [priorityFilter, setPriorityFilter] = usePersistentState<'All' | TaskPriority>('tasks.priority', 'All')
   const [dueDateFilter, setDueDateFilter] = usePersistentState<DueDateFilter>('tasks.due-date', 'All')
-  const openNewOnLoad = new URLSearchParams(window.location.search).get('new') === '1'
+  const initialQuery = new URLSearchParams(window.location.search)
+  const openNewOnLoad = initialQuery.get('new') === '1'
+  const taskIdParam = initialQuery.get('task')
+  const taskIdOnLoad = taskIdParam ? Number(taskIdParam) : null
   const [isAddingTask, setIsAddingTask] = useState(openNewOnLoad)
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(() => typeof taskIdOnLoad === 'number' && Number.isFinite(taskIdOnLoad) && tasks.some((task) => task.id === taskIdOnLoad) ? taskIdOnLoad : null)
   const [isEditingTask, setIsEditingTask] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [toast, setToast] = useState('')
@@ -351,8 +355,8 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const activeTasks = useMemo(() => tasks.filter(isActiveRecord), [tasks])
 
   useEffect(() => {
-    if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
-  }, [openNewOnLoad])
+    if (openNewOnLoad || taskIdOnLoad !== null) window.history.replaceState(null, '', window.location.pathname)
+  }, [openNewOnLoad, taskIdOnLoad])
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(tasks))
@@ -685,6 +689,8 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
               <div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">Task details</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="task-details-title">{isEditingTask ? 'Edit task' : selectedTask.title}</h2></div>
               <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeTaskDetails} aria-label="Close details"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
             </div>
+
+            {!isEditingTask ? <div className="bg-slate-50/45 p-4"><WorkflowHeader eyebrow="Task" recordNumber={`TASK-${selectedTask.id}`} partyName={selectedTask.assignedTo} createdLabel={`Created ${formatDate(selectedTask.createdAt)}`} status={selectedTask.status} steps={["To do", "In progress", "Completed"]} currentStep={selectedTask.status === 'To do' ? 0 : selectedTask.status === 'In progress' ? 1 : 2} module="Tasks" recordId={String(selectedTask.id)} badges={[{ label: `${selectedTask.priority} priority`, tone: selectedTask.priority === 'High' ? 'red' : selectedTask.priority === 'Medium' ? 'amber' : 'blue' }]} primaryAction={selectedTask.status === 'To do' ? { label: 'Start task', onClick: () => updateTask(selectedTask.id, { status: 'In progress' }) } : selectedTask.status === 'In progress' ? { label: 'Complete task', onClick: () => updateTask(selectedTask.id, { status: 'Completed' }) } : undefined} secondaryActions={selectedTask.status === 'Completed' ? [{ label: 'Reopen', onClick: () => updateTask(selectedTask.id, { status: 'In progress' }) }] : []} menuActions={[{ label: 'Edit', onClick: beginEditingTask }, { label: 'Archive', onClick: () => setIsConfirmingDelete(true) }]}><p className="text-xs leading-5 text-slate-500">Due {formatDate(selectedTask.dueDate)} · Assigned by {selectedTask.assignedBy}</p></WorkflowHeader></div> : null}
 
             {isEditingTask ? (
               <form className="[&_input]:!text-sm [&_label]:!text-[11px] [&_select]:!text-sm [&_textarea]:!text-sm" onSubmit={saveTask}>

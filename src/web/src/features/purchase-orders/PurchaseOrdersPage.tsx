@@ -2,6 +2,8 @@ import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { DocumentContentFormSectionPortal } from '../../components/ui/DocumentContentFields'
+import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
@@ -12,9 +14,13 @@ import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from
 import { loadDocumentDefaults, nextDocumentNumber } from '../settings/settingsStorage'
 import { PurchaseOrderClientPickerDialog } from './PurchaseOrderClientPickerDialog'
 import { PurchaseOrderDocumentDialog } from './PurchaseOrderDocumentDialog'
+import { PurchaseOrderProfile } from './PurchaseOrderProfile'
 import { QuickAddSupplierDialog, type QuickSupplierInput } from './QuickAddSupplierDialog'
 
 type PurchaseOrderStatus = 'Delivered' | 'For Payment' | 'Waiting for Delivery' | 'Cancelled' | 'Sent' | 'Not yet sent'
+export type PurchaseOrderDocumentStatus = 'Draft' | 'Sent' | 'Cancelled'
+export type PurchaseOrderDeliveryStatus = 'Pending' | 'Partially Delivered' | 'Delivered'
+export type PurchaseOrderPaymentStatus = 'Not Due' | 'To Pay' | 'Overdue' | 'Paid'
 
 type SupplierContact = { id: string; name: string; email: string; phone: string }
 type Supplier = { id: string; name: string; status: string; address: string; companyEmail: string; companyPhone: string; contacts: SupplierContact[] }
@@ -23,7 +29,7 @@ type ApprovedQuotationOption = { id: string; quotationNumber: string; clientId: 
 type CatalogVariant = { id: string; name: string; value: string; photo: string; productCode: string; unitOfMeasure: string; status: string; rawCost: number; sellingPrice: number }
 type CatalogItem = { id: string; photo: string; name: string; category: string; brand: string; unitOfMeasure: string; productCode: string; supplierId: string; rawCost: number; variants: CatalogVariant[]; status: string }
 
-type PurchaseOrderLine = {
+export type PurchaseOrderLine = {
   id: string
   itemId: string
   variantId: string
@@ -36,13 +42,13 @@ type PurchaseOrderLine = {
   unitCost: number
 }
 
-type PurchaseOrderCharge = {
+export type PurchaseOrderCharge = {
   id: string
   label: string
   amount: number
 }
 
-type PurchaseOrder = {
+export type PurchaseOrder = {
   id: string
   date: string
   poNumber: string
@@ -67,6 +73,9 @@ type PurchaseOrder = {
   otherCharges: PurchaseOrderCharge[]
   totalAmount: number
   status: PurchaseOrderStatus
+  documentStatus: PurchaseOrderDocumentStatus
+  deliveryStatus: PurchaseOrderDeliveryStatus
+  paymentStatus: PurchaseOrderPaymentStatus
   addedToExpenses: boolean
   createdAt: string
   updatedAt: string
@@ -74,7 +83,7 @@ type PurchaseOrder = {
 
 type LineDraft = Omit<PurchaseOrderLine, 'quantity' | 'unitCost'> & { quantity: string; unitCost: string }
 type ChargeDraft = Omit<PurchaseOrderCharge, 'amount'> & { amount: string }
-type PurchaseOrderDraft = Omit<PurchaseOrder, 'id' | 'supplierName' | 'items' | 'subtotalAmount' | 'vatAmount' | 'otherCharges' | 'totalAmount' | 'addedToExpenses' | 'createdAt' | 'updatedAt'> & { items: LineDraft[]; otherCharges: ChargeDraft[] }
+type PurchaseOrderDraft = Omit<PurchaseOrder, 'id' | 'supplierName' | 'items' | 'subtotalAmount' | 'vatAmount' | 'otherCharges' | 'totalAmount' | 'status' | 'documentStatus' | 'deliveryStatus' | 'paymentStatus' | 'addedToExpenses' | 'createdAt' | 'updatedAt'> & { items: LineDraft[]; otherCharges: ChargeDraft[] }
 type PurchaseOrdersPageProps = { currentUsername: string }
 
 const storageKey = 'adiel.purchase-orders'
@@ -182,13 +191,21 @@ function loadPurchaseOrders(): PurchaseOrder[] {
       const vatAmount = typeof order.vatAmount === 'number' ? order.vatAmount : vatEnabled ? subtotalAmount * 0.12 : 0
       const otherCharges = Array.isArray(order.otherCharges) ? order.otherCharges.filter((charge): charge is PurchaseOrderCharge => typeof charge?.id === 'string' && typeof charge.label === 'string' && typeof charge.amount === 'number') : []
       const totalAmount = typeof order.totalAmount === 'number' ? order.totalAmount : subtotalAmount + vatAmount + otherCharges.reduce((total, charge) => total + charge.amount, 0)
-      return [{ ...(order as PurchaseOrder), clientId: typeof order.clientId === 'string' ? order.clientId : '', quotationId: typeof order.quotationId === 'string' ? order.quotationId : '', quotationNumber: typeof order.quotationNumber === 'string' ? order.quotationNumber : '', notes: typeof order.notes === 'string' ? order.notes : '', terms: typeof order.terms === 'string' && order.terms.trim() ? order.terms : loadDocumentDefaults().purchaseOrderTerms, items, subtotalAmount, vatEnabled, vatAmount, otherCharges, totalAmount }]
+      const legacyStatus = purchaseOrderStatuses.includes(order.status as PurchaseOrderStatus) ? order.status as PurchaseOrderStatus : 'Not yet sent'
+      const documentStatus: PurchaseOrderDocumentStatus = order.documentStatus === 'Draft' || order.documentStatus === 'Sent' || order.documentStatus === 'Cancelled' ? order.documentStatus : legacyStatus === 'Cancelled' ? 'Cancelled' : legacyStatus === 'Not yet sent' ? 'Draft' : 'Sent'
+      const deliveryStatus: PurchaseOrderDeliveryStatus = order.deliveryStatus === 'Pending' || order.deliveryStatus === 'Partially Delivered' || order.deliveryStatus === 'Delivered' ? order.deliveryStatus : legacyStatus === 'Delivered' ? 'Delivered' : 'Pending'
+      const paymentStatus: PurchaseOrderPaymentStatus = order.paymentStatus === 'Not Due' || order.paymentStatus === 'To Pay' || order.paymentStatus === 'Overdue' || order.paymentStatus === 'Paid' ? order.paymentStatus : legacyStatus === 'For Payment' || order.addedToExpenses ? 'To Pay' : 'Not Due'
+      return [{ ...(order as PurchaseOrder), clientId: typeof order.clientId === 'string' ? order.clientId : '', quotationId: typeof order.quotationId === 'string' ? order.quotationId : '', quotationNumber: typeof order.quotationNumber === 'string' ? order.quotationNumber : '', notes: typeof order.notes === 'string' ? order.notes : '', terms: typeof order.terms === 'string' ? order.terms : loadDocumentDefaults().purchaseOrderTerms, items, subtotalAmount, vatEnabled, vatAmount, otherCharges, totalAmount, status: legacyStatus, documentStatus, deliveryStatus, paymentStatus, addedToExpenses: order.addedToExpenses === true }]
     })
   } catch { return [] }
 }
 
 function emptyDraft(): PurchaseOrderDraft {
-  return { date: new Date().toISOString().slice(0, 10), poNumber: '', clientId: '', clientName: '', supplierId: '', contactPerson: '', subject: '', quotationId: '', quotationNumber: '', modeOfPayment: 'Bank transfer', paymentTerm: '30 days', deliveryLocation: '', modeOfDelivery: 'Supplier delivery', notes: '', terms: loadDocumentDefaults().purchaseOrderTerms, items: [], vatEnabled: false, otherCharges: [], status: 'Not yet sent' }
+  return { date: new Date().toISOString().slice(0, 10), poNumber: '', clientId: '', clientName: '', supplierId: '', contactPerson: '', subject: '', quotationId: '', quotationNumber: '', modeOfPayment: 'Bank transfer', paymentTerm: '30 days', deliveryLocation: '', modeOfDelivery: 'Supplier delivery', notes: '', terms: '', items: [], vatEnabled: false, otherCharges: [] }
+}
+
+function purchaseOrderDraftFrom(order: PurchaseOrder, clients: Client[]): PurchaseOrderDraft {
+  return { date: order.date, poNumber: order.poNumber, clientId: order.clientId || clients.find((client) => client.name.toLowerCase() === order.clientName.toLowerCase())?.id || '', clientName: order.clientName, supplierId: order.supplierId, contactPerson: order.contactPerson, subject: order.subject, quotationId: order.quotationId, quotationNumber: order.quotationNumber, modeOfPayment: order.modeOfPayment, paymentTerm: order.paymentTerm, deliveryLocation: order.deliveryLocation, modeOfDelivery: order.modeOfDelivery, notes: order.notes, terms: order.terms, items: order.items.map((line) => ({ ...line, quantity: String(line.quantity), unitCost: String(line.unitCost) })), vatEnabled: order.vatEnabled, otherCharges: order.otherCharges.map((charge) => ({ ...charge, amount: String(charge.amount) })) }
 }
 
 function statusTone(status: PurchaseOrderStatus) {
@@ -200,6 +217,15 @@ function statusTone(status: PurchaseOrderStatus) {
   return 'bg-slate-100 text-slate-600'
 }
 
+function legacyStatusFor(documentStatus: PurchaseOrderDocumentStatus, deliveryStatus: PurchaseOrderDeliveryStatus, paymentStatus: PurchaseOrderPaymentStatus): PurchaseOrderStatus {
+  if (documentStatus === 'Cancelled') return 'Cancelled'
+  if (documentStatus === 'Draft') return 'Not yet sent'
+  if (paymentStatus === 'To Pay' || paymentStatus === 'Overdue') return 'For Payment'
+  if (deliveryStatus === 'Delivered') return 'Delivered'
+  if (deliveryStatus === 'Pending' || deliveryStatus === 'Partially Delivered') return 'Waiting for Delivery'
+  return 'Sent'
+}
+
 export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps) {
   const [orders, setOrders] = useState<PurchaseOrder[]>(loadPurchaseOrders)
   const [suppliers, setSuppliers] = useState<Supplier[]>(loadSuppliers)
@@ -208,10 +234,16 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>(loadApprovedQuotations)
   const [search, setSearch] = usePersistentState('purchase-orders.search', '')
   const [statusFilter, setStatusFilter] = usePersistentState<'All statuses' | PurchaseOrderStatus>('purchase-orders.status', 'All statuses')
-  const openNewOnLoad = new URLSearchParams(window.location.search).get('new') === '1'
+  const initialQuery = new URLSearchParams(window.location.search)
+  const openNewFromQuery = initialQuery.get('new') === '1'
+  const openNewOnLoad = openNewFromQuery || window.location.pathname === '/purchase-orders/new'
+  const editOrderIdOnLoad = /^\/purchase-orders\/([^/]+)\/edit$/.exec(window.location.pathname)?.[1]
+  const editOrderOnLoad = editOrderIdOnLoad ? orders.find((order) => order.id === decodeURIComponent(editOrderIdOnLoad)) : undefined
+  const orderIdOnLoad = initialQuery.get('order')
   const initialSupplier = suppliers.find((entry) => entry.status === 'Active') ?? suppliers[0]
   const initialClient = clients.find((entry) => entry.status === 'Active') ?? clients[0]
   const [draft, setDraft] = useState<PurchaseOrderDraft>(() => {
+    if (editOrderOnLoad) return purchaseOrderDraftFrom(editOrderOnLoad, clients)
     const values = emptyDraft()
     if (!openNewOnLoad) return values
     if (initialClient) {
@@ -226,12 +258,12 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     }
     return values
   })
-  const [isFormOpen, setIsFormOpen] = useState(openNewOnLoad)
+  const [isFormOpen, setIsFormOpen] = useState(openNewOnLoad || Boolean(editOrderOnLoad))
   const [isQuickSupplierOpen, setIsQuickSupplierOpen] = useState(false)
   const [isItemPickerOpen, setIsItemPickerOpen] = useState(false)
   const [itemSearch, setItemSearch] = useState('')
-  const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(editOrderOnLoad?.id ?? null)
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(() => orderIdOnLoad && orders.some((order) => order.id === orderIdOnLoad) ? orderIdOnLoad : null)
   const [isDocumentDialogOpen, setIsDocumentDialogOpen] = useState(false)
   const [isClientPickerOpen, setIsClientPickerOpen] = useState(openNewOnLoad && !initialClient)
   const [isProjectLinkOpen, setIsProjectLinkOpen] = useState(false)
@@ -242,8 +274,11 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   const [pendingVoidOrderId, setPendingVoidOrderId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (openNewOnLoad) window.history.replaceState(null, '', window.location.pathname)
-  }, [openNewOnLoad])
+    if (openNewFromQuery) {
+      window.history.replaceState(null, '', '/purchase-orders/new')
+      window.dispatchEvent(new Event('adiel:navigate'))
+    } else if (orderIdOnLoad) window.history.replaceState(null, '', window.location.pathname)
+  }, [openNewFromQuery, orderIdOnLoad])
 
   useEffect(() => {
     try { window.localStorage.setItem(storageKey, JSON.stringify(orders)); setStorageError('') }
@@ -270,11 +305,11 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   }, [toast])
 
   useEffect(() => {
-    if (!isFormOpen && !selectedOrderId && !isDocumentDialogOpen && !isClientPickerOpen) return
+    if (!isDocumentDialogOpen && !isClientPickerOpen && !isProjectLinkOpen && !isItemPickerOpen && !isQuickSupplierOpen) return
     const overflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = overflow }
-  }, [isClientPickerOpen, isDocumentDialogOpen, isFormOpen, selectedOrderId])
+  }, [isClientPickerOpen, isDocumentDialogOpen, isItemPickerOpen, isProjectLinkOpen, isQuickSupplierOpen])
 
   useEffect(() => {
     if (!isFormOpen) return
@@ -331,6 +366,19 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     return nextDocumentNumber('purchaseOrder', orders.map((order) => order.poNumber), date)
   }
 
+  function openPurchaseOrderFormPage(path: string) {
+    window.history.pushState(null, '', path)
+    window.dispatchEvent(new Event('adiel:navigate'))
+  }
+
+  function closePurchaseOrderFormPage() {
+    setIsFormOpen(false)
+    setIsClientPickerOpen(false)
+    setIsItemPickerOpen(false)
+    window.history.replaceState(null, '', '/purchase-orders')
+    window.dispatchEvent(new Event('adiel:navigate'))
+  }
+
   function openForm() {
     const supplier = suppliers.find((entry) => entry.status === 'Active') ?? suppliers[0]
     const client = clients.find((entry) => entry.status === 'Active') ?? clients[0]
@@ -352,31 +400,12 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setFormError('')
     setIsFormOpen(true)
     setIsClientPickerOpen(!client)
+    openPurchaseOrderFormPage('/purchase-orders/new')
   }
 
   function openEditForm(order: PurchaseOrder) {
     setEditingOrderId(order.id)
-    setDraft({
-      date: order.date,
-      poNumber: order.poNumber,
-      clientId: order.clientId || clients.find((client) => client.name.toLowerCase() === order.clientName.toLowerCase())?.id || '',
-      clientName: order.clientName,
-      supplierId: order.supplierId,
-      contactPerson: order.contactPerson,
-      subject: order.subject,
-      quotationId: order.quotationId,
-      quotationNumber: order.quotationNumber,
-      modeOfPayment: order.modeOfPayment,
-      paymentTerm: order.paymentTerm,
-      deliveryLocation: order.deliveryLocation,
-      modeOfDelivery: order.modeOfDelivery,
-      notes: order.notes,
-      terms: order.terms,
-      items: order.items.map((line) => ({ ...line, quantity: String(line.quantity), unitCost: String(line.unitCost) })),
-      vatEnabled: order.vatEnabled,
-      otherCharges: order.otherCharges.map((charge) => ({ ...charge, amount: String(charge.amount) })),
-      status: order.status,
-    })
+    setDraft(purchaseOrderDraftFrom(order, clients))
     setSelectedOrderId(null)
     setIsConfirmingDelete(false)
     setIsItemPickerOpen(false)
@@ -384,6 +413,7 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setFormError('')
     setIsClientPickerOpen(false)
     setIsFormOpen(true)
+    openPurchaseOrderFormPage(`/purchase-orders/${encodeURIComponent(order.id)}/edit`)
   }
 
   function selectSupplier(supplierId: string) {
@@ -486,6 +516,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
 
   function saveOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const submitter = (event.nativeEvent as SubmitEvent).submitter
+    const intent = submitter instanceof HTMLButtonElement ? submitter.dataset.intent : undefined
     const supplier = supplierMap.get(draft.supplierId)
     const client = clients.find((entry) => entry.id === draft.clientId)
     const linkedQuotation = approvedQuotations.find((quotation) => quotation.id === draft.quotationId && quotation.clientId === draft.clientId)
@@ -496,7 +528,10 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     const now = new Date().toISOString()
     const previous = editingOrderId ? orders.find((order) => order.id === editingOrderId) : undefined
     const id = previous?.id ?? crypto.randomUUID()
-    const values: PurchaseOrder = { id, date: draft.date, poNumber: draft.poNumber.trim(), clientId: client.id, clientName: client.name, supplierId: supplier.id, supplierName: supplier.name, contactPerson: draft.contactPerson.trim(), subject: draft.subject.trim(), quotationId: linkedQuotation?.id ?? '', quotationNumber: linkedQuotation?.quotationNumber ?? '', modeOfPayment: draft.modeOfPayment, paymentTerm: draft.paymentTerm, deliveryLocation: draft.deliveryLocation.trim(), modeOfDelivery: draft.modeOfDelivery, notes: draft.notes.trim(), terms: draft.terms.trim() || loadDocumentDefaults().purchaseOrderTerms, items: draft.items.map((line) => ({ ...line, quantity: Number(line.quantity), unitCost: Number(line.unitCost) })), subtotalAmount: draftSubtotal, vatEnabled: draft.vatEnabled, vatAmount: draftVatAmount, otherCharges: draft.otherCharges.map((charge) => ({ ...charge, label: charge.label.trim(), amount: Number(charge.amount) || 0 })), totalAmount: draftTotal, status: previous?.status ?? 'Not yet sent', addedToExpenses: previous?.addedToExpenses ?? false, createdAt: previous?.createdAt ?? now, updatedAt: now }
+    const documentStatus: PurchaseOrderDocumentStatus = intent === 'send' ? 'Sent' : intent === 'draft' ? 'Draft' : previous?.documentStatus ?? 'Draft'
+    const deliveryStatus = previous?.deliveryStatus ?? 'Pending'
+    const paymentStatus = previous?.paymentStatus ?? 'Not Due'
+    const values: PurchaseOrder = { id, date: draft.date, poNumber: draft.poNumber.trim(), clientId: client.id, clientName: client.name, supplierId: supplier.id, supplierName: supplier.name, contactPerson: draft.contactPerson.trim(), subject: draft.subject.trim(), quotationId: linkedQuotation?.id ?? '', quotationNumber: linkedQuotation?.quotationNumber ?? '', modeOfPayment: draft.modeOfPayment, paymentTerm: draft.paymentTerm, deliveryLocation: draft.deliveryLocation.trim(), modeOfDelivery: draft.modeOfDelivery, notes: draft.notes.trim(), terms: draft.terms.trim(), items: draft.items.map((line) => ({ ...line, quantity: Number(line.quantity), unitCost: Number(line.unitCost) })), subtotalAmount: draftSubtotal, vatEnabled: draft.vatEnabled, vatAmount: draftVatAmount, otherCharges: draft.otherCharges.map((charge) => ({ ...charge, label: charge.label.trim(), amount: Number(charge.amount) || 0 })), totalAmount: draftTotal, status: legacyStatusFor(documentStatus, deliveryStatus, paymentStatus), documentStatus, deliveryStatus, paymentStatus, addedToExpenses: previous?.addedToExpenses ?? false, createdAt: previous?.createdAt ?? now, updatedAt: now }
     if (previous) {
       setOrders((current) => current.map((order) => order.id === previous.id ? values : order))
       if (previous.addedToExpenses) syncLinkedExpense(previous, values)
@@ -505,9 +540,9 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
       setOrders((current) => [values, ...current])
       appendSystemLog({ recordId: id, module: 'Purchase Orders', action: 'Created', entity: values.poNumber, description: `Purchase order created for ${values.supplierName}.`, actor: currentUsername, tone: 'success', amount: values.totalAmount, status: values.status })
     }
-    setIsFormOpen(false)
+    closePurchaseOrderFormPage()
     setEditingOrderId(null)
-    setToast(previous ? 'Purchase order updated successfully' : 'Purchase order created successfully')
+    setToast(intent === 'send' ? 'Purchase order saved and marked sent' : previous ? 'Purchase order updated successfully' : 'Purchase order saved as draft')
   }
 
   function updateStatus(order: PurchaseOrder, status: PurchaseOrderStatus) {
@@ -520,10 +555,37 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setToast('Purchase order status updated')
   }
 
+  function updateDocumentStatus(order: PurchaseOrder, documentStatus: PurchaseOrderDocumentStatus) {
+    if (documentStatus === 'Cancelled') { setPendingVoidOrderId(order.id); return }
+    if (order.documentStatus === documentStatus) return
+    const status = legacyStatusFor(documentStatus, order.deliveryStatus, order.paymentStatus)
+    setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, documentStatus, status, updatedAt: new Date().toISOString() } : entry))
+    appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `Document status changed from ${order.documentStatus} to ${documentStatus}.`, actor: currentUsername, tone: documentStatus === 'Sent' ? 'success' : 'info', amount: order.totalAmount, status: documentStatus })
+    setToast(`Purchase order marked ${documentStatus.toLowerCase()}`)
+  }
+
+  function updateDeliveryStatus(order: PurchaseOrder, deliveryStatus: PurchaseOrderDeliveryStatus) {
+    if (order.deliveryStatus === deliveryStatus) return
+    const status = legacyStatusFor(order.documentStatus, deliveryStatus, order.paymentStatus)
+    setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, deliveryStatus, status, updatedAt: new Date().toISOString() } : entry))
+    appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `Delivery status changed from ${order.deliveryStatus} to ${deliveryStatus}.`, actor: currentUsername, tone: deliveryStatus === 'Delivered' ? 'success' : 'info', amount: order.totalAmount, status: deliveryStatus })
+    setToast(`Delivery marked ${deliveryStatus.toLowerCase()}`)
+  }
+
+  function updatePaymentStatus(order: PurchaseOrder, paymentStatus: PurchaseOrderPaymentStatus) {
+    if (order.paymentStatus === paymentStatus) return
+    const status = legacyStatusFor(order.documentStatus, order.deliveryStatus, paymentStatus)
+    setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, paymentStatus, status, updatedAt: new Date().toISOString() } : entry))
+    if ((paymentStatus === 'To Pay' || paymentStatus === 'Overdue') && !order.addedToExpenses) addToExpenses(order, paymentStatus === 'Overdue' ? 'Overdue' : 'To pay')
+    else if (order.addedToExpenses) updateLinkedExpenseStatus(order, paymentStatus === 'Paid' ? 'Paid' : paymentStatus === 'Overdue' ? 'Overdue' : 'To pay')
+    appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `Payment status changed from ${order.paymentStatus} to ${paymentStatus}${paymentStatus === 'To Pay' || paymentStatus === 'Overdue' ? '; the linked expense was synchronized automatically.' : '.'}`, actor: currentUsername, tone: paymentStatus === 'Paid' ? 'success' : paymentStatus === 'Overdue' ? 'warning' : 'info', amount: order.totalAmount, status: paymentStatus })
+    setToast(paymentStatus === 'To Pay' || paymentStatus === 'Overdue' ? 'Payment status updated and expense synchronized' : 'Payment status updated')
+  }
+
   function confirmVoidOrder(reason: string, archiveAfterVoiding: boolean) {
     const order = orders.find((entry) => entry.id === pendingVoidOrderId)
     if (!order) return
-    setOrders((current) => current.map((entry) => entry.id === order.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason)) : entry))
+    setOrders((current) => current.map((entry) => entry.id === order.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Cancelled' as const, documentStatus: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Cancelled' as const, documentStatus: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason)) : entry))
     notifyLifecycleChanged()
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Voided', entity: order.poNumber, description: `Purchase order voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, tone: 'danger', amount: order.totalAmount, status: 'Cancelled' })
     setPendingVoidOrderId(null)
@@ -536,12 +598,12 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setOrders((current) => current.map((order) => order.id === selectedOrder.id ? { ...order, notes, terms, updatedAt: new Date().toISOString() } : order))
   }
 
-  function addToExpenses(order: PurchaseOrder) {
+  function addToExpenses(order: PurchaseOrder, expenseStatus: 'To pay' | 'Overdue' = 'To pay') {
     if (order.addedToExpenses) return
     try {
       const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
       const expenses = Array.isArray(parsed) ? parsed : []
-      expenses.unshift({ id: Date.now(), date: order.date, payee: order.supplierName, category: 'Materials', description: expenseDescription(order), amount: order.totalAmount, paymentMethod: order.modeOfPayment, purchaser: currentUsername, status: 'To pay', invoiceLink: '', notes: expenseNotes(order), quotationId: order.quotationId, quotationNumber: order.quotationNumber, projectName: order.subject || order.clientName })
+      expenses.unshift({ id: Date.now(), date: order.date, payee: order.supplierName, category: 'Materials', description: expenseDescription(order), amount: order.totalAmount, paymentMethod: order.modeOfPayment, purchaser: currentUsername, status: expenseStatus, invoiceLink: '', notes: expenseNotes(order), quotationId: order.quotationId, quotationNumber: order.quotationNumber, projectName: order.subject || order.clientName })
       window.localStorage.setItem(expenseStorageKey, JSON.stringify(expenses))
       setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, addedToExpenses: true, updatedAt: new Date().toISOString() } : entry))
       appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Added to Expenses', entity: order.poNumber, description: 'Purchase order total was added to Expenses.', actor: currentUsername, tone: 'success', amount: order.totalAmount, status: order.status })
@@ -571,6 +633,15 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
       const expenses = (parsed as unknown[]).map((value) => isLinkedExpense(value, previous) && typeof value === 'object' && value !== null ? { ...value, date: order.date, payee: order.supplierName, description: expenseDescription(order), amount: order.totalAmount, paymentMethod: order.modeOfPayment, notes: expenseNotes(order), quotationId: order.quotationId, quotationNumber: order.quotationNumber, projectName: order.subject || order.clientName } : value)
       window.localStorage.setItem(expenseStorageKey, JSON.stringify(expenses))
     } catch { setToast('PO updated, but its linked expense could not be synchronized') }
+  }
+
+  function updateLinkedExpenseStatus(order: PurchaseOrder, status: 'Paid' | 'Overdue' | 'To pay') {
+    try {
+      const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
+      if (!Array.isArray(parsed)) return
+      window.localStorage.setItem(expenseStorageKey, JSON.stringify((parsed as unknown[]).map((value) => isLinkedExpense(value, order) && typeof value === 'object' && value !== null ? { ...value, status } : value)))
+      window.dispatchEvent(new StorageEvent('storage', { key: expenseStorageKey }))
+    } catch { setToast('Payment status updated, but the linked expense could not be synchronized') }
   }
 
   function removeFromExpenses(order: PurchaseOrder) {
@@ -610,6 +681,26 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     { label: 'Committed value', value: formatPeso(activeOrders.filter((order) => order.status !== 'Cancelled').reduce((total, order) => total + order.totalAmount, 0)), color: 'text-brand-orange', dot: 'bg-brand-orange' },
   ]
 
+  if (selectedOrder && !isFormOpen) return <>
+    <PurchaseOrderProfile
+      order={selectedOrder}
+      onBack={() => setSelectedOrderId(null)}
+      onEdit={() => openEditForm(selectedOrder)}
+      onExport={() => setIsDocumentDialogOpen(true)}
+      onArchive={() => deleteOrder(selectedOrder)}
+      onVoid={() => setPendingVoidOrderId(selectedOrder.id)}
+      onLinkProject={() => setIsProjectLinkOpen(true)}
+      onOpenExpense={() => { window.history.pushState(null, '', `/expenses?poId=${encodeURIComponent(selectedOrder.id)}`); window.dispatchEvent(new Event('adiel:navigate')) }}
+      onDocumentStatusChange={(status) => updateDocumentStatus(selectedOrder, status)}
+      onDeliveryStatusChange={(status) => updateDeliveryStatus(selectedOrder, status)}
+      onPaymentStatusChange={(status) => updatePaymentStatus(selectedOrder, status)}
+    />
+    {isProjectLinkOpen ? <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="po-project-link-title"><button className="absolute inset-0" type="button" onClick={() => setIsProjectLinkOpen(false)} aria-label="Close project link dialog" /><section className="relative w-full max-w-lg rounded-[1.5rem] border border-white/20 bg-white p-6 shadow-[0_30px_90px_rgba(0,20,76,0.35)]"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-orange">Project expense</p><h2 className="mt-1.5 text-xl font-extrabold text-brand-blue" id="po-project-link-title">Link purchase to a project</h2><p className="mt-1 text-xs leading-5 text-slate-400">Choose an approved quotation for {selectedOrder.clientName}. The linked expense will stay synchronized.</p></div><button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 hover:bg-slate-100" type="button" onClick={() => setIsProjectLinkOpen(false)} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="mt-5"><label className={labelClassName}>Approved quotation</label><AnimatedDropdown value={selectedOrder.quotationId} options={selectedOrderQuotationOptions} onChange={(quotationId) => linkOrderToQuotation(selectedOrder, quotationId)} ariaLabel="Approved quotation project link" /></div></section></div> : null}
+    {isDocumentDialogOpen ? <PurchaseOrderDocumentDialog order={selectedOrder} supplier={{ name: selectedOrderSupplier?.name ?? selectedOrder.supplierName, address: selectedOrderSupplier?.address ?? '', contactPerson: selectedOrder.contactPerson, phone: selectedOrderContact?.phone || selectedOrderSupplier?.companyPhone || '', email: selectedOrderContact?.email || selectedOrderSupplier?.companyEmail || '' }} onSaveOrderContent={saveOrderDocumentContent} onClose={() => setIsDocumentDialogOpen(false)} /> : null}
+    {pendingVoidOrderId ? <VoidRecordDialog recordLabel="purchase order" onClose={() => setPendingVoidOrderId(null)} onConfirm={confirmVoidOrder} /> : null}
+    <SuccessToast message={toast} />
+  </>
+
   return <div className="purchase-order-page space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
     <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Purchase order summary"><div><div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Supplier orders</p></div><h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Purchase orders</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Create supplier orders, check delivery and payment status, and add completed costs to Expenses.</p></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">{summaryCards.map((card, index) => <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-[linear-gradient(145deg,rgba(248,250,252,0.9),rgba(255,255,255,0.96))] px-3 py-3.5 shadow-[0_9px_24px_-22px_rgba(0,20,76,0.48)] ring-1 ring-inset ring-white/70 transition-all duration-300 hover:-translate-y-1 hover:border-brand-blue/15 hover:shadow-[0_18px_36px_-24px_rgba(0,20,76,0.48)] animate-[po-card-enter_380ms_cubic-bezier(0.22,1,0.36,1)_both] sm:min-w-32 sm:px-4" style={{ animationDelay: `${index * 55}ms` }} key={card.label}><div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.dot}`} /><p className="truncate text-[10px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div><p className={`mt-2 truncate text-xl font-bold tracking-[-0.04em] ${card.color}`}>{card.value}</p></article>)}</div></SummarySurface>
     {storageError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{storageError}</div> : null}
@@ -638,6 +729,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     {isFormOpen && isClientPickerOpen ? <PurchaseOrderClientPickerDialog clients={clients} selectedClientId={draft.clientId} onSelect={selectClient} onClose={() => setIsClientPickerOpen(false)} /> : null}
     {isQuickSupplierOpen ? <QuickAddSupplierDialog existingNames={suppliers.map((supplier) => supplier.name)} onCreate={createQuickSupplier} onClose={() => setIsQuickSupplierOpen(false)} /> : null}
     {pendingVoidOrderId ? <VoidRecordDialog recordLabel="purchase order" onClose={() => setPendingVoidOrderId(null)} onConfirm={confirmVoidOrder} /> : null}
+    {isFormOpen ? <DocumentContentFormSectionPortal dialogTitleId="po-form-title" idPrefix="po-document" notes={draft.notes} terms={draft.terms} defaultTerms={loadDocumentDefaults().purchaseOrderTerms} onNotesChange={(notes) => setDraft((current) => ({ ...current, notes }))} onTermsChange={(terms) => setDraft((current) => ({ ...current, terms }))} /> : null}
+    {isFormOpen ? <DocumentFormScaffold dialogTitleId="po-form-title" breakdown={[{ label: 'Subtotal', value: formatPeso(draftSubtotal) }, { label: 'VAT', value: formatPeso(draftVatAmount), muted: !draft.vatEnabled }]} totalLabel="Total" totalValue={formatPeso(draftTotal)} helperText="Optional VAT, charges, notes, and terms only appear when you enable or add them." backLabel="Back to purchase orders" onCancel={closePurchaseOrderFormPage} actions={editingOrderId ? [{ label: 'Save changes', intent: 'preserve' }, ...(orders.find((order) => order.id === editingOrderId)?.documentStatus === 'Draft' ? [{ label: 'Save & Send', intent: 'send', tone: 'primary' as const }] : [])] : [{ label: 'Save Draft', intent: 'draft' }, { label: 'Save & Send', intent: 'send', tone: 'primary', disabled: !suppliers.length }]} /> : null}
     <SuccessToast message={toast} />
   </div>
 }

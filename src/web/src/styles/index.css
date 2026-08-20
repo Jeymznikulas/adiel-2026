@@ -11,8 +11,10 @@
     --app-ease: cubic-bezier(0.22, 1, 0.36, 1);
     --app-motion-fast: 160ms;
     --app-motion: 220ms;
+    --app-motion-slow: 300ms;
     --app-focus: rgba(0, 20, 76, 0.08);
     --app-border: rgba(203, 213, 225, 0.78);
+    --app-surface-shadow: 0 14px 38px -29px rgba(0, 20, 76, 0.34);
   }
 
   * {
@@ -247,14 +249,34 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .purchase-order-page *,
-  .purchase-order-page *::before,
-  .purchase-order-page *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+@keyframes app-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-page-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes app-section-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -370,6 +392,17 @@
 }
 
 /* Shared interaction language: quiet, responsive, and consistent across modules. */
+.app-page-transition {
+  /* Avoid a transformed page wrapper: it would make fixed dialogs position
+     against the page content instead of the browser viewport. */
+  animation: app-page-fade var(--app-motion-slow) var(--app-ease) both;
+}
+
+.app-shell [class*="animate-["] {
+  animation-duration: var(--app-motion-slow) !important;
+  animation-timing-function: var(--app-ease) !important;
+}
+
 .app-shell :where(button, a[href]) {
   transition-duration: var(--app-motion-fast);
   transition-timing-function: var(--app-ease);
@@ -441,8 +474,26 @@
   animation: app-dialog-enter var(--app-motion) var(--app-ease) both;
 }
 
+.app-document-page .app-form-page {
+  box-shadow: var(--app-surface-shadow);
+  animation: app-page-enter var(--app-motion-slow) var(--app-ease) both;
+}
+
+.app-document-page .app-form-page > :nth-child(2) > section,
+.app-document-page .app-form-page > :nth-child(2) > div > section,
+.app-document-page [data-document-content-section] > section,
+.app-document-page [data-quotation-pricing-section] > section {
+  animation: app-section-enter var(--app-motion) var(--app-ease) both;
+}
+
+.app-document-page :where(article, aside) {
+  transition-property: background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--app-motion);
+  transition-timing-function: var(--app-ease);
+}
+
 .app-summary-surface {
-  box-shadow: 0 14px 38px -29px rgba(0, 20, 76, 0.34);
+  box-shadow: var(--app-surface-shadow);
 }
 
 .app-summary-accent {
