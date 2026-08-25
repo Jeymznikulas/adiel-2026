@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from './AnimatedDropdown'
+import { Button, IconButton } from './Button'
 import { usePersistentState } from './usePersistentState'
 
 export type TableSortOption<T> = {
@@ -55,6 +56,7 @@ export function TableControls({ tableId, storageKey, columns, sortKey, sortOptio
 }) {
   const [isColumnsOpen, setIsColumnsOpen] = useState(false)
   const [hiddenColumns, setHiddenColumns] = usePersistentState<number[]>(`${storageKey}.hidden-columns`, [])
+  const columnsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const table = document.getElementById(tableId) ?? document.querySelector('main table')
@@ -65,6 +67,22 @@ export function TableControls({ tableId, storageKey, columns, sortKey, sortOptio
       })
     })
   }, [columns, hiddenColumns, tableId, page, pageSize, total])
+
+  useEffect(() => {
+    if (!isColumnsOpen) return
+    function closeOnPointerDown(event: PointerEvent) {
+      if (!columnsRef.current?.contains(event.target as Node)) setIsColumnsOpen(false)
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setIsColumnsOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnPointerDown)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isColumnsOpen])
 
   function toggleColumn(index: number) {
     setHiddenColumns((current) => current.includes(index) ? current.filter((value) => value !== index) : [...current, index])
@@ -77,9 +95,9 @@ export function TableControls({ tableId, storageKey, columns, sortKey, sortOptio
     <p className="text-[10px] font-semibold text-slate-400">Showing <strong className="text-slate-600">{first}–{last}</strong> of {total}</p>
     <div className="flex flex-wrap items-center gap-2">
       <div className="min-w-40"><AnimatedDropdown size="compact" value={sortKey} options={sortOptions} onChange={onSortChange} ariaLabel="Sort table" /></div>
-      {columns.length ? <div className="relative"><button className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-600 transition hover:border-brand-blue/15 hover:text-brand-blue" type="button" onClick={() => setIsColumnsOpen((current) => !current)} aria-expanded={isColumnsOpen}><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 5h16v14H4V5Zm5 0v14m6-14v14" /></svg>Columns</button>{isColumnsOpen ? <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-[0_18px_42px_-18px_rgba(0,20,76,0.35)] animate-[status-menu-enter_160ms_cubic-bezier(0.22,1,0.36,1)]">{columns.map((column) => <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50" type="button" onClick={() => toggleColumn(column.index)} disabled={column.required} key={column.index}><span className={`grid size-4 place-items-center rounded border ${!hiddenColumns.includes(column.index) ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-300 text-transparent'}`}><svg className="size-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="m5 12 4 4L19 6" /></svg></span>{column.label}</button>)}</div> : null}</div> : null}
-      <select className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-bold text-slate-600 outline-none" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} aria-label={`${itemLabel} per page`}>{pageSizeOptions.map((size) => <option value={size} key={size}>{size} {itemLabel}</option>)}</select>
-      <div className="flex items-center gap-1"><button className="grid size-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-brand-blue disabled:opacity-30" type="button" onClick={() => onPageChange(page - 1)} disabled={page <= 1} aria-label="Previous page"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg></button><span className="min-w-12 text-center text-[10px] font-bold text-slate-500">{page}/{pageCount}</span><button className="grid size-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-brand-blue disabled:opacity-30" type="button" onClick={() => onPageChange(page + 1)} disabled={page >= pageCount} aria-label="Next page"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg></button></div>
+      {columns.length ? <div className="relative" ref={columnsRef}><Button size="small" variant="secondary" onClick={() => setIsColumnsOpen((current) => !current)} aria-expanded={isColumnsOpen} leadingIcon={<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 5h16v14H4V5Zm5 0v14m6-14v14" /></svg>}>Columns</Button>{isColumnsOpen ? <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-[0_18px_42px_-18px_rgba(0,20,76,0.35)] animate-[status-menu-enter_160ms_cubic-bezier(0.22,1,0.36,1)]" role="menu">{columns.map((column) => <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50" type="button" role="menuitemcheckbox" aria-checked={!hiddenColumns.includes(column.index)} onClick={() => toggleColumn(column.index)} disabled={column.required} key={column.index}><span className={`grid size-4 place-items-center rounded border ${!hiddenColumns.includes(column.index) ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-300 text-transparent'}`}><svg className="size-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="m5 12 4 4L19 6" /></svg></span>{column.label}</button>)}</div> : null}</div> : null}
+      <div className="min-w-24"><AnimatedDropdown size="compact" value={String(pageSize)} options={pageSizeOptions.map((size) => ({ value: String(size), label: `${size} ${itemLabel}` }))} onChange={(value) => onPageSizeChange(Number(value))} ariaLabel={`${itemLabel} per page`} /></div>
+      <div className="flex items-center gap-1"><IconButton size="small" variant="secondary" onClick={() => onPageChange(page - 1)} disabled={page <= 1} label="Previous page"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></IconButton><span className="min-w-12 text-center text-[10px] font-bold text-slate-500" aria-label={`Page ${page} of ${pageCount}`}>{page}/{pageCount}</span><IconButton size="small" variant="secondary" onClick={() => onPageChange(page + 1)} disabled={page >= pageCount} label="Next page"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg></IconButton></div>
     </div>
   </div>
 }

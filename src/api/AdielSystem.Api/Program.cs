@@ -1,11 +1,34 @@
+using AdielSystem.Api;
 using AdielSystem.Api.Endpoints;
+using AdielSystem.Api.Security;
+using AdielSystem.Application.Clients;
+using AdielSystem.Application.Settings;
+using AdielSystem.Application.Suppliers;
+using AdielSystem.Application.Items;
+using AdielSystem.Application.Quotations;
 using AdielSystem.Infrastructure;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.SingleLine = true;
+    options.TimestampFormat = "HH:mm:ss ";
+});
+builder.Logging.AddDebug();
+
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddHealthChecks();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddOwnerSecurity(builder.Configuration);
+builder.Services.AddScoped<ClientService>();
+builder.Services.AddScoped<SettingsService>();
+builder.Services.AddScoped<SupplierService>();
+builder.Services.AddScoped<ItemService>();
+builder.Services.AddScoped<QuotationService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("WebClient", policy =>
@@ -18,13 +41,33 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 app.UseExceptionHandler();
-app.UseHttpsRedirection();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Cache-Control"] = "no-store";
+    await next(context);
+});
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
 app.UseCors("WebClient");
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready");
 
 var api = app.MapGroup("/api/v1");
 api.MapSystemEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapClientEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapSettingsEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapSupplierEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapItemEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapQuotationEndpoints();
 
 app.Run();
 

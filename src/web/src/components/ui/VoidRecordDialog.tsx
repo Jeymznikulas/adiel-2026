@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from './Button'
 
 type VoidRecordDialogProps = {
   recordLabel: string
@@ -32,7 +33,7 @@ export function VoidRecordDialog({ recordLabel, onClose, onConfirm }: VoidRecord
         <div><label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500" htmlFor="void-reason">Reason for voiding</label><textarea className="min-h-24 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-brand-blue outline-none placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="void-reason" value={reason} onChange={(event) => { setReason(event.target.value); setError('') }} placeholder="Example: Duplicate entry or transaction cancelled by client" autoFocus /></div>
         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/65 p-3.5"><input className="mt-0.5 size-4 accent-brand-blue" type="checkbox" checked={archiveAfterVoiding} onChange={(event) => setArchiveAfterVoiding(event.target.checked)} /><span><span className="block text-xs font-bold text-brand-blue">Archive after voiding</span><span className="mt-1 block text-[10px] leading-4 text-slate-400">Hide it from the regular list immediately. It can still be restored from Archive.</span></span></label>
       </div>
-      <footer className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={onClose}>Keep record</button><button className="h-10 rounded-xl bg-red-600 px-5 text-xs font-bold text-white shadow-sm hover:bg-red-700" type="button" onClick={confirm}>Void record</button></footer>
+      <footer className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><Button variant="ghost" onClick={onClose}>Keep record</Button><Button variant="destructive" onClick={confirm}>Void record</Button></footer>
     </section>
   </div>
 }

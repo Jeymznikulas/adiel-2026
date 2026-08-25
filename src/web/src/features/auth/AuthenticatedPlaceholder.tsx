@@ -49,7 +49,7 @@ export function AuthenticatedPlaceholder({ session }: AuthenticatedPlaceholderPr
         Sales: <SalesTrackerPage />,
         Collections: <CollectionsPage />,
         Expenses: <ExpensesPage currentUsername={username} />,
-        Clients: <ClientsPage currentUsername={username} />,
+        Clients: <ClientsPage />,
         Suppliers: <SupplierPage currentUsername={username} />,
         Settings: <SettingsPage />,
         Archive: <ArchivePage currentUsername={username} />,

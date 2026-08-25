@@ -9,8 +9,10 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
-import { ExpenseSettingsDialog, type ExpenseOption, type ExpenseOptionKind } from './ExpenseSettingsDialog'
+import type { ExpenseOption, ExpenseOptionKind } from './ExpenseSettingsDialog'
 import { appendSystemLog } from '../../services/activityLog'
+import { listBusinessOptions } from '../../services/api/settings'
+import { listQuotations } from '../../services/api/quotations'
 import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
@@ -55,9 +57,6 @@ type ExpensesPageProps = {
 }
 
 const storageKey = 'adiel.expenses'
-const quotationStorageKey = 'adiel.quotations'
-const categoryStorageKey = 'adiel.expense-categories'
-const paymentMethodStorageKey = 'adiel.expense-payment-methods'
 const defaultCategoryNames = ['Materials', 'Transportation', 'Office supplies', 'Utilities', 'Meals', 'Equipment', 'Professional fees', 'Other']
 const defaultPaymentMethodNames = ['Cash', 'GCash', 'Bank transfer', 'Credit card', 'Cheque', 'Other']
 const expenseStatuses: ExpenseStatus[] = ['Paid', 'Verifying', 'To pay', 'Overdue', 'Cancelled']
@@ -107,41 +106,6 @@ function loadExpenses(): Expense[] {
     }))
   } catch {
     return []
-  }
-}
-
-function loadApprovedQuotations(): ApprovedQuotationOption[] {
-  try {
-    const stored = window.localStorage.getItem(quotationStorageKey)
-    const parsed: unknown = stored ? JSON.parse(stored) : []
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((value): value is ApprovedQuotationOption => typeof value === 'object' && value !== null && (value as ApprovedQuotationOption).status === 'Approved')
-      .map((quotation) => ({
-        id: String(quotation.id),
-        quotationNumber: String(quotation.quotationNumber ?? ''),
-        clientName: String(quotation.clientName ?? ''),
-        subject: String(quotation.subject ?? ''),
-        projectLocation: String(quotation.projectLocation ?? ''),
-        status: quotation.status,
-      }))
-      .sort((left, right) => right.quotationNumber.localeCompare(left.quotationNumber))
-  } catch {
-    return []
-  }
-}
-
-function loadOptions(storageKey: string, defaults: ExpenseOption[]): ExpenseOption[] {
-  try {
-    const stored = window.localStorage.getItem(storageKey)
-    if (!stored) return defaults
-    const parsed: unknown = JSON.parse(stored)
-    if (!Array.isArray(parsed) || !parsed.length) return defaults
-    const options = parsed.filter((item): item is ExpenseOption => typeof item === 'object' && item !== null && typeof (item as ExpenseOption).id === 'string' && typeof (item as ExpenseOption).name === 'string' && typeof (item as ExpenseOption).isActive === 'boolean')
-    if (!options.length) return defaults
-    return options.some((option) => option.isActive) ? options : options.map((option, index) => index === 0 ? { ...option, isActive: true } : option)
-  } catch {
-    return defaults
   }
 }
 
@@ -306,9 +270,9 @@ function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLab
 
 export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [expenses, setExpenses] = useState<Expense[]>(loadExpenses)
-  const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>(loadApprovedQuotations)
-  const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(() => loadOptions(categoryStorageKey, defaultCategoryOptions))
-  const [paymentMethodOptions, setPaymentMethodOptions] = useState<ExpenseOption[]>(() => loadOptions(paymentMethodStorageKey, defaultPaymentMethodOptions))
+  const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>([])
+  const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(defaultCategoryOptions)
+  const [paymentMethodOptions, setPaymentMethodOptions] = useState<ExpenseOption[]>(defaultPaymentMethodOptions)
   const [searchQuery, setSearchQuery] = usePersistentState('expenses.search', '')
   const [dateFilterMode, setDateFilterMode] = usePersistentState<DateFilterMode>('expenses.date-mode', 'all')
   const [selectedMonth, setSelectedMonth] = usePersistentState('expenses.month', currentMonth)
@@ -325,8 +289,6 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [selectedExpenseId, setSelectedExpenseId] = useState<number | null>(() => linkedPoIdOnLoad ? expenses.find((expense) => expense.notes.includes(`PO ID: ${linkedPoIdOnLoad}`))?.id ?? null : null)
   const [toast, setToast] = useState('')
   const [pendingVoidExpenseId, setPendingVoidExpenseId] = useState<number | null>(null)
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<ExpenseOptionKind>('categories')
   const categories = categoryOptions.filter((option) => option.isActive).map((option) => option.name)
   const paymentMethods = paymentMethodOptions.filter((option) => option.isActive).map((option) => option.name)
   const [draft, setDraft] = useState<ExpenseDraft>(() => ({ ...emptyDraft, category: categories[0] ?? emptyDraft.category, paymentMethod: paymentMethods[0] ?? emptyDraft.paymentMethod, purchaser: currentUsername }))
@@ -361,31 +323,18 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   }, [toast])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(categoryStorageKey, JSON.stringify(categoryOptions))
-      window.localStorage.setItem(paymentMethodStorageKey, JSON.stringify(paymentMethodOptions))
-    } catch {
-      // Custom options remain usable for the current session.
-    }
-  }, [categoryOptions, paymentMethodOptions])
-
-  useEffect(() => {
-    const refreshQuotations = (event: StorageEvent) => {
-      if (event.key === quotationStorageKey) setApprovedQuotations(loadApprovedQuotations())
-    }
-    const refreshOnNavigate = () => setApprovedQuotations(loadApprovedQuotations())
-    window.addEventListener('storage', refreshQuotations)
-    window.addEventListener('adiel:navigate', refreshOnNavigate)
-    return () => {
-      window.removeEventListener('storage', refreshQuotations)
-      window.removeEventListener('adiel:navigate', refreshOnNavigate)
-    }
+    let isActive = true
+    void Promise.all([listBusinessOptions('expense_category'), listBusinessOptions('payment_method')]).then(([categoriesResult, methodsResult]) => {
+      if (!isActive) return
+      setCategoryOptions(categoriesResult.map(({ id, name, isActive: active }) => ({ id, name, isActive: active })))
+      setPaymentMethodOptions(methodsResult.map(({ id, name, isActive: active }) => ({ id, name, isActive: active })))
+    })
+    return () => { isActive = false }
   }, [])
 
-  const categoryFilterOptions = useMemo(() => Array.from(new Set([...categoryOptions.map((option) => option.name), ...expenses.map((expense) => expense.category)])), [categoryOptions, expenses])
-  const usedCategories = useMemo(() => new Set(expenses.map((expense) => expense.category)), [expenses])
-  const usedPaymentMethods = useMemo(() => new Set(expenses.map((expense) => expense.paymentMethod)), [expenses])
+  useEffect(() => { void listQuotations({ status: 'Approved', pageSize: 100 }).then((result) => setApprovedQuotations(result.items.map((quotation) => ({ id: quotation.id, quotationNumber: quotation.quotationNumber, clientName: quotation.clientName, subject: quotation.subject, projectLocation: quotation.projectLocation, status: quotation.status })))).catch(() => undefined) }, [])
 
+  const categoryFilterOptions = useMemo(() => Array.from(new Set([...categoryOptions.map((option) => option.name), ...expenses.map((expense) => expense.category)])), [categoryOptions, expenses])
   const matchingExpenses = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     return expenses.filter(isActiveRecord)
@@ -465,82 +414,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   }, [activeExpenses, comparisonMonth, trendRange])
   const activeFilterCount = Number(dateFilterMode !== 'all') + Number(categoryFilter !== 'All')
 
-  function getOptions(kind: ExpenseOptionKind) {
-    return kind === 'categories' ? categoryOptions : paymentMethodOptions
-  }
-
-  function updateOptions(kind: ExpenseOptionKind, update: (current: ExpenseOption[]) => ExpenseOption[]) {
-    if (kind === 'categories') setCategoryOptions(update)
-    else setPaymentMethodOptions(update)
-  }
-
-  function addOption(kind: ExpenseOptionKind, value: string) {
-    const name = value.trim()
-    const options = getOptions(kind)
-    if (!name || options.some((option) => option.name.toLowerCase() === name.toLowerCase())) return false
-    updateOptions(kind, (current) => [...current, { id: `${kind}-${Date.now()}`, name, isActive: true }])
-    return true
-  }
-
-  function renameOption(kind: ExpenseOptionKind, id: string, value: string) {
-    const name = value.trim()
-    const options = getOptions(kind)
-    const option = options.find((item) => item.id === id)
-    if (!option || !name || options.some((item) => item.id !== id && item.name.toLowerCase() === name.toLowerCase())) return false
-    const previousName = option.name
-    updateOptions(kind, (current) => current.map((item) => item.id === id ? { ...item, name } : item))
-    setExpenses((current) => current.map((expense) => kind === 'categories' && expense.category === previousName
-      ? { ...expense, category: name }
-      : kind === 'paymentMethods' && expense.paymentMethod === previousName ? { ...expense, paymentMethod: name } : expense))
-    setDraft((current) => kind === 'categories' && current.category === previousName
-      ? { ...current, category: name }
-      : kind === 'paymentMethods' && current.paymentMethod === previousName ? { ...current, paymentMethod: name } : current)
-    if (kind === 'categories' && categoryFilter === previousName) setCategoryFilter(name)
-    return true
-  }
-
-  function moveOption(kind: ExpenseOptionKind, id: string, direction: -1 | 1) {
-    updateOptions(kind, (current) => {
-      const index = current.findIndex((option) => option.id === id)
-      const destination = index + direction
-      if (index < 0 || destination < 0 || destination >= current.length) return current
-      const next = [...current]
-      const source = next[index]
-      const target = next[destination]
-      if (!source || !target) return current
-      next[index] = target
-      next[destination] = source
-      return next
-    })
-  }
-
-  function toggleOption(kind: ExpenseOptionKind, id: string) {
-    const options = getOptions(kind)
-    const option = options.find((item) => item.id === id)
-    if (!option || (option.isActive && options.filter((item) => item.isActive).length === 1)) return
-    const replacement = options.find((item) => item.id !== id && item.isActive)?.name ?? option.name
-    updateOptions(kind, (current) => current.map((item) => item.id === id ? { ...item, isActive: !item.isActive } : item))
-    if (option.isActive) setDraft((current) => kind === 'categories' && current.category === option.name
-      ? { ...current, category: replacement }
-      : kind === 'paymentMethods' && current.paymentMethod === option.name ? { ...current, paymentMethod: replacement } : current)
-  }
-
-  function deleteOption(kind: ExpenseOptionKind, id: string) {
-    const options = getOptions(kind)
-    const option = options.find((item) => item.id === id)
-    if (!option || options.length === 1 || (option.isActive && options.filter((item) => item.isActive).length === 1) || expenses.some((expense) => kind === 'categories' ? expense.category === option.name : expense.paymentMethod === option.name)) return
-    const remaining = options.filter((item) => item.id !== id)
-    const replacement = remaining.find((item) => item.isActive)?.name ?? remaining[0]?.name ?? option.name
-    updateOptions(kind, () => remaining)
-    setDraft((current) => kind === 'categories' && current.category === option.name
-      ? { ...current, category: replacement }
-      : kind === 'paymentMethods' && current.paymentMethod === option.name ? { ...current, paymentMethod: replacement } : current)
-    if (kind === 'categories' && categoryFilter === option.name) setCategoryFilter('All')
-  }
-
   function openSettings(tab: ExpenseOptionKind) {
-    setSettingsTab(tab)
-    setIsSettingsOpen(false)
     navigateToBusinessSettings(tab === 'categories' ? 'expense-categories' : 'payment-methods')
   }
 
@@ -815,22 +689,6 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
         </div>
       ) : null}
 
-      {isSettingsOpen ? (
-        <ExpenseSettingsDialog
-          tab={settingsTab}
-          categoryOptions={categoryOptions}
-          paymentMethodOptions={paymentMethodOptions}
-          usedCategories={usedCategories}
-          usedPaymentMethods={usedPaymentMethods}
-          onTabChange={setSettingsTab}
-          onAdd={addOption}
-          onRename={renameOption}
-          onMove={moveOption}
-          onToggle={toggleOption}
-          onDelete={deleteOption}
-          onClose={() => setIsSettingsOpen(false)}
-        />
-      ) : null}
       {pendingVoidExpenseId !== null ? <VoidRecordDialog recordLabel="expense" onClose={() => setPendingVoidExpenseId(null)} onConfirm={confirmVoidExpense} /> : null}
       <SuccessToast message={toast} />
     </div>

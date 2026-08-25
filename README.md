@@ -44,7 +44,7 @@ dotnet restore AdielSystem.slnx
 dotnet run --project src/api/AdielSystem.Api
 ```
 
-The frontend defaults to `http://localhost:5173`; the API launch profile uses `http://localhost:5080`. Health is available at `/health` and versioned endpoints start at `/api/v1`.
+The frontend defaults to `http://localhost:5173`; the API launch profile uses `http://localhost:5080`. Liveness is available at `/health/live`, database readiness at `/health/ready`, and versioned endpoints start at `/api/v1`.
 
 ## Configuration rules
 
@@ -58,5 +58,6 @@ See [docs/authentication.md](docs/authentication.md) for the username-based Supa
 For local backend development, store the Supabase database connection string with .NET user secrets rather than committing its password:
 
 ```powershell
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=aws-0-ap-northeast-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.yrscqzdqfyneaguoncwl;Password=YOUR-DATABASE-PASSWORD;SSL Mode=Require;Trust Server Certificate=true" --project src/api/AdielSystem.Api
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=aws-0-ap-southeast-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.ggdpxqyxinyumxgknsul;Password=YOUR-DATABASE-PASSWORD;SSL Mode=Require;Trust Server Certificate=true" --project src/api/AdielSystem.Api
+dotnet user-secrets set "AccessControl:OwnerUserId" "YOUR-SUPABASE-AUTH-USER-ID" --project src/api/AdielSystem.Api
 ```

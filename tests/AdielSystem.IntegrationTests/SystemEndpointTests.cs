@@ -12,11 +12,23 @@ public sealed class SystemEndpointTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     [Fact]
-    public async Task Get_system_returns_success(CancellationToken cancellationToken)
+    public async Task Get_system_returns_success()
     {
-        var response = await _client.GetAsync("/api/v1/system", cancellationToken);
+        var response = await _client.GetAsync(
+            "/api/v1/system",
+            TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Get_clients_without_owner_token_returns_unauthorized()
+    {
+        var response = await _client.GetAsync(
+            "/api/v1/clients",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }
 

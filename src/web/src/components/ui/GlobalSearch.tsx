@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { listClients, type Client } from '../../services/api/clients'
+import { listQuotations } from '../../services/api/quotations'
 
 type SearchRecord = {
   id: string
@@ -24,21 +26,14 @@ function text(value: unknown) {
 }
 
 function loadRecords(): SearchRecord[] {
-  const clients = readArray('adiel.clients').flatMap((value): SearchRecord[] => {
-    if (typeof value !== 'object' || value === null) return []
-    const item = value as Record<string, unknown>
-    if (typeof item.id !== 'string' || typeof item.name !== 'string') return []
-    const detail = [text(item.contactPerson), text(item.industry), text(item.address)].filter(Boolean).join(' · ')
-    return [{ id: `client-${item.id}`, type: 'Client', title: item.name, detail: detail || 'Client record', searchText: `${item.name} ${detail} ${text(item.email)} ${text(item.phone)}`.toLowerCase(), path: `/clients/${encodeURIComponent(item.id)}` }]
-  })
-  const items = readArray('adiel.items').flatMap((value): SearchRecord[] => {
+  const items = readArray('__items_migrated_to_api__').flatMap((value): SearchRecord[] => {
     if (typeof value !== 'object' || value === null) return []
     const item = value as Record<string, unknown>
     if (typeof item.id !== 'string' || typeof item.name !== 'string') return []
     const detail = [text(item.productCode), text(item.category), text(item.brand)].filter(Boolean).join(' · ')
     return [{ id: `item-${item.id}`, type: 'Item', title: item.name, detail: detail || 'Item record', searchText: `${item.name} ${detail} ${text(item.barcode)} ${text(item.subcategory)}`.toLowerCase(), path: `/items/${encodeURIComponent(item.id)}` }]
   })
-  const quotations = readArray('adiel.quotations').flatMap((value): SearchRecord[] => {
+  const quotations = readArray('__quotations_migrated_to_api__').flatMap((value): SearchRecord[] => {
     if (typeof value !== 'object' || value === null) return []
     const item = value as Record<string, unknown>
     if (typeof item.id !== 'string' || typeof item.quotationNumber !== 'string') return []
@@ -52,7 +47,12 @@ function loadRecords(): SearchRecord[] {
     const detail = [text(item.supplierName), text(item.clientName), text(item.status)].filter(Boolean).join(' · ')
     return [{ id: `po-${item.id}`, type: 'Purchase order', title: item.poNumber, detail: detail || 'Purchase order', searchText: `${item.poNumber} ${detail} ${text(item.subject)}`.toLowerCase(), path: '/purchase-orders' }]
   })
-  return [...clients, ...items, ...quotations, ...purchaseOrders]
+  return [...items, ...quotations, ...purchaseOrders]
+}
+
+function clientSearchRecord(client: Client): SearchRecord {
+  const detail = [client.contactPerson, client.industry, client.address].filter(Boolean).join(' · ')
+  return { id: `client-${client.id}`, type: 'Client', title: client.name, detail: detail || 'Client record', searchText: `${client.name} ${detail} ${client.email} ${client.phone}`.toLowerCase(), path: `/clients/${encodeURIComponent(client.id)}` }
 }
 
 const typeTone: Record<SearchRecord['type'], string> = {
@@ -72,6 +72,8 @@ export function GlobalSearch({ onNavigate }: { onNavigate: (path: string) => voi
   useEffect(() => {
     const open = () => {
       setRecords(loadRecords())
+      void listClients({ pageSize: 100 }).then((result) => setRecords((current) => [...result.items.map(clientSearchRecord), ...current]))
+      void listQuotations({ pageSize: 100 }).then((result) => setRecords((current) => [...result.items.map((item): SearchRecord => { const detail = [item.clientName, item.subject, item.status].filter(Boolean).join(' · '); return { id: `quotation-${item.id}`, type: 'Quotation', title: item.quotationNumber, detail: detail || 'Quotation record', searchText: `${item.quotationNumber} ${detail} ${item.projectLocation}`.toLowerCase(), path: `/quotations/${encodeURIComponent(item.id)}` } }), ...current]))
       setIsOpen(true)
       window.requestAnimationFrame(() => inputRef.current?.focus())
     }
@@ -110,6 +112,8 @@ export function GlobalSearch({ onNavigate }: { onNavigate: (path: string) => voi
 
   function openSearch() {
     setRecords(loadRecords())
+    void listClients({ pageSize: 100 }).then((result) => setRecords((current) => [...result.items.map(clientSearchRecord), ...current]))
+    void listQuotations({ pageSize: 100 }).then((result) => setRecords((current) => [...result.items.map((item): SearchRecord => { const detail = [item.clientName, item.subject, item.status].filter(Boolean).join(' · '); return { id: `quotation-${item.id}`, type: 'Quotation', title: item.quotationNumber, detail: detail || 'Quotation record', searchText: `${item.quotationNumber} ${detail} ${item.projectLocation}`.toLowerCase(), path: `/quotations/${encodeURIComponent(item.id)}` } }), ...current]))
     setIsOpen(true)
     window.requestAnimationFrame(() => inputRef.current?.focus())
   }

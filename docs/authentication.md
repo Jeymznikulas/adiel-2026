@@ -29,6 +29,14 @@ Auto confirm user: enabled
 
 The person signs in to the application with username `admin`, not the synthetic email. The database trigger creates the matching profile row.
 
+Copy that user's UUID from **Authentication > Users** and configure it as the API's only allowed owner:
+
+```powershell
+dotnet user-secrets set "AccessControl:OwnerUserId" "YOUR-SUPABASE-AUTH-USER-ID" --project src/api/AdielSystem.Api
+```
+
+The API validates the Supabase JWT signature, issuer, audience, expiry, authenticated role, and exact owner UUID before any business endpoint runs.
+
 ## Operational consequences
 
 - Password reset is administrator-managed because the synthetic email cannot receive mail.

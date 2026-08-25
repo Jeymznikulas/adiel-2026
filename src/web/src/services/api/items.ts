@@ -1,0 +1,21 @@
+import { apiRequest } from './client'
+
+export type ItemStatus = 'Active' | 'Inactive' | 'Discontinued'
+export type ItemVariantSpecification = { id: string; name: string; value: string; sortOrder: number }
+export type ItemVariant = { id: string; name: string; value: string; photo: string; productCode: string; barcode: string; unitOfMeasure: string; unitWeight: number; status: ItemStatus; rawCost: number; sellingPrice: number; sortOrder: number; specifications: ItemVariantSpecification[]; createdAt: string; updatedAt: string; version: number }
+export type ItemPriceAdjustment = { id: string; variantId: string | null; effectiveDate: string; previousRawCost: number; previousSellingPrice: number; rawCost: number; sellingPrice: number; reason: string; notes: string; createdAt: string; createdBy: string }
+export type Item = { id: string; supplierId: string | null; name: string; photo: string; category: string; subcategory: string; brand: string; unitOfMeasure: string; unitWeight: number; productCode: string; barcode: string; description: string; status: ItemStatus; rawCost: number; sellingPrice: number; lastPriceUpdate: string | null; variants: ItemVariant[]; priceAdjustments: ItemPriceAdjustment[]; createdAt: string; updatedAt: string; archivedAt: string | null; version: number }
+export type SaveItem = Omit<Item, 'id' | 'variants' | 'priceAdjustments' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version'> & { version?: number }
+export type SaveItemVariant = Omit<ItemVariant, 'id' | 'sortOrder' | 'createdAt' | 'updatedAt' | 'version' | 'specifications'> & { specifications: Array<Omit<ItemVariantSpecification, 'sortOrder'>>; version?: number }
+export type ItemPage = { items: Item[]; page: number; pageSize: number; total: number; summary: { totalItems: number; activeItems: number; categoryCount: number; averageMargin: number } }
+
+export const listItems = (query: { search?: string; supplierId?: string; category?: string; status?: ItemStatus; includeArchived?: boolean; archivedOnly?: boolean; page?: number; pageSize?: number; sort?: 'name' | 'newest' | 'price' } = {}) => { const p = new URLSearchParams(); if (query.search) p.set('search', query.search); if (query.supplierId) p.set('supplierId', query.supplierId); if (query.category) p.set('category', query.category); if (query.status) p.set('status', query.status); if (query.includeArchived) p.set('includeArchived', 'true'); if (query.archivedOnly) p.set('archivedOnly', 'true'); p.set('page', String(query.page ?? 1)); p.set('pageSize', String(query.pageSize ?? 100)); p.set('sort', query.sort ?? 'newest'); return apiRequest<ItemPage>('/items?' + p.toString()) }
+export const getItem = (id: string) => apiRequest<Item>('/items/' + id)
+export const createItem = (item: SaveItem) => apiRequest<Item>('/items', { method: 'POST', body: JSON.stringify(item) })
+export const updateItem = (id: string, item: SaveItem) => apiRequest<Item>('/items/' + id, { method: 'PUT', body: JSON.stringify(item) })
+export const archiveItem = (id: string, version: number) => apiRequest<Item>('/items/' + id + '/archive', { method: 'POST', body: JSON.stringify({ version }) })
+export const restoreItem = (id: string, version: number) => apiRequest<Item>('/items/' + id + '/restore', { method: 'POST', body: JSON.stringify({ version }) })
+export const createItemVariant = (itemId: string, variant: SaveItemVariant) => apiRequest<Item>('/items/' + itemId + '/variants', { method: 'POST', body: JSON.stringify(variant) })
+export const updateItemVariant = (itemId: string, variantId: string, variant: SaveItemVariant) => apiRequest<Item>('/items/' + itemId + '/variants/' + variantId, { method: 'PUT', body: JSON.stringify(variant) })
+export const deleteItemVariant = (itemId: string, variantId: string, version: number) => apiRequest<Item>('/items/' + itemId + '/variants/' + variantId + '?version=' + version, { method: 'DELETE' })
+export const addItemPriceAdjustment = (itemId: string, adjustment: { variantId?: string; rawCost: number; sellingPrice: number; effectiveDate: string; reason: string; notes?: string; itemVersion: number; variantVersion?: number }) => apiRequest<Item>('/items/' + itemId + '/price-adjustments', { method: 'POST', body: JSON.stringify(adjustment) })

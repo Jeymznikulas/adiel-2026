@@ -7,6 +7,7 @@ import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import type { StatementOfAccount, StatementStatus } from '../statement-of-account/statementOfAccountTypes'
 import { isActiveRecord } from '../../services/recordLifecycle'
+import { listQuotations } from '../../services/api/quotations'
 
 const ProfitChart = lazy(() => import('./SalesProfitChart'))
 
@@ -44,7 +45,6 @@ type SalesRow = {
 
 type PeriodMode = 'Day' | 'Week' | 'Month' | 'Year' | 'Custom'
 
-const quotationStorageKey = 'adiel.quotations'
 const statementStorageKey = 'adiel.statements-of-account'
 const expenseStorageKey = 'adiel.expenses'
 const billingOptions = ['All billing', 'Unbilled', 'Draft SOA', 'Billed'].map((value) => ({ value }))
@@ -138,47 +138,6 @@ function shiftPeriod(mode: PeriodMode, anchor: string, amount: number) {
     date.setMonth(date.getMonth() + amount)
   } else date.setFullYear(date.getFullYear() + amount, 0, 1)
   return dateKey(date)
-}
-
-function loadApprovedQuotations(): SalesQuotation[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(quotationStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null || !isActiveRecord(value)) return []
-      const quotation = value as Partial<SalesQuotation>
-      if (quotation.status !== 'Approved' || typeof quotation.id !== 'string' || typeof quotation.quotationNumber !== 'string') return []
-      const items = Array.isArray(quotation.items)
-        ? quotation.items.map((item) => ({
-            ...item,
-            quantity: Number(item.quantity) || 0,
-            unitCost: Number(item.unitCost) || 0,
-          }))
-        : []
-      const subtotalAmount = Number(quotation.subtotalAmount) || Math.max(0, Number(quotation.totalAmount) || 0)
-      return [
-        {
-          id: quotation.id,
-          dateCreated: quotation.dateCreated ?? '',
-          quotationNumber: quotation.quotationNumber,
-          clientId: quotation.clientId ?? '',
-          clientName: quotation.clientName ?? '',
-          contactPerson: quotation.contactPerson ?? '',
-          subject: quotation.subject ?? '',
-          projectLocation: quotation.projectLocation ?? '',
-          leadTime: quotation.leadTime ?? '',
-          subtotalAmount,
-          totalAmount: Number(quotation.totalAmount) || 0,
-          estimatedCost: items.reduce((total, item) => total + item.quantity * item.unitCost, 0),
-          estimatedProfit: Number(quotation.estimatedProfit) || 0,
-          status: quotation.status,
-          items,
-        },
-      ]
-    })
-  } catch {
-    return []
-  }
 }
 
 function loadLinkedExpenses(): LinkedExpense[] {
@@ -286,7 +245,7 @@ function collectionTone(status: SalesRow['collectionStatus']) {
 }
 
 export function SalesTrackerPage() {
-  const [quotations, setQuotations] = useState<SalesQuotation[]>(loadApprovedQuotations)
+  const [quotations, setQuotations] = useState<SalesQuotation[]>([])
   const [statements, setStatements] = useState<StatementOfAccount[]>(loadStatements)
   const [expenses, setExpenses] = useState<LinkedExpense[]>(loadLinkedExpenses)
   const [search, setSearch] = usePersistentState('sales.search', '')
@@ -302,10 +261,10 @@ export function SalesTrackerPage() {
 
   useEffect(() => {
     function refresh() {
-      setQuotations(loadApprovedQuotations())
       setStatements(loadStatements())
       setExpenses(loadLinkedExpenses())
     }
+    void listQuotations({ status: 'Approved', pageSize: 100 }).then((result) => setQuotations(result.items.map((quotation) => ({ id: quotation.id, dateCreated: quotation.quotationDate, quotationNumber: quotation.quotationNumber, clientId: quotation.clientId ?? '', clientName: quotation.clientName, contactPerson: quotation.contactPerson, subject: quotation.subject, projectLocation: quotation.projectLocation, leadTime: quotation.leadTime, subtotalAmount: quotation.subtotalAmount, totalAmount: quotation.totalAmount, estimatedCost: quotation.lines.reduce((total, line) => total + line.quantity * line.unitCost, 0), estimatedProfit: quotation.estimatedProfit, status: quotation.status, items: quotation.lines.map((line) => ({ id: line.id, quantity: line.quantity, unitCost: line.unitCost })) }))))
     window.addEventListener('storage', refresh)
     window.addEventListener('adiel:navigate', refresh)
     return () => {

@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogEntry } from '../../services/activityLog'
+import { listClients } from '../../services/api/clients'
+import { listQuotations } from '../../services/api/quotations'
 import { isActiveRecord } from '../../services/recordLifecycle'
 
 const BusinessTrendChart = lazy(() => import('./BusinessTrendChart'))
@@ -153,7 +155,7 @@ function readArray(storageKey: string): unknown[] {
 }
 
 function loadDashboardData(): DashboardData {
-  const actionQuotations = readArray('adiel.quotations').flatMap((value): DashboardQuotation[] => {
+  const actionQuotations = readArray('__quotations_migrated_to_api__').flatMap((value): DashboardQuotation[] => {
     if (typeof value !== 'object' || value === null) return []
     const entry = value as Record<string, unknown>
     if (typeof entry.id !== 'string' || typeof entry.status !== 'string') return []
@@ -179,13 +181,7 @@ function loadDashboardData(): DashboardData {
     return [{ id: entry.id, date: typeof entry.date === 'string' ? entry.date.slice(0, 10) : '', amount: Number(entry.amount) || 0, status: typeof entry.status === 'string' ? entry.status : 'To pay', quotationId: typeof entry.quotationId === 'string' ? entry.quotationId : '' }]
   })
 
-  const clients = readArray('adiel.clients').flatMap((value): DashboardClient[] => {
-    if (typeof value !== 'object' || value === null) return []
-    const entry = value as Record<string, unknown>
-    if (typeof entry.id !== 'string' || typeof entry.name !== 'string') return []
-    const transactions = Array.isArray(entry.transactions) ? entry.transactions.filter((transaction): transaction is { status?: string } => typeof transaction === 'object' && transaction !== null) : []
-    return [{ id: entry.id, name: entry.name, photo: typeof entry.photo === 'string' ? entry.photo : '', status: typeof entry.status === 'string' ? entry.status : 'Active', clientSince: typeof entry.clientSince === 'string' ? entry.clientSince.slice(0, 10) : '', transactions }]
-  })
+  const clients: DashboardClient[] = []
 
   const tasks = readArray('adiel.tasks').flatMap((value): DashboardTask[] => {
     if (typeof value !== 'object' || value === null) return []
@@ -355,7 +351,11 @@ export function DashboardPage({ username }: { username: string }) {
   const [showAllActions, setShowAllActions] = useState(false)
 
   useEffect(() => {
-    const refresh = () => setData(loadDashboardData())
+    const refresh = () => {
+      setData(loadDashboardData())
+      void listClients({ pageSize: 100 }).then((result) => setData((current) => ({ ...current, clients: result.items.map((client) => ({ id: client.id, name: client.name, photo: client.photo, status: client.status, clientSince: client.clientSince, transactions: [] })) })))
+      void listQuotations({ pageSize: 100 }).then((result) => { const actionQuotations = result.items.map((quotation) => ({ id: quotation.id, quotationNumber: quotation.quotationNumber, dateCreated: quotation.quotationDate, clientId: quotation.clientId ?? '', clientName: quotation.clientName, subject: quotation.subject, subtotalAmount: quotation.subtotalAmount, totalAmount: quotation.totalAmount, estimatedProfit: quotation.estimatedProfit, status: quotation.status })); setData((current) => ({ ...current, actionQuotations, quotations: actionQuotations.filter((quotation) => quotation.status === 'Approved') })) })
+    }
     refresh()
     window.addEventListener('storage', refresh)
     window.addEventListener('adiel:navigate', refresh)

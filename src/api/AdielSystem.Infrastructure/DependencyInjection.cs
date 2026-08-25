@@ -1,7 +1,16 @@
+using AdielSystem.Application.Clients;
+using AdielSystem.Infrastructure.Clients;
 using AdielSystem.Infrastructure.Configuration;
+using AdielSystem.Application.Settings;
+using AdielSystem.Infrastructure.Settings;
+using AdielSystem.Application.Suppliers;
+using AdielSystem.Infrastructure.Suppliers;
+using AdielSystem.Application.Items;
+using AdielSystem.Infrastructure.Items;
+using AdielSystem.Application.Quotations;
+using AdielSystem.Infrastructure.Quotations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace AdielSystem.Infrastructure;
@@ -16,21 +25,17 @@ public static class DependencyInjection
             .AddOptions<SupabaseOptions>()
             .Bind(configuration.GetSection(SupabaseOptions.SectionName))
             .Validate(options => options.Url.IsAbsoluteUri, "Supabase:Url must be an absolute URL.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.ServiceRoleKey), "Supabase:ServiceRoleKey is required.")
             .ValidateOnStart();
-
-        services.AddHttpClient("Supabase", (serviceProvider, client) =>
-        {
-            var options = serviceProvider.GetRequiredService<IOptions<SupabaseOptions>>().Value;
-            client.BaseAddress = options.Url;
-            client.DefaultRequestHeaders.Add("apikey", options.ServiceRoleKey);
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {options.ServiceRoleKey}");
-        });
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 
         services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+        services.AddScoped<IClientRepository, ClientRepository>();
+        services.AddScoped<ISettingsRepository, SettingsRepository>();
+        services.AddScoped<ISupplierRepository, SupplierRepository>();
+        services.AddScoped<IItemRepository, ItemRepository>();
+        services.AddScoped<IQuotationRepository, QuotationRepository>();
         services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
         return services;

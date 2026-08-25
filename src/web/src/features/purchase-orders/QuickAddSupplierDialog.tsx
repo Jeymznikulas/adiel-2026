@@ -13,7 +13,7 @@ export type QuickSupplierInput = {
 
 type QuickAddSupplierDialogProps = {
   existingNames: string[]
-  onCreate: (values: QuickSupplierInput) => string | null
+  onCreate: (values: QuickSupplierInput) => Promise<string | null>
   onClose: () => void
 }
 
@@ -29,7 +29,7 @@ export function QuickAddSupplierDialog({ existingNames, onCreate, onClose }: Qui
   const [draft, setDraft] = useState<QuickSupplierInput>({ name: '', type: 'Distributor', contactName: '', email: '', phone: '', address: '' })
   const [error, setError] = useState('')
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values = {
       ...draft,
@@ -47,7 +47,7 @@ export function QuickAddSupplierDialog({ existingNames, onCreate, onClose }: Qui
       setError('A supplier with this name already exists. Select it from the list instead.')
       return
     }
-    const createError = onCreate(values)
+    const createError = await onCreate(values)
     if (createError) setError(createError)
   }
 

@@ -1,6 +1,7 @@
 import type { MouseEvent, PropsWithChildren, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { GlobalSearch } from '../ui/GlobalSearch'
+import { hydrateSettingsCache } from '../../features/settings/settingsStorage'
 
 type NavigationItem = {
   label: string
@@ -98,6 +99,8 @@ export function AppShell({ children, username, isSigningOut, onSignOut, sectionC
   const [activePath, setActivePath] = useState(() => normalizePath(window.location.pathname))
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarState)
+
+  useEffect(() => { void hydrateSettingsCache().catch(() => { /* Individual Settings screens show API errors. */ }) }, [])
   const activeItem = navigationItems.find((item) => item.path === activePath)
     ?? (activePath.startsWith('/items/') ? navigationItems.find((item) => item.path === '/items') : undefined)
     ?? (activePath.startsWith('/clients/') ? navigationItems.find((item) => item.path === '/clients') : undefined)

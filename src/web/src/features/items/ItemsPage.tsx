@@ -7,7 +7,10 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
-import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
+import { addItemPriceAdjustment, archiveItem, createItem, createItemVariant, deleteItemVariant, listItems, updateItem, updateItemVariant, type Item as ApiItem } from '../../services/api/items'
+import { listBusinessOptions } from '../../services/api/settings'
+import { listSuppliers } from '../../services/api/suppliers'
+import { isActiveRecord } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 type ItemStatus = 'Active' | 'Inactive' | 'Discontinued'
@@ -33,6 +36,7 @@ type ItemVariant = {
   rawCost: number
   sellingPrice: number
   priceHistory: PriceAdjustmentRecord[]
+  version: number
 }
 
 type PriceAdjustmentRecord = {
@@ -94,9 +98,11 @@ type Item = {
   supplierId: string
   createdAt: string
   updatedAt: string
+  archivedAt: string | null
+  version: number
 }
 
-type ItemDraft = Omit<Item, 'id' | 'createdAt' | 'updatedAt' | 'unitWeight' | 'rawCost' | 'sellingPrice' | 'priceHistory'> & {
+type ItemDraft = Omit<Item, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version' | 'unitWeight' | 'rawCost' | 'sellingPrice' | 'priceHistory'> & {
   unitWeight: string
   rawCost: string
   sellingPrice: string
@@ -106,9 +112,6 @@ type ItemsPageProps = {
   currentUsername: string
 }
 
-const storageKey = 'adiel.items'
-const categoryStorageKey = 'adiel.item-categories'
-const supplierStorageKey = 'adiel.suppliers'
 const defaultCategories = ['Electrical', 'Hardware', 'Construction materials', 'Safety equipment', 'Plumbing', 'Tools', 'Office supplies', 'Other']
 const itemStatuses: ItemStatus[] = ['Active', 'Inactive', 'Discontinued']
 const statusOptions = [
@@ -145,120 +148,16 @@ function createEmptyDraft(supplierId = '', category = ''): ItemDraft {
 }
 
 function createEmptyVariant(rawCost = 0, sellingPrice = 0, productCode = '', unitOfMeasure = 'Piece', unitWeight = 0, status: ItemStatus = 'Active'): ItemVariant {
-  return { id: crypto.randomUUID(), name: '', value: '', photo: '', productCode, barcode: '', unitOfMeasure, unitWeight, status, specifications: [], rawCost, sellingPrice, priceHistory: [] }
+  return { id: crypto.randomUUID(), name: '', value: '', photo: '', productCode, barcode: '', unitOfMeasure, unitWeight, status, specifications: [], rawCost, sellingPrice, priceHistory: [], version: 0 }
+}
+
+function toItem(value: ApiItem): Item {
+  const priceHistory = (variantId?: string) => value.priceAdjustments.filter((entry) => entry.variantId === (variantId ?? null)).map((entry) => ({ id: entry.id, date: entry.effectiveDate, recordedAt: entry.createdAt, previousRawCost: entry.previousRawCost, previousSellingPrice: entry.previousSellingPrice, rawCost: entry.rawCost, sellingPrice: entry.sellingPrice, reason: entry.reason, notes: entry.notes, createdBy: entry.createdBy }))
+  return { id: value.id, photo: value.photo, name: value.name, category: value.category, subcategory: value.subcategory, brand: value.brand, unitOfMeasure: value.unitOfMeasure, unitWeight: value.unitWeight, productCode: value.productCode, barcode: value.barcode, variants: value.variants.map((variant) => ({ id: variant.id, name: variant.name, value: variant.value, photo: variant.photo, productCode: variant.productCode, barcode: variant.barcode, unitOfMeasure: variant.unitOfMeasure, unitWeight: variant.unitWeight, status: variant.status, specifications: variant.specifications.map((specification) => ({ id: specification.id, name: specification.name, value: specification.value })), rawCost: variant.rawCost, sellingPrice: variant.sellingPrice, priceHistory: priceHistory(variant.id), version: variant.version })), description: value.description, status: value.status, lastPriceUpdate: value.lastPriceUpdate ?? '', rawCost: value.rawCost, sellingPrice: value.sellingPrice, priceHistory: priceHistory(), supplierId: value.supplierId ?? '', createdAt: value.createdAt, updatedAt: value.updatedAt, archivedAt: value.archivedAt, version: value.version }
 }
 
 function createPriceRecord(rawCost: number, sellingPrice: number, date: string, createdBy: string, reason = 'Initial price', notes = '', previousRawCost = rawCost, previousSellingPrice = sellingPrice): PriceAdjustmentRecord {
   return { id: crypto.randomUUID(), date, recordedAt: new Date().toISOString(), previousRawCost, previousSellingPrice, rawCost, sellingPrice, reason, notes, createdBy }
-}
-
-function normalizePriceHistory(value: unknown, fallbackRawCost: number, fallbackSellingPrice: number, fallbackDate: string): PriceAdjustmentRecord[] {
-  if (!Array.isArray(value)) return [createPriceRecord(fallbackRawCost, fallbackSellingPrice, fallbackDate || new Date().toISOString().slice(0, 10), 'System')]
-  let previousRawCost = fallbackRawCost
-  let previousSellingPrice = fallbackSellingPrice
-  const records = value.flatMap((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) return []
-    const saved = entry as Partial<PriceAdjustmentRecord>
-    if (typeof saved.date !== 'string' || typeof saved.rawCost !== 'number' || typeof saved.sellingPrice !== 'number') return []
-    const normalized: PriceAdjustmentRecord = {
-      id: typeof saved.id === 'string' ? saved.id : crypto.randomUUID(),
-      date: saved.date,
-      recordedAt: typeof saved.recordedAt === 'string' ? saved.recordedAt : `${saved.date}T00:00:00.000Z`,
-      previousRawCost: typeof saved.previousRawCost === 'number' ? saved.previousRawCost : index ? previousRawCost : saved.rawCost,
-      previousSellingPrice: typeof saved.previousSellingPrice === 'number' ? saved.previousSellingPrice : index ? previousSellingPrice : saved.sellingPrice,
-      rawCost: saved.rawCost,
-      sellingPrice: saved.sellingPrice,
-      reason: typeof saved.reason === 'string' && saved.reason.trim() ? saved.reason : index ? 'Imported adjustment' : 'Initial price',
-      notes: typeof saved.notes === 'string' ? saved.notes : '',
-      createdBy: typeof saved.createdBy === 'string' && saved.createdBy.trim() ? saved.createdBy : 'System',
-    }
-    previousRawCost = saved.rawCost
-    previousSellingPrice = saved.sellingPrice
-    return [normalized]
-  })
-  return records.length ? records : [createPriceRecord(fallbackRawCost, fallbackSellingPrice, fallbackDate || new Date().toISOString().slice(0, 10), 'System')]
-}
-
-function loadItems(): Item[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const item = value as Partial<Item>
-      if (typeof item.id !== 'string' || typeof item.name !== 'string') return []
-      const itemRawCost = typeof item.rawCost === 'number' ? item.rawCost : 0
-      const itemSellingPrice = typeof item.sellingPrice === 'number' ? item.sellingPrice : 0
-      const itemPriceDate = typeof item.lastPriceUpdate === 'string' ? item.lastPriceUpdate : ''
-      const itemPriceHistory = normalizePriceHistory(item.priceHistory, itemRawCost, itemSellingPrice, itemPriceDate)
-      return [{
-        id: item.id,
-        photo: typeof item.photo === 'string' ? item.photo : '',
-        name: item.name,
-        category: typeof item.category === 'string' ? item.category : '',
-        subcategory: typeof item.subcategory === 'string' ? item.subcategory : '',
-        brand: typeof item.brand === 'string' ? item.brand : '',
-        unitOfMeasure: typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece',
-        unitWeight: typeof item.unitWeight === 'number' ? item.unitWeight : 0,
-        productCode: typeof item.productCode === 'string' ? item.productCode : '',
-        barcode: typeof item.barcode === 'string' ? item.barcode : '',
-        variants: Array.isArray(item.variants) ? item.variants.flatMap((variant) => {
-          if (typeof variant === 'string') return [{ id: crypto.randomUUID(), name: 'Variant', value: variant, photo: '', productCode: '', barcode: '', unitOfMeasure: typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece', unitWeight: typeof item.unitWeight === 'number' ? item.unitWeight : 0, status: itemStatuses.includes(item.status as ItemStatus) ? item.status as ItemStatus : 'Active', specifications: [], rawCost: itemRawCost, sellingPrice: itemSellingPrice, priceHistory: [createPriceRecord(itemRawCost, itemSellingPrice, itemPriceDate || new Date().toISOString().slice(0, 10), 'System')] }]
-          if (typeof variant !== 'object' || variant === null) return []
-          const savedVariant = variant as Partial<ItemVariant>
-          if (typeof savedVariant.name !== 'string' || typeof savedVariant.value !== 'string') return []
-          const rawCost = typeof savedVariant.rawCost === 'number' ? savedVariant.rawCost : itemRawCost
-          const sellingPrice = typeof savedVariant.sellingPrice === 'number' ? savedVariant.sellingPrice : itemSellingPrice
-          const specifications = Array.isArray(savedVariant.specifications) ? savedVariant.specifications.flatMap((specification) => {
-            if (typeof specification !== 'object' || specification === null) return []
-            const savedSpecification = specification as Partial<VariantSpecification>
-            if (typeof savedSpecification.name !== 'string' || typeof savedSpecification.value !== 'string') return []
-            return [{ id: typeof savedSpecification.id === 'string' ? savedSpecification.id : crypto.randomUUID(), name: savedSpecification.name, value: savedSpecification.value }]
-          }) : []
-          const priceHistory = normalizePriceHistory(savedVariant.priceHistory, rawCost, sellingPrice, itemPriceDate)
-          return [{ id: typeof savedVariant.id === 'string' ? savedVariant.id : crypto.randomUUID(), name: savedVariant.name, value: savedVariant.value, photo: typeof savedVariant.photo === 'string' ? savedVariant.photo : '', productCode: typeof savedVariant.productCode === 'string' ? savedVariant.productCode : '', barcode: typeof savedVariant.barcode === 'string' ? savedVariant.barcode : '', unitOfMeasure: typeof savedVariant.unitOfMeasure === 'string' ? savedVariant.unitOfMeasure : typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece', unitWeight: typeof savedVariant.unitWeight === 'number' ? savedVariant.unitWeight : typeof item.unitWeight === 'number' ? item.unitWeight : 0, status: itemStatuses.includes(savedVariant.status as ItemStatus) ? savedVariant.status as ItemStatus : itemStatuses.includes(item.status as ItemStatus) ? item.status as ItemStatus : 'Active', specifications, rawCost, sellingPrice, priceHistory }]
-        }) : [],
-        description: typeof item.description === 'string' ? item.description : '',
-        status: itemStatuses.includes(item.status as ItemStatus) ? item.status as ItemStatus : 'Active',
-        lastPriceUpdate: itemPriceDate,
-        rawCost: itemRawCost,
-        sellingPrice: itemSellingPrice,
-        priceHistory: itemPriceHistory,
-        supplierId: typeof item.supplierId === 'string' ? item.supplierId : '',
-        createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
-        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
-      }]
-    })
-  } catch {
-    return []
-  }
-}
-
-function loadItemCategories(): string[] {
-  try {
-    const stored = window.localStorage.getItem(categoryStorageKey)
-    const parsed: unknown = JSON.parse(stored ?? '[]')
-    const saved = Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())) : []
-    const used = loadItems().map((item) => item.category).filter(Boolean)
-    return Array.from(new Set([...(stored === null ? defaultCategories : saved), ...used])).sort((left, right) => left.localeCompare(right))
-  } catch {
-    return defaultCategories
-  }
-}
-
-function loadDirectorySuppliers(): DirectorySupplier[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(supplierStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const supplier = value as Partial<DirectorySupplier>
-      if (typeof supplier.id !== 'string' || typeof supplier.name !== 'string') return []
-      return [{ id: supplier.id, name: supplier.name, address: typeof supplier.address === 'string' ? supplier.address : '', status: typeof supplier.status === 'string' ? supplier.status : 'Active' }]
-    }).sort((left, right) => left.name.localeCompare(right.name))
-  } catch {
-    return []
-  }
 }
 
 function resizeItemPhoto(file: File, maxSize = 800, quality = 0.84) {
@@ -458,10 +357,10 @@ function ItemDetailsView({ item, supplier, onBack, onEdit, onAddVariant, onEditV
 }
 
 export function ItemsPage({ currentUsername }: ItemsPageProps) {
-  const [items, setItems] = useState<Item[]>(loadItems)
+  const [items, setItems] = useState<Item[]>([])
   const [detailItemId, setDetailItemId] = useState<string | null>(getItemIdFromPath)
-  const [suppliers, setSuppliers] = useState<DirectorySupplier[]>(loadDirectorySuppliers)
-  const [categories, setCategories] = useState<string[]>(loadItemCategories)
+  const [suppliers, setSuppliers] = useState<DirectorySupplier[]>([])
+  const [categories, setCategories] = useState<string[]>(defaultCategories)
   const [search, setSearch] = usePersistentState('items.search', '')
   const [categoryFilter, setCategoryFilter] = usePersistentState('items.category', 'All categories')
   const [statusFilter, setStatusFilter] = usePersistentState<ItemStatusFilter>('items.status', 'All statuses')
@@ -494,24 +393,23 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(items))
-      setStorageError('')
-    } catch {
-      setStorageError('Items could not be saved. Try using a smaller product photo.')
-    }
-  }, [items])
+    let isActive = true
+    void listItems().then((result) => { if (isActive) { setItems(result.items.map(toItem)); setStorageError('') } }).catch(() => { if (isActive) setStorageError('Items could not be loaded from the API.') })
+    return () => { isActive = false }
+  }, [])
 
   useEffect(() => {
-    window.localStorage.setItem(categoryStorageKey, JSON.stringify(categories))
-  }, [categories])
+    let isActive = true
+    void listBusinessOptions('item_category').then((result) => { if (isActive) setCategories(result.filter((option) => option.isActive).map((option) => option.name)) }).catch(() => setStorageError('Item categories could not be loaded from the API.'))
+    return () => { isActive = false }
+  }, [])
 
   useEffect(() => {
-    const refreshSuppliers = (event: StorageEvent) => {
-      if (event.key === supplierStorageKey) setSuppliers(loadDirectorySuppliers())
-    }
-    window.addEventListener('storage', refreshSuppliers)
-    return () => window.removeEventListener('storage', refreshSuppliers)
+    let isActive = true
+    void listSuppliers().then((result) => {
+      if (isActive) setSuppliers(result.items.map((supplier) => ({ id: supplier.id, name: supplier.name, address: supplier.address, status: supplier.status })))
+    }).catch(() => { if (isActive) setStorageError('Suppliers could not be loaded from the API.') })
+    return () => { isActive = false }
   }, [])
 
   useEffect(() => {
@@ -648,7 +546,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setPriceAdjustmentError('')
   }
 
-  function savePriceAdjustment(event: FormEvent<HTMLFormElement>) {
+  async function savePriceAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!priceAdjustmentTarget) return
     const rawCost = Number(priceAdjustmentDraft.rawCost)
@@ -667,18 +565,13 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       setPriceAdjustmentError('The selected item or variant is no longer available.')
       return
     }
-    const record = createPriceRecord(rawCost, sellingPrice, priceAdjustmentDraft.effectiveDate, currentUsername, priceAdjustmentDraft.reason.trim(), priceAdjustmentDraft.notes.trim(), priceAdjustmentTarget.currentRawCost, priceAdjustmentTarget.currentSellingPrice)
-    const now = new Date().toISOString()
-    setItems((current) => current.map((entry) => {
-      if (entry.id !== priceAdjustmentTarget.itemId) return entry
-      if (!priceAdjustmentTarget.variantId) return { ...entry, rawCost, sellingPrice, lastPriceUpdate: priceAdjustmentDraft.effectiveDate, priceHistory: [...entry.priceHistory, record], updatedAt: now }
-      return { ...entry, variants: entry.variants.map((option) => option.id === priceAdjustmentTarget.variantId ? { ...option, rawCost, sellingPrice, priceHistory: [...option.priceHistory, record] } : option), updatedAt: now }
-    }))
-    const targetLabel = variant ? `${item.name} - ${variant.value}` : item.name
-    appendSystemLog({ recordId: record.id, module: 'Items', action: 'Updated', entity: targetLabel, description: `${record.reason}: price adjusted from ${formatPeso(priceAdjustmentTarget.currentSellingPrice)} to ${formatPeso(sellingPrice)}.`, actor: currentUsername, tone: sellingPrice >= priceAdjustmentTarget.currentSellingPrice ? 'success' : 'warning', amount: sellingPrice, status: variant?.status ?? item.status })
-    setPriceAdjustmentTarget(null)
-    setPriceAdjustmentError('')
-    setToast(`${variant ? 'Variant' : 'Item'} price adjusted successfully`)
+    try {
+      const saved = toItem(await addItemPriceAdjustment(item.id, { variantId: variant?.id, rawCost, sellingPrice, effectiveDate: priceAdjustmentDraft.effectiveDate, reason: priceAdjustmentDraft.reason.trim(), notes: priceAdjustmentDraft.notes.trim(), itemVersion: item.version, variantVersion: variant?.version }))
+      setItems((current) => current.map((entry) => entry.id === saved.id ? saved : entry))
+      setPriceAdjustmentTarget(null)
+      setPriceAdjustmentError('')
+      setToast(`${variant ? 'Variant' : 'Item'} price adjusted successfully`)
+    } catch (failure) { setPriceAdjustmentError(failure instanceof Error ? failure.message : 'The price adjustment could not be saved.') }
   }
 
   function editVariant(item: Item, variant: ItemVariant) {
@@ -690,7 +583,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setIsVariantDialogOpen(true)
   }
 
-  function saveVariant(event: FormEvent<HTMLFormElement>) {
+  async function saveVariant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!variantDraft.name.trim() || !variantDraft.value.trim() || !variantDraft.productCode.trim() || !variantDraft.unitOfMeasure || !Number.isFinite(variantDraft.rawCost) || variantDraft.rawCost < 0 || !Number.isFinite(variantDraft.sellingPrice) || variantDraft.sellingPrice < 0 || !Number.isFinite(variantDraft.unitWeight) || variantDraft.unitWeight < 0) {
       setVariantFormError('Complete the variant name, value, SKU, unit, weight, raw cost, and selling price.')
@@ -712,33 +605,21 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       setVariantFormError('That SKU or product code is already used by another item or variant.')
       return
     }
-    const previous = parentItem.variants.find((variant) => variant.id === editingVariantId)
-    const priceChanged = previous ? previous.rawCost !== variantDraft.rawCost || previous.sellingPrice !== variantDraft.sellingPrice : false
-    const priceHistory = !previous
-      ? [createPriceRecord(variantDraft.rawCost, variantDraft.sellingPrice, new Date().toISOString().slice(0, 10), currentUsername)]
-      : priceChanged
-        ? [...variantDraft.priceHistory, createPriceRecord(variantDraft.rawCost, variantDraft.sellingPrice, new Date().toISOString().slice(0, 10), currentUsername, 'Item details update', 'Price changed while editing variant details.', previous.rawCost, previous.sellingPrice)]
-        : variantDraft.priceHistory
-    const values = { ...variantDraft, name: variantDraft.name.trim(), value: variantDraft.value.trim(), productCode, barcode: variantDraft.barcode.trim(), specifications: variantDraft.specifications.map((specification) => ({ ...specification, name: specification.name.trim(), value: specification.value.trim() })), priceHistory }
-    const now = new Date().toISOString()
-    setItems((current) => current.map((item) => item.id === variantParentItemId ? { ...item, variants: editingVariantId ? item.variants.map((variant) => variant.id === editingVariantId ? values : variant) : [...item.variants, values], updatedAt: now } : item))
-    appendSystemLog({ recordId: values.id, module: 'Items', action: editingVariantId ? 'Updated' : 'Created', entity: `${parentItem.name} - ${values.value}`, description: editingVariantId ? 'Product variant details and pricing were updated.' : 'A new product variant was added.', actor: currentUsername, tone: 'success', amount: values.sellingPrice, status: parentItem.status })
-    setIsVariantDialogOpen(false)
-    setVariantParentItemId(null)
-    setVariantFormError('')
-    setToast(editingVariantId ? 'Variant updated successfully' : 'Variant added successfully')
+    try {
+      const payload = { name: variantDraft.name.trim(), value: variantDraft.value.trim(), photo: variantDraft.photo, productCode, barcode: variantDraft.barcode.trim(), unitOfMeasure: variantDraft.unitOfMeasure, unitWeight: variantDraft.unitWeight, status: variantDraft.status, rawCost: variantDraft.rawCost, sellingPrice: variantDraft.sellingPrice, specifications: variantDraft.specifications.map((specification) => ({ id: specification.id, name: specification.name.trim(), value: specification.value.trim() })), version: editingVariantId ? variantDraft.version : undefined }
+      const saved = toItem(editingVariantId ? await updateItemVariant(parentItem.id, editingVariantId, payload) : await createItemVariant(parentItem.id, payload))
+      setItems((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setIsVariantDialogOpen(false); setVariantParentItemId(null); setVariantFormError(''); setToast(editingVariantId ? 'Variant updated successfully' : 'Variant added successfully')
+    } catch (failure) { setVariantFormError(failure instanceof Error ? failure.message : 'The variant could not be saved.') }
   }
 
-  function deleteVariant() {
+  async function deleteVariant() {
     if (!variantParentItemId || !editingVariantId) return
     const parentItem = items.find((item) => item.id === variantParentItemId)
     const variant = parentItem?.variants.find((entry) => entry.id === editingVariantId)
     if (!parentItem || !variant) return
-    setItems((current) => current.map((item) => item.id === variantParentItemId ? { ...item, variants: item.variants.filter((entry) => entry.id !== editingVariantId), updatedAt: new Date().toISOString() } : item))
-    appendSystemLog({ recordId: variant.id, module: 'Items', action: 'Deleted', entity: `${parentItem.name} - ${variant.value}`, description: 'Product variant removed from the catalog.', actor: currentUsername, tone: 'danger', amount: variant.sellingPrice, status: parentItem.status })
-    setIsVariantDialogOpen(false)
-    setVariantParentItemId(null)
-    setToast('Variant removed')
+    try { const saved = toItem(await deleteItemVariant(parentItem.id, variant.id, variant.version)); setItems((current) => current.map((item) => item.id === saved.id ? saved : item)); setIsVariantDialogOpen(false); setVariantParentItemId(null); setToast('Variant removed') }
+    catch (failure) { setVariantFormError(failure instanceof Error ? failure.message : 'The variant could not be removed.') }
   }
 
   async function handleVariantPhotoChange(id: string, event: ChangeEvent<HTMLInputElement>) {
@@ -858,7 +739,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     }
   }
 
-  function saveItem(event: FormEvent<HTMLFormElement>) {
+  async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const unitWeight = Number(draft.unitWeight)
     const rawCost = Number(draft.rawCost)
@@ -925,23 +806,24 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       supplierId: draft.supplierId,
       createdAt: existingItem?.createdAt ?? now,
       updatedAt: now,
+      archivedAt: existingItem?.archivedAt ?? null,
+      version: existingItem?.version ?? 0,
     }
-    setItems((current) => editingId ? current.map((item) => item.id === editingId ? values : item) : [values, ...current])
-    appendSystemLog({ recordId: itemId, module: 'Items', action: editingId ? 'Updated' : 'Created', entity: values.name, description: editingId ? 'Item details, sourcing, or pricing were updated.' : `Item added under ${values.category}.`, actor: currentUsername, tone: 'success', amount: sellingPrice, status: values.status })
-    setToast(editingId ? 'Item updated successfully' : 'Item added successfully')
-    closeDialog()
+    try {
+      const { id: _id, variants: _variants, priceHistory: _priceHistory, createdAt: _createdAt, updatedAt: _updatedAt, archivedAt: _archivedAt, ...payload } = values
+      const saved = toItem(editingId ? await updateItem(editingId, { ...payload, supplierId: payload.supplierId || null, version: existingItem?.version }) : await createItem({ ...payload, supplierId: payload.supplierId || null }))
+      setItems((current) => editingId ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current])
+      setToast(editingId ? 'Item updated successfully' : 'Item added successfully')
+      closeDialog()
+    } catch (failure) { setFormError(failure instanceof Error ? failure.message : 'The item could not be saved.') }
   }
 
-  function deleteItem() {
+  async function deleteItem() {
     if (!editingId) return
     const item = items.find((entry) => entry.id === editingId)
     if (!item) return
-    setItems((current) => current.map((entry) => entry.id === editingId ? withArchived(entry, currentUsername) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ recordId: item.id, module: 'Items', action: 'Archived', entity: item.name, description: 'Item was archived with quotation and purchasing history retained.', actor: currentUsername, tone: 'info', amount: item.sellingPrice, status: item.status })
-    if (detailItemId === item.id) returnToItems()
-    setToast('Item archived')
-    closeDialog()
+    try { const saved = toItem(await archiveItem(item.id, item.version)); setItems((current) => current.map((entry) => entry.id === saved.id ? saved : entry)); if (detailItemId === item.id) returnToItems(); setToast('Item archived'); closeDialog() }
+    catch (failure) { setFormError(failure instanceof Error ? failure.message : 'The item could not be archived.') }
   }
 
   return (

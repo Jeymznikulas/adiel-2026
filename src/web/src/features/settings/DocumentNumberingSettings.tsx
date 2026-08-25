@@ -1,13 +1,13 @@
 import type { FormEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
-import { formatDocumentNumber, loadDocumentNumbering, nextDocumentNumber, saveDocumentNumbering, type DocumentNumberingRule, type DocumentNumberingSettings, type DocumentNumberingType } from './settingsStorage'
+import { formatDocumentNumber, loadDocumentNumbering, previewDocumentNumber, refreshDocumentNumbering, saveDocumentNumbering, type DocumentNumberingRule, type DocumentNumberingSettings, type DocumentNumberingType } from './settingsStorage'
 
-const documentTypes: Array<{ type: DocumentNumberingType; title: string; detail: string; storageKey: string; numberKey: string; tone: string }> = [
-  { type: 'quotation', title: 'Quotation', detail: 'Used for every new quotation', storageKey: 'adiel.quotations', numberKey: 'quotationNumber', tone: 'bg-violet-50 text-violet-700' },
-  { type: 'purchaseOrder', title: 'Purchase Order', detail: 'One sequence across all suppliers', storageKey: 'adiel.purchase-orders', numberKey: 'poNumber', tone: 'bg-amber-50 text-amber-700' },
-  { type: 'statementOfAccount', title: 'Statement of Account', detail: 'Used for every new SOA', storageKey: 'adiel.statements-of-account', numberKey: 'soaNumber', tone: 'bg-sky-50 text-sky-700' },
+const documentTypes: Array<{ type: DocumentNumberingType; title: string; detail: string; tone: string }> = [
+  { type: 'quotation', title: 'Quotation', detail: 'Used for every new quotation', tone: 'bg-violet-50 text-violet-700' },
+  { type: 'purchaseOrder', title: 'Purchase Order', detail: 'One sequence across all suppliers', tone: 'bg-amber-50 text-amber-700' },
+  { type: 'statementOfAccount', title: 'Statement of Account', detail: 'Used for every new SOA', tone: 'bg-sky-50 text-sky-700' },
 ]
 
 const digitOptions = ['2', '3', '4', '5', '6', '7', '8'].map((value) => ({ value, label: `${value} digits` }))
@@ -18,26 +18,29 @@ function Icon({ path, className = 'size-4' }: { path: string; className?: string
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={path} /></svg>
 }
 
-function readExistingNumbers(storageKey: string, numberKey: string) {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const number = (value as Record<string, unknown>)[numberKey]
-      return typeof number === 'string' ? [number] : []
-    })
-  } catch {
-    return []
-  }
-}
-
 export function DocumentNumberingSettings() {
   const [settings, setSettings] = useState<DocumentNumberingSettings>(loadDocumentNumbering)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
+  const [previews, setPreviews] = useState<Partial<Record<DocumentNumberingType, string>>>({})
+  const [isSaving, setIsSaving] = useState(false)
   const today = new Date().toISOString().slice(0, 10)
-  const existingNumbers = useMemo(() => Object.fromEntries(documentTypes.map((document) => [document.type, readExistingNumbers(document.storageKey, document.numberKey)])) as Record<DocumentNumberingType, string[]>, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const saved = await refreshDocumentNumbering()
+        const nextPreviews = await Promise.all(documentTypes.map(async (document) => [document.type, await previewDocumentNumber(document.type, today)] as const))
+        if (cancelled) return
+        setSettings(saved)
+        setPreviews(Object.fromEntries(nextPreviews))
+      } catch {
+        if (!cancelled) setError('Document numbering settings could not be loaded.')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -50,7 +53,7 @@ export function DocumentNumberingSettings() {
     setError('')
   }
 
-  function save(event: FormEvent<HTMLFormElement>) {
+  async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const prefixes = documentTypes.map(({ type }) => settings[type].prefix.trim().toUpperCase())
     if (prefixes.some((prefix) => !prefix)) {
@@ -61,12 +64,17 @@ export function DocumentNumberingSettings() {
       setError('Use a different prefix for Quotations, Purchase Orders, and SOAs.')
       return
     }
+    setIsSaving(true)
     try {
-      saveDocumentNumbering(settings)
-      setSettings(loadDocumentNumbering())
+      const saved = await saveDocumentNumbering(settings)
+      setSettings(saved)
+      const nextPreviews = await Promise.all(documentTypes.map(async (document) => [document.type, await previewDocumentNumber(document.type, today)] as const))
+      setPreviews(Object.fromEntries(nextPreviews))
       setToast('Document numbering settings saved')
     } catch {
-      setError('Document numbering settings could not be saved in browser storage.')
+      setError('Document numbering settings could not be saved. Reload and try again.')
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -76,7 +84,7 @@ export function DocumentNumberingSettings() {
     <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-3">
       {documentTypes.map((document) => {
         const rule = settings[document.type]
-        const nextNumber = nextDocumentNumber(document.type, existingNumbers[document.type], today, settings)
+        const nextNumber = previews[document.type] ?? formatDocumentNumber(rule, rule.startingNumber, today)
         const startingPreview = formatDocumentNumber(rule, rule.startingNumber, today)
         return <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/45" key={document.type}>
           <div className="border-b border-slate-200/70 bg-white p-4"><div className="flex items-start gap-3"><span className={`grid size-10 shrink-0 place-items-center rounded-xl ${document.tone}`}><Icon path="M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2" /></span><div className="min-w-0"><h4 className="text-sm font-extrabold text-brand-blue">{document.title}</h4><p className="mt-1 text-[10px] text-slate-400">{document.detail}</p></div></div><div className="mt-4 rounded-xl bg-[linear-gradient(145deg,#00113f,#073078)] px-4 py-3 text-white"><p className="text-[8px] font-bold uppercase tracking-[0.12em] text-white/45">Next number</p><p className="mt-1.5 truncate font-mono text-sm font-extrabold">{nextNumber}</p></div></div>
@@ -90,7 +98,7 @@ export function DocumentNumberingSettings() {
         </section>
       })}
     </div>
-    <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 bg-slate-50/60 px-5 py-4 sm:px-6"><p className="max-w-xl text-[10px] font-semibold leading-5 text-slate-400">If a matching number already exists, the system automatically moves to the next available sequence.</p><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit"><Icon path="m5 12 4 4L19 6" />Save numbering</button></footer>
+    <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 bg-slate-50/60 px-5 py-4 sm:px-6"><p className="max-w-xl text-[10px] font-semibold leading-5 text-slate-400">Previews do not reserve a number. A number is reserved atomically only when the backend is asked to create one.</p><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60" type="submit" disabled={isSaving}><Icon path="m5 12 4 4L19 6" />{isSaving ? 'Saving…' : 'Save numbering'}</button></footer>
     <SuccessToast message={toast} />
   </form>
 }

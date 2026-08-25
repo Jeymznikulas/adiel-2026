@@ -1,4 +1,5 @@
 import type { LateChargePolicy } from '../statement-of-account/statementOfAccountTypes'
+import { getCompanySettings, getDocumentDefaults, getDocumentNumberingRules, previewDocumentNumber as getDocumentNumberPreview, reserveDocumentNumber as reserveDocumentNumberFromApi, updateCompanySettings, updateDocumentDefaults, updateDocumentNumberingRules, type CompanySettings as ApiCompanySettings, type DocumentDefaults as ApiDocumentDefaults, type DocumentNumberingRule as ApiDocumentNumberingRule, type DocumentNumberingType as ApiDocumentNumberingType } from '../../services/api/settings'
 
 export type CompanyProfile = {
   companyName: string
@@ -30,13 +31,7 @@ export type DocumentNumberingRule = {
 
 export type DocumentNumberingSettings = Record<DocumentNumberingType, DocumentNumberingRule>
 
-export type BusinessSettingsTab = 'expense-categories' | 'payment-methods' | 'client-industries' | 'item-categories'
-
-const companyProfileStorageKey = 'adiel.company-profile'
-const legacyCompanyProfileStorageKey = 'adiel.po-company-profile'
-const documentDefaultsStorageKey = 'adiel.document-defaults'
-const lateChargeDefaultsStorageKey = 'adiel.late-charge-defaults'
-const documentNumberingStorageKey = 'adiel.document-numbering'
+export type BusinessSettingsTab = 'expense-categories' | 'payment-methods' | 'client-industries' | 'supplier-categories' | 'item-categories'
 
 export const defaultCompanyProfile: CompanyProfile = {
   companyName: 'ADIEL CONSTRUCTION SUPPLIES',
@@ -77,97 +72,113 @@ export const defaultDocumentNumbering: DocumentNumberingSettings = {
   statementOfAccount: { prefix: 'SOA', startingNumber: 1, digits: 3, includeYear: true, resetYearly: true },
 }
 
-function normalizeRecord<T extends Record<string, string>>(saved: unknown, defaults: T): T {
-  if (typeof saved !== 'object' || saved === null) return { ...defaults }
-  const record = saved as Partial<Record<keyof T, unknown>>
-  return Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => [key, typeof record[key] === 'string' ? record[key] : fallback])) as T
+let companyCache: CompanyProfile = { ...defaultCompanyProfile }
+let documentCache: DocumentDefaults = { ...defaultDocumentDefaults }
+let lateChargeCache: LateChargePolicy = { ...defaultLateChargePolicy }
+let numberingCache: DocumentNumberingSettings = { ...defaultDocumentNumbering }
+let companyVersion = 0
+let documentVersion = 0
+let numberingVersions: Record<DocumentNumberingType, number> = { quotation: 0, purchaseOrder: 0, statementOfAccount: 0 }
+
+function cacheCompany(settings: ApiCompanySettings) {
+  companyCache = { companyName: settings.companyName, address: settings.address, mainOfficeNumber: settings.mainOfficeNumber, clientRelationsNumber: settings.clientRelationsNumber, accountsNumber: settings.accountsNumber, newAccountsNumber: settings.newAccountsNumber, email: settings.email, tin: settings.tin }
+  companyVersion = settings.version
 }
 
-function readStorage(key: string): unknown {
-  try {
-    return JSON.parse(window.localStorage.getItem(key) ?? 'null') as unknown
-  } catch {
-    return null
+function cacheDocuments(settings: ApiDocumentDefaults) {
+  documentCache = { quotationTerms: settings.quotationTerms, purchaseOrderTerms: settings.purchaseOrderTerms, statementPaymentInstructions: settings.statementPaymentInstructions, pdfFooter: settings.pdfFooter }
+  lateChargeCache = { enabled: settings.lateChargeEnabled, graceDays: settings.lateChargeGraceDays, type: settings.lateChargeType, value: settings.lateChargeValue }
+  documentVersion = settings.version
+}
+
+const apiDocumentTypes: Record<DocumentNumberingType, ApiDocumentNumberingType> = {
+  quotation: 'quotation',
+  purchaseOrder: 'purchase_order',
+  statementOfAccount: 'statement_of_account',
+}
+
+const appDocumentTypes = Object.fromEntries(Object.entries(apiDocumentTypes).map(([type, apiType]) => [apiType, type])) as Record<ApiDocumentNumberingType, DocumentNumberingType>
+
+function cacheDocumentNumbering(rules: ApiDocumentNumberingRule[]) {
+  const nextCache = { ...defaultDocumentNumbering }
+  const nextVersions = { ...numberingVersions }
+  for (const rule of rules) {
+    const type = appDocumentTypes[rule.documentType]
+    if (!type) continue
+    nextCache[type] = { prefix: rule.prefix, startingNumber: rule.startingNumber, digits: rule.digits, includeYear: rule.includeYear, resetYearly: rule.resetYearly }
+    nextVersions[type] = rule.version
   }
+  numberingCache = nextCache
+  numberingVersions = nextVersions
 }
 
-export function loadCompanyProfile(): CompanyProfile {
-  const current = readStorage(companyProfileStorageKey)
-  if (current) return normalizeRecord(current, defaultCompanyProfile)
-
-  const legacy = readStorage(legacyCompanyProfileStorageKey)
-  const migrated = normalizeRecord(legacy, defaultCompanyProfile)
-  if (legacy) {
-    try {
-      window.localStorage.setItem(companyProfileStorageKey, JSON.stringify(migrated))
-    } catch {
-      // The migrated values still remain available for this session.
-    }
-  }
-  return migrated
-}
-
-export function saveCompanyProfile(profile: CompanyProfile) {
-  window.localStorage.setItem(companyProfileStorageKey, JSON.stringify(profile))
+export async function hydrateSettingsCache() {
+  const [company, documents, numbering] = await Promise.all([getCompanySettings(), getDocumentDefaults(), getDocumentNumberingRules()])
+  cacheCompany(company)
+  cacheDocuments(documents)
+  cacheDocumentNumbering(numbering)
   window.dispatchEvent(new Event('adiel:settings-changed'))
+  return { company, documents, numbering }
 }
 
-export function loadDocumentDefaults(): DocumentDefaults {
-  return normalizeRecord(readStorage(documentDefaultsStorageKey), defaultDocumentDefaults)
-}
+export function loadCompanyProfile(): CompanyProfile { return { ...companyCache } }
+export function loadDocumentDefaults(): DocumentDefaults { return { ...documentCache } }
+export function loadLateChargePolicy(): LateChargePolicy { return { ...lateChargeCache } }
+export function getCachedSettingsVersions() { return { companyVersion, documentVersion } }
 
-export function saveDocumentDefaults(defaults: DocumentDefaults) {
-  window.localStorage.setItem(documentDefaultsStorageKey, JSON.stringify(defaults))
+export async function saveCompanyProfile(profile: CompanyProfile, version = companyVersion) {
+  const saved = await updateCompanySettings({ ...profile, version })
+  cacheCompany(saved)
   window.dispatchEvent(new Event('adiel:settings-changed'))
+  return saved
 }
 
-export function loadLateChargePolicy(): LateChargePolicy {
-  const saved = readStorage(lateChargeDefaultsStorageKey)
-  if (typeof saved !== 'object' || saved === null) return { ...defaultLateChargePolicy }
-  const record = saved as Partial<LateChargePolicy>
-  return {
-    enabled: typeof record.enabled === 'boolean' ? record.enabled : defaultLateChargePolicy.enabled,
-    graceDays: typeof record.graceDays === 'number' && Number.isFinite(record.graceDays) ? Math.max(0, Math.min(90, Math.round(record.graceDays))) : defaultLateChargePolicy.graceDays,
-    type: record.type === 'Fixed amount' ? 'Fixed amount' : 'Percentage',
-    value: typeof record.value === 'number' && Number.isFinite(record.value) ? Math.max(0, record.value) : defaultLateChargePolicy.value,
-  }
-}
-
-export function saveLateChargePolicy(policy: LateChargePolicy) {
-  window.localStorage.setItem(lateChargeDefaultsStorageKey, JSON.stringify(policy))
+export async function saveDocumentDefaults(defaults: DocumentDefaults, policy = lateChargeCache, version = documentVersion) {
+  const saved = await updateDocumentDefaults({ ...defaults, lateChargeEnabled: policy.enabled, lateChargeGraceDays: policy.graceDays, lateChargeType: policy.type, lateChargeValue: policy.value, version })
+  cacheDocuments(saved)
   window.dispatchEvent(new Event('adiel:settings-changed'))
+  return saved
 }
 
-function normalizeNumberingRule(saved: unknown, fallback: DocumentNumberingRule): DocumentNumberingRule {
-  if (typeof saved !== 'object' || saved === null) return { ...fallback }
-  const rule = saved as Partial<DocumentNumberingRule>
-  return {
-    prefix: typeof rule.prefix === 'string' && rule.prefix.trim() ? rule.prefix.trim().toUpperCase().slice(0, 12) : fallback.prefix,
-    startingNumber: typeof rule.startingNumber === 'number' && Number.isFinite(rule.startingNumber) ? Math.max(1, Math.min(99_999_999, Math.round(rule.startingNumber))) : fallback.startingNumber,
-    digits: typeof rule.digits === 'number' && Number.isFinite(rule.digits) ? Math.max(2, Math.min(8, Math.round(rule.digits))) : fallback.digits,
-    includeYear: typeof rule.includeYear === 'boolean' ? rule.includeYear : fallback.includeYear,
-    resetYearly: typeof rule.resetYearly === 'boolean' ? rule.resetYearly : fallback.resetYearly,
-  }
+export async function saveLateChargePolicy(policy: LateChargePolicy, version = documentVersion) {
+  return saveDocumentDefaults(documentCache, policy, version)
 }
 
 export function loadDocumentNumbering(): DocumentNumberingSettings {
-  const saved = readStorage(documentNumberingStorageKey)
-  const record = typeof saved === 'object' && saved !== null ? saved as Partial<Record<DocumentNumberingType, unknown>> : {}
   return {
-    quotation: normalizeNumberingRule(record.quotation, defaultDocumentNumbering.quotation),
-    purchaseOrder: normalizeNumberingRule(record.purchaseOrder, defaultDocumentNumbering.purchaseOrder),
-    statementOfAccount: normalizeNumberingRule(record.statementOfAccount, defaultDocumentNumbering.statementOfAccount),
+    quotation: { ...numberingCache.quotation },
+    purchaseOrder: { ...numberingCache.purchaseOrder },
+    statementOfAccount: { ...numberingCache.statementOfAccount },
   }
 }
 
-export function saveDocumentNumbering(settings: DocumentNumberingSettings) {
-  const normalized: DocumentNumberingSettings = {
-    quotation: normalizeNumberingRule(settings.quotation, defaultDocumentNumbering.quotation),
-    purchaseOrder: normalizeNumberingRule(settings.purchaseOrder, defaultDocumentNumbering.purchaseOrder),
-    statementOfAccount: normalizeNumberingRule(settings.statementOfAccount, defaultDocumentNumbering.statementOfAccount),
-  }
-  window.localStorage.setItem(documentNumberingStorageKey, JSON.stringify(normalized))
+export async function refreshDocumentNumbering() {
+  cacheDocumentNumbering(await getDocumentNumberingRules())
   window.dispatchEvent(new Event('adiel:settings-changed'))
+  return loadDocumentNumbering()
+}
+
+export async function saveDocumentNumbering(settings: DocumentNumberingSettings) {
+  const saved = await updateDocumentNumberingRules((Object.keys(apiDocumentTypes) as DocumentNumberingType[]).map((type) => ({
+    documentType: apiDocumentTypes[type],
+    prefix: settings[type].prefix.trim().toUpperCase(),
+    startingNumber: settings[type].startingNumber,
+    digits: settings[type].digits,
+    includeYear: settings[type].includeYear,
+    resetYearly: settings[type].resetYearly,
+    version: numberingVersions[type],
+  })))
+  cacheDocumentNumbering(saved)
+  window.dispatchEvent(new Event('adiel:settings-changed'))
+  return loadDocumentNumbering()
+}
+
+export async function previewDocumentNumber(type: DocumentNumberingType, date: string) {
+  return (await getDocumentNumberPreview(apiDocumentTypes[type], date)).number
+}
+
+export async function reserveDocumentNumber(type: DocumentNumberingType, date: string) {
+  return (await reserveDocumentNumberFromApi(apiDocumentTypes[type], date)).number
 }
 
 function escapeRegExp(value: string) {

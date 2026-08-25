@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { BrandMark } from '../../components/ui/BrandMark'
+import { Button } from '../../components/ui/Button'
 import { AuthenticationError, signInWithUsername } from './auth'
 
 const loginImageUrl = '/images/login-background.jpg'
@@ -105,12 +106,9 @@ export function LoginPage() {
                 </div>
               ) : null}
 
-              <button className="group relative flex h-14 w-full items-center justify-center gap-3 overflow-hidden rounded-[0.9rem] bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-sm font-bold text-white shadow-[0_14px_35px_-12px_rgba(0,20,76,0.65)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_20px_42px_-14px_rgba(0,20,76,0.7)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-blue active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-65 disabled:hover:translate-y-0" type="submit" disabled={isSubmitting}>
-                <span className="absolute inset-0 translate-x-[-120%] bg-[linear-gradient(100deg,transparent,rgba(255,255,255,0.08),transparent)] transition-transform duration-700 group-hover:translate-x-[120%]" aria-hidden="true" />
-                {isSubmitting ? <span className="size-4 animate-spin rounded-full border-2 border-white/25 border-t-white" aria-hidden="true" /> : null}
-                <span>{isSubmitting ? 'Signing in securely...' : 'Sign in to workspace'}</span>
-                {!isSubmitting ? <svg className="size-4 transition-transform duration-300 group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg> : null}
-              </button>
+              <Button className="shadow-[0_14px_35px_-12px_rgba(0,20,76,0.65)]" variant="primary" size="large" type="submit" fullWidth disabled={isSubmitting} aria-busy={isSubmitting} leadingIcon={isSubmitting ? <span className="size-4 animate-spin rounded-full border-2 border-white/25 border-t-white" /> : undefined} trailingIcon={!isSubmitting ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg> : undefined}>
+                {isSubmitting ? 'Signing in securely...' : 'Sign in to workspace'}
+              </Button>
             </form>
 
             <div className="mt-6 flex items-center justify-center gap-2 text-[10px] font-medium text-slate-400">

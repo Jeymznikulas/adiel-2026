@@ -10,6 +10,10 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
+import { listClients as fetchClients } from '../../services/api/clients'
+import { createSupplier, listSuppliers, type Supplier as ApiSupplier } from '../../services/api/suppliers'
+import { listItems, type Item as ApiItem } from '../../services/api/items'
+import { listQuotations } from '../../services/api/quotations'
 import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { loadDocumentDefaults, nextDocumentNumber } from '../settings/settingsStorage'
 import { PurchaseOrderClientPickerDialog } from './PurchaseOrderClientPickerDialog'
@@ -87,11 +91,7 @@ type PurchaseOrderDraft = Omit<PurchaseOrder, 'id' | 'supplierName' | 'items' | 
 type PurchaseOrdersPageProps = { currentUsername: string }
 
 const storageKey = 'adiel.purchase-orders'
-const supplierStorageKey = 'adiel.suppliers'
-const clientStorageKey = 'adiel.clients'
-const itemStorageKey = 'adiel.items'
 const expenseStorageKey = 'adiel.expenses'
-const quotationStorageKey = 'adiel.quotations'
 const addSupplierOptionValue = '__add_supplier__'
 const purchaseOrderStatuses: PurchaseOrderStatus[] = ['Delivered', 'For Payment', 'Waiting for Delivery', 'Cancelled', 'Sent', 'Not yet sent']
 const statusOptions: { value: PurchaseOrderStatus }[] = purchaseOrderStatuses.map((value) => ({ value }))
@@ -118,64 +118,15 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
 }
 
-function loadSuppliers(): Supplier[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(supplierStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const supplier = value as Partial<Supplier>
-      if (typeof supplier.id !== 'string' || typeof supplier.name !== 'string') return []
-      const contacts = Array.isArray(supplier.contacts) ? supplier.contacts.filter((contact): contact is SupplierContact => typeof contact?.id === 'string' && typeof contact.name === 'string' && typeof contact.email === 'string' && typeof contact.phone === 'string') : []
-      return [{ id: supplier.id, name: supplier.name, status: typeof supplier.status === 'string' ? supplier.status : 'Active', address: typeof supplier.address === 'string' ? supplier.address : '', companyEmail: typeof supplier.companyEmail === 'string' ? supplier.companyEmail : '', companyPhone: typeof supplier.companyPhone === 'string' ? supplier.companyPhone : '', contacts }]
-    }).sort((left, right) => left.name.localeCompare(right.name))
-  } catch { return [] }
+function toPurchaseOrderSupplier(supplier: ApiSupplier): Supplier {
+  return { id: supplier.id, name: supplier.name, status: supplier.status, address: supplier.address, companyEmail: supplier.companyEmail, companyPhone: supplier.companyPhone, contacts: supplier.contacts.map((contact) => ({ id: contact.id, name: contact.name, email: contact.email, phone: contact.phone })) }
 }
 
 function loadClients(): Client[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(clientStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const client = value as Partial<Client>
-      if (typeof client.id !== 'string' || typeof client.name !== 'string') return []
-      return [{ id: client.id, name: client.name, status: typeof client.status === 'string' ? client.status : 'Active', address: typeof client.address === 'string' ? client.address : '', industry: typeof client.industry === 'string' ? client.industry : '', contactPerson: typeof client.contactPerson === 'string' ? client.contactPerson : '', email: typeof client.email === 'string' ? client.email : '', phone: typeof client.phone === 'string' ? client.phone : '' }]
-    }).sort((left, right) => left.name.localeCompare(right.name))
-  } catch { return [] }
+  return []
 }
 
-function loadCatalogItems(): CatalogItem[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(itemStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const item = value as Partial<CatalogItem>
-      if (typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.supplierId !== 'string') return []
-      const variants = Array.isArray(item.variants) ? item.variants.flatMap((entry) => {
-        if (typeof entry !== 'object' || entry === null) return []
-        const variant = entry as Partial<CatalogVariant>
-        if (typeof variant.id !== 'string' || typeof variant.name !== 'string' || typeof variant.value !== 'string') return []
-        return [{ id: variant.id, name: variant.name, value: variant.value, photo: typeof variant.photo === 'string' ? variant.photo : '', productCode: typeof variant.productCode === 'string' ? variant.productCode : typeof item.productCode === 'string' ? item.productCode : '', unitOfMeasure: typeof variant.unitOfMeasure === 'string' ? variant.unitOfMeasure : typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece', status: typeof variant.status === 'string' ? variant.status : 'Active', rawCost: typeof variant.rawCost === 'number' ? variant.rawCost : 0, sellingPrice: typeof variant.sellingPrice === 'number' ? variant.sellingPrice : 0 }]
-      }) : []
-      return [{ id: item.id, photo: typeof item.photo === 'string' ? item.photo : '', name: item.name, category: typeof item.category === 'string' ? item.category : '', brand: typeof item.brand === 'string' ? item.brand : '', unitOfMeasure: typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece', productCode: typeof item.productCode === 'string' ? item.productCode : '', supplierId: item.supplierId, rawCost: typeof item.rawCost === 'number' ? item.rawCost : 0, variants: variants.filter((variant) => variant.status === 'Active'), status: typeof item.status === 'string' ? item.status : 'Active' }]
-    })
-  } catch { return [] }
-}
-
-function loadApprovedQuotations(): ApprovedQuotationOption[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(quotationStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const quotation = value as Partial<ApprovedQuotationOption>
-      if (quotation.status !== 'Approved' || typeof quotation.id !== 'string' || typeof quotation.quotationNumber !== 'string') return []
-      return [{ id: quotation.id, quotationNumber: quotation.quotationNumber, clientId: typeof quotation.clientId === 'string' ? quotation.clientId : '', clientName: typeof quotation.clientName === 'string' ? quotation.clientName : '', subject: typeof quotation.subject === 'string' ? quotation.subject : '', projectLocation: typeof quotation.projectLocation === 'string' ? quotation.projectLocation : '', status: quotation.status }]
-    }).sort((left, right) => right.quotationNumber.localeCompare(left.quotationNumber))
-  } catch { return [] }
-}
+function toCatalogItem(item: ApiItem): CatalogItem { return { id: item.id, photo: item.photo, name: item.name, category: item.category, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, supplierId: item.supplierId ?? '', rawCost: item.rawCost, variants: item.variants.filter((variant) => variant.status === 'Active').map((variant) => ({ id: variant.id, name: variant.name, value: variant.value, photo: variant.photo, productCode: variant.productCode || item.productCode, unitOfMeasure: variant.unitOfMeasure, status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })), status: item.status } }
 
 function loadPurchaseOrders(): PurchaseOrder[] {
   try {
@@ -228,10 +179,10 @@ function legacyStatusFor(documentStatus: PurchaseOrderDocumentStatus, deliverySt
 
 export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps) {
   const [orders, setOrders] = useState<PurchaseOrder[]>(loadPurchaseOrders)
-  const [suppliers, setSuppliers] = useState<Supplier[]>(loadSuppliers)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [clients, setClients] = useState<Client[]>(loadClients)
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>(loadCatalogItems)
-  const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>(loadApprovedQuotations)
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
+  const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>([])
   const [search, setSearch] = usePersistentState('purchase-orders.search', '')
   const [statusFilter, setStatusFilter] = usePersistentState<'All statuses' | PurchaseOrderStatus>('purchase-orders.status', 'All statuses')
   const initialQuery = new URLSearchParams(window.location.search)
@@ -286,17 +237,16 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   }, [orders])
 
   useEffect(() => {
-    const refresh = (event: StorageEvent) => {
-      if (event.key === supplierStorageKey) setSuppliers(loadSuppliers())
-      if (event.key === clientStorageKey) setClients(loadClients())
-      if (event.key === itemStorageKey) setCatalogItems(loadCatalogItems())
-      if (event.key === quotationStorageKey) setApprovedQuotations(loadApprovedQuotations())
-    }
-    const refreshOnNavigate = () => setApprovedQuotations(loadApprovedQuotations())
-    window.addEventListener('storage', refresh)
-    window.addEventListener('adiel:navigate', refreshOnNavigate)
-    return () => { window.removeEventListener('storage', refresh); window.removeEventListener('adiel:navigate', refreshOnNavigate) }
+    void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
   }, [])
+
+  useEffect(() => {
+    void listSuppliers().then((result) => setSuppliers(result.items.map(toPurchaseOrderSupplier))).catch(() => setStorageError('Suppliers could not be loaded from the API.'))
+  }, [])
+
+  useEffect(() => { void listItems().then((result) => setCatalogItems(result.items.map(toCatalogItem))).catch(() => setStorageError('Items could not be loaded from the API.')) }, [])
+
+  useEffect(() => { void listQuotations({ status: 'Approved', pageSize: 100 }).then((result) => setApprovedQuotations(result.items.map((quotation) => ({ id: quotation.id, quotationNumber: quotation.quotationNumber, clientId: quotation.clientId ?? '', clientName: quotation.clientName, subject: quotation.subject, projectLocation: quotation.projectLocation, status: quotation.status })))).catch(() => setStorageError('Approved quotations could not be loaded from the API.')) }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -435,44 +385,33 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setFormError('')
   }
 
-  function createQuickSupplier(values: QuickSupplierInput) {
-    const id = crypto.randomUUID()
-    const now = new Date().toISOString()
-    const contact = { id: crypto.randomUUID(), name: values.contactName, email: values.email, phone: values.phone }
-    const directorySupplier = {
-      id,
-      logo: '',
-      name: values.name,
-      type: values.type,
-      status: 'Active',
-      tin: '',
-      companyEmail: values.email,
-      companyPhone: values.phone,
-      address: values.address,
-      contacts: [contact],
-      categories: [],
-      performanceNotes: [],
-      catalogLink: '',
-      createdAt: now,
-      updatedAt: now,
-    }
+  async function createQuickSupplier(values: QuickSupplierInput) {
     try {
-      const parsed: unknown = JSON.parse(window.localStorage.getItem(supplierStorageKey) ?? '[]')
-      const savedSuppliers: unknown[] = Array.isArray(parsed) ? parsed.map((entry: unknown) => entry) : []
-      window.localStorage.setItem(supplierStorageKey, JSON.stringify([...savedSuppliers, directorySupplier]))
-    } catch {
-      return 'The supplier could not be saved in browser storage.'
+      const saved = toPurchaseOrderSupplier(await createSupplier({
+        name: values.name,
+        logo: '',
+        type: values.type,
+        status: 'Active',
+        tin: '',
+        companyEmail: values.email,
+        companyPhone: values.phone,
+        address: values.address,
+        catalogUrl: '',
+        contacts: [{ id: crypto.randomUUID(), name: values.contactName, email: values.email, phone: values.phone }],
+        categories: [],
+        performanceNotes: [],
+      }))
+      setSuppliers((current) => [...current, saved].sort((left, right) => left.name.localeCompare(right.name)))
+      setDraft((current) => ({ ...current, supplierId: saved.id, contactPerson: saved.contacts[0]?.name ?? '', deliveryLocation: values.address || current.deliveryLocation, poNumber: editingOrderId ? current.poNumber : makePoNumber(current.date), items: [] }))
+      setIsItemPickerOpen(false)
+      setItemSearch('')
+      setFormError('')
+      setIsQuickSupplierOpen(false)
+      setToast('Supplier added and selected')
+      return null
+    } catch (failure) {
+      return failure instanceof Error ? failure.message : 'The supplier could not be saved.'
     }
-    const supplier: Supplier = { id, name: values.name, status: 'Active', address: values.address, companyEmail: values.email, companyPhone: values.phone, contacts: [contact] }
-    setSuppliers((current) => [...current, supplier].sort((left, right) => left.name.localeCompare(right.name)))
-    setDraft((current) => ({ ...current, supplierId: id, contactPerson: contact.name, deliveryLocation: values.address || current.deliveryLocation, poNumber: editingOrderId ? current.poNumber : makePoNumber(current.date), items: [] }))
-    setIsItemPickerOpen(false)
-    setItemSearch('')
-    setFormError('')
-    setIsQuickSupplierOpen(false)
-    setToast('Supplier added and selected')
-    appendSystemLog({ recordId: id, module: 'Suppliers', action: 'Created', entity: values.name, description: `${values.type} added while creating a purchase order.`, actor: currentUsername, tone: 'success', status: 'Active' })
-    return null
   }
 
   function changeDate(date: string) {
@@ -704,11 +643,6 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   return <div className="purchase-order-page space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
     <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Purchase order summary"><div><div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Supplier orders</p></div><h2 className="mt-3 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Purchase orders</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Create supplier orders, check delivery and payment status, and add completed costs to Expenses.</p></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">{summaryCards.map((card, index) => <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-[linear-gradient(145deg,rgba(248,250,252,0.9),rgba(255,255,255,0.96))] px-3 py-3.5 shadow-[0_9px_24px_-22px_rgba(0,20,76,0.48)] ring-1 ring-inset ring-white/70 transition-all duration-300 hover:-translate-y-1 hover:border-brand-blue/15 hover:shadow-[0_18px_36px_-24px_rgba(0,20,76,0.48)] animate-[po-card-enter_380ms_cubic-bezier(0.22,1,0.36,1)_both] sm:min-w-32 sm:px-4" style={{ animationDelay: `${index * 55}ms` }} key={card.label}><div className="flex items-center gap-2"><span className={`size-1.5 rounded-full ${card.dot}`} /><p className="truncate text-[10px] font-bold uppercase tracking-[0.06em] text-slate-500">{card.label}</p></div><p className={`mt-2 truncate text-xl font-bold tracking-[-0.04em] ${card.color}`}>{card.value}</p></article>)}</div></SummarySurface>
     {storageError ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{storageError}</div> : null}
-
-    <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-brand-blue/10 bg-[linear-gradient(110deg,rgba(0,20,76,0.045),rgba(255,255,255,0.98),rgba(244,128,32,0.055))] p-4 shadow-[0_12px_32px_-28px_rgba(0,20,76,0.55)] sm:flex-row sm:items-center sm:justify-between sm:px-5">
-      <div className="flex min-w-0 items-center gap-3.5"><span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand-blue text-white shadow-[0_10px_22px_-12px_rgba(0,20,76,0.8)]"><Icon className="size-5" path="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" /></span><div className="min-w-0"><p className="text-sm font-extrabold text-brand-blue">Shared PDF settings</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Company details and document defaults are managed once and reused by quotation, PO, and SOA PDFs.</p></div></div>
-      <button className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-brand-blue/10 bg-white px-4 text-xs font-bold text-brand-blue shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-blue/20 hover:bg-blue-50 hover:shadow-md" type="button" onClick={() => { window.history.pushState(null, '', '/settings'); window.dispatchEvent(new Event('adiel:navigate')) }}><Icon className="size-4" path="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M19 12h2M3 12h2M12 3v2M12 19v2" />Open Settings</button>
-    </section>
 
     <TableControls tableId="purchase-orders-table" storageKey="purchase-orders.table" columns={[{ index: 1, label: 'Number', required: true }, { index: 2, label: 'PO date' }, { index: 3, label: 'PO number', required: true }, { index: 4, label: 'Client' }, { index: 5, label: 'Supplier' }, { index: 6, label: 'Items' }, { index: 7, label: 'Total amount' }, { index: 8, label: 'Status' }, { index: 9, label: 'Expenses' }, { index: 10, label: 'Details', required: true }]} sortKey={orderTable.sortKey} sortOptions={orderSortOptions} onSortChange={orderTable.setSortKey} page={orderTable.page} pageCount={orderTable.pageCount} pageSize={orderTable.pageSize} onPageChange={orderTable.setPage} onPageSizeChange={orderTable.setPageSize} total={orderTable.total} />
 

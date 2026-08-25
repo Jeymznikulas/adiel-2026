@@ -8,10 +8,12 @@ import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
-import { appendSystemLog } from '../../services/activityLog'
-import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
+import { listClients as fetchClients } from '../../services/api/clients'
+import { listItems } from '../../services/api/items'
+import { archiveQuotation as archiveQuotationRequest, changeQuotationStatus, createQuotation, listQuotations, updateQuotation, type Quotation as ApiQuotation, type SaveQuotation } from '../../services/api/quotations'
+import { isActiveRecord } from '../../services/recordLifecycle'
 import { PurchaseOrderClientPickerDialog } from '../purchase-orders/PurchaseOrderClientPickerDialog'
-import { loadDocumentDefaults, nextDocumentNumber } from '../settings/settingsStorage'
+import { loadDocumentDefaults } from '../settings/settingsStorage'
 import { QuotationPricingDialog, type QuotationFeeDraft } from './QuotationPricingDialog'
 import { QuotationPricingFormSectionPortal } from './QuotationPricingFormSection'
 import { QuotationProfile } from './QuotationProfile'
@@ -63,9 +65,13 @@ export type Quotation = {
   approvedAt: string
   createdAt: string
   updatedAt: string
+  archivedAt: string | null
+  version: number
+  rejectionReason: string
+  voidReason: string
 }
 
-type QuotationDraft = Omit<Quotation, 'id' | 'items' | 'subtotalAmount' | 'vatAmount' | 'otherCharges' | 'totalAmount' | 'estimatedProfit' | 'approvedAt' | 'createdAt' | 'updatedAt'> & {
+type QuotationDraft = Omit<Quotation, 'id' | 'items' | 'subtotalAmount' | 'vatAmount' | 'otherCharges' | 'totalAmount' | 'estimatedProfit' | 'approvedAt' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version' | 'rejectionReason' | 'voidReason'> & {
   items: Array<Omit<QuotationLine, 'quantity' | 'unitPrice'> & { quantity: string; unitPrice: string }>
   otherCharges: QuotationFeeDraft[]
 }
@@ -73,10 +79,6 @@ type QuotationDraft = Omit<Quotation, 'id' | 'items' | 'subtotalAmount' | 'vatAm
 type QuotationsPageProps = { currentUsername: string }
 type QuotationViewMode = 'table' | 'cards'
 
-const storageKey = 'adiel.quotations'
-const clientStorageKey = 'adiel.clients'
-const itemStorageKey = 'adiel.items'
-const statuses: QuotationStatus[] = ['Draft', 'For Approval', 'Approved', 'Rejected', 'Voided']
 const statusOptions = [
   { value: 'Draft' as const, dotClassName: 'bg-slate-400', toneClassName: 'border-slate-200 bg-slate-100 text-slate-600' },
   { value: 'For Approval' as const, dotClassName: 'bg-amber-500', toneClassName: 'border-amber-100 bg-amber-50 text-amber-700' },
@@ -132,62 +134,12 @@ function QuotationCard({ quotation, index, onEdit, onView }: { quotation: Quotat
   </article>
 }
 
-function loadClients(): Client[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(clientStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const saved = value as Partial<Client>
-      if (typeof saved.id !== 'string' || typeof saved.name !== 'string') return []
-      const contacts = Array.isArray(saved.contacts) ? saved.contacts.flatMap((contact) => typeof contact?.id === 'string' && typeof contact.name === 'string' ? [{ id: contact.id, name: contact.name, email: typeof contact.email === 'string' ? contact.email : '', phone: typeof contact.phone === 'string' ? contact.phone : '' }] : []) : []
-      if (!contacts.length && typeof saved.contactPerson === 'string' && saved.contactPerson) contacts.push({ id: `${saved.id}-primary`, name: saved.contactPerson, email: typeof saved.email === 'string' ? saved.email : '', phone: typeof saved.phone === 'string' ? saved.phone : '' })
-      const primary = contacts[0]
-      return [{ id: saved.id, name: saved.name, status: typeof saved.status === 'string' ? saved.status : 'Active', address: typeof saved.address === 'string' ? saved.address : '', industry: typeof saved.industry === 'string' ? saved.industry : '', contactPerson: primary?.name ?? '', email: primary?.email ?? '', phone: primary?.phone ?? '', contacts }]
-    }).sort((left, right) => left.name.localeCompare(right.name))
-  } catch { return [] }
+function toQuotation(value: ApiQuotation): Quotation {
+  return { id: value.id, dateCreated: value.quotationDate, quotationNumber: value.quotationNumber, clientId: value.clientId ?? '', clientName: value.clientName, contactId: value.contactId ?? '', contactPerson: value.contactPerson, subject: value.subject, projectLocation: value.projectLocation, leadTime: value.leadTime, notes: value.notes, terms: value.terms, items: value.lines.map((line) => ({ id: line.id, itemId: line.itemId ?? '', variantId: line.variantId ?? '', photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: line.quantity, unitPrice: line.unitPrice, unitCost: line.unitCost })), subtotalAmount: value.subtotalAmount, vatEnabled: value.vatEnabled, vatAmount: value.vatAmount, otherCharges: value.charges.map((charge) => ({ id: charge.id, label: charge.label, amount: charge.amount })), totalAmount: value.totalAmount, estimatedProfit: value.estimatedProfit, status: value.status, approvedAt: value.status === 'Approved' ? value.updatedAt : '', createdAt: value.createdAt, updatedAt: value.updatedAt, archivedAt: value.archivedAt, version: value.version, rejectionReason: value.rejectionReason ?? '', voidReason: value.voidReason ?? '' }
 }
 
-function loadItems(): CatalogItem[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(itemStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const saved = value as Partial<CatalogItem>
-      if (typeof saved.id !== 'string' || typeof saved.name !== 'string') return []
-      const baseUnit = typeof saved.unitOfMeasure === 'string' ? saved.unitOfMeasure : 'Piece'
-      const baseCode = typeof saved.productCode === 'string' ? saved.productCode : ''
-      const variants = Array.isArray(saved.variants) ? saved.variants.flatMap((entry) => {
-        if (typeof entry !== 'object' || entry === null) return []
-        const variant = entry as Partial<CatalogVariant>
-        if (typeof variant.id !== 'string' || typeof variant.name !== 'string' || typeof variant.value !== 'string') return []
-        return [{ id: variant.id, name: variant.name, value: variant.value, photo: typeof variant.photo === 'string' ? variant.photo : '', productCode: typeof variant.productCode === 'string' ? variant.productCode : baseCode, unitOfMeasure: typeof variant.unitOfMeasure === 'string' ? variant.unitOfMeasure : baseUnit, status: typeof variant.status === 'string' ? variant.status : 'Active', rawCost: typeof variant.rawCost === 'number' ? variant.rawCost : 0, sellingPrice: typeof variant.sellingPrice === 'number' ? variant.sellingPrice : 0 }]
-      }) : []
-      return [{ id: saved.id, photo: typeof saved.photo === 'string' ? saved.photo : '', name: saved.name, category: typeof saved.category === 'string' ? saved.category : '', brand: typeof saved.brand === 'string' ? saved.brand : '', unitOfMeasure: baseUnit, productCode: baseCode, status: typeof saved.status === 'string' ? saved.status : 'Active', rawCost: typeof saved.rawCost === 'number' ? saved.rawCost : 0, sellingPrice: typeof saved.sellingPrice === 'number' ? saved.sellingPrice : 0, variants }]
-    }).sort((left, right) => left.name.localeCompare(right.name))
-  } catch { return [] }
-}
-
-function loadQuotations(): Quotation[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const saved = value as Partial<Quotation>
-      if (typeof saved.id !== 'string' || typeof saved.quotationNumber !== 'string' || !Array.isArray(saved.items)) return []
-      const items = saved.items
-      const subtotalAmount = items.reduce((total, line) => total + (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0), 0)
-      const vatEnabled = saved.vatEnabled === true
-      const vatAmount = vatEnabled ? subtotalAmount * 0.12 : 0
-      const otherCharges = Array.isArray(saved.otherCharges) ? saved.otherCharges.filter((charge): charge is QuotationCharge => typeof charge?.id === 'string' && typeof charge.label === 'string' && typeof charge.amount === 'number') : []
-      const totalAmount = subtotalAmount + vatAmount + otherCharges.reduce((total, charge) => total + charge.amount, 0)
-      const estimatedProfit = items.reduce((total, line) => total + (Number(line.quantity) || 0) * ((Number(line.unitPrice) || 0) - (Number(line.unitCost) || 0)), 0)
-      const status = statuses.includes(saved.status as QuotationStatus) ? saved.status as QuotationStatus : 'For Approval'
-      return [{ ...(saved as Quotation), dateCreated: typeof saved.dateCreated === 'string' ? saved.dateCreated : new Date().toISOString().slice(0, 10), clientId: typeof saved.clientId === 'string' ? saved.clientId : '', contactId: typeof saved.contactId === 'string' ? saved.contactId : '', subject: typeof saved.subject === 'string' ? saved.subject : '', projectLocation: typeof saved.projectLocation === 'string' ? saved.projectLocation : '', leadTime: typeof saved.leadTime === 'string' ? saved.leadTime : '', notes: typeof saved.notes === 'string' ? saved.notes : '', terms: typeof saved.terms === 'string' ? saved.terms : loadDocumentDefaults().quotationTerms, status, approvedAt: typeof saved.approvedAt === 'string' ? saved.approvedAt : status === 'Approved' && typeof saved.updatedAt === 'string' ? saved.updatedAt : '', items, subtotalAmount, vatEnabled, vatAmount, otherCharges, totalAmount, estimatedProfit }]
-    })
-  } catch { return [] }
+function quotationRequest(draft: QuotationDraft, intent: 'draft' | 'submit', version?: number): SaveQuotation {
+  return { quotationDate: draft.dateCreated, clientId: draft.clientId || null, clientName: draft.clientName, contactId: draft.contactId || null, contactPerson: draft.contactPerson, subject: draft.subject.trim(), projectLocation: draft.projectLocation.trim(), leadTime: draft.leadTime.trim(), notes: draft.notes.trim(), terms: draft.terms.trim(), vatEnabled: draft.vatEnabled, lines: draft.items.map((line) => ({ itemId: line.itemId || null, variantId: line.variantId || null, photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice), unitCost: line.unitCost })), charges: draft.otherCharges.map((charge) => ({ label: charge.label.trim(), amount: Number(charge.amount) })), intent, version }
 }
 
 function quotationIsInActiveStatement(quotationId: string) {
@@ -215,9 +167,10 @@ function quotationDraftFrom(quotation: Quotation, clients: Client[]): QuotationD
 }
 
 export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
-  const [quotations, setQuotations] = useState<Quotation[]>(loadQuotations)
-  const [clients, setClients] = useState<Client[]>(loadClients)
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>(loadItems)
+  void currentUsername
+  const [quotations, setQuotations] = useState<Quotation[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   const initialQuery = new URLSearchParams(window.location.search)
   const openNewFromQuery = initialQuery.get('new') === '1'
   const openNewOnLoad = openNewFromQuery || window.location.pathname === '/quotations/new'
@@ -229,7 +182,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     const values = emptyDraft()
     if (!openNewOnLoad) return values
     const client = clients.find((entry) => entry.status === 'Active') ?? clients[0]
-    values.quotationNumber = nextDocumentNumber('quotation', quotations.map((quotation) => quotation.quotationNumber), values.dateCreated)
+    values.quotationNumber = 'Assigned when saved'
     if (client) {
       values.clientId = client.id
       values.clientName = client.name
@@ -265,17 +218,9 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   }, [openNewFromQuery, reviewQuotationIdOnLoad])
 
   useEffect(() => {
-    try { window.localStorage.setItem(storageKey, JSON.stringify(quotations)); setStorageError('') }
-    catch { setStorageError('Quotations could not be saved in browser storage.') }
-  }, [quotations])
-
-  useEffect(() => {
-    const refresh = (event: StorageEvent) => {
-      if (event.key === clientStorageKey) setClients(loadClients())
-      if (event.key === itemStorageKey) setCatalogItems(loadItems())
-    }
-    window.addEventListener('storage', refresh)
-    return () => window.removeEventListener('storage', refresh)
+    void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
+    void listItems({ pageSize: 100, sort: 'name' }).then((result) => setCatalogItems(result.items)).catch(() => setStorageError('Items could not be loaded from the API.'))
+    void listQuotations({ pageSize: 100 }).then((result) => { setQuotations(result.items.map(toQuotation)); setStorageError('') }).catch(() => setStorageError('Quotations could not be loaded from the API.'))
   }, [])
 
   useEffect(() => {
@@ -343,10 +288,6 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const quotationTable = useTableView({ rows: filteredQuotations, storageKey: 'quotations.table', sortOptions: quotationSortOptions })
   const visibleQuotations = quotationTable.pageRows
 
-  function makeQuotationNumber(date: string) {
-    return nextDocumentNumber('quotation', quotations.map((quotation) => quotation.quotationNumber), date)
-  }
-
   function openQuotationFormPage(path: string) {
     window.history.pushState(null, '', path)
     setCurrentPath(path)
@@ -365,7 +306,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   function openNewQuotation() {
     const values = emptyDraft()
     const client = clients.find((entry) => entry.status === 'Active') ?? clients[0]
-    values.quotationNumber = makeQuotationNumber(values.dateCreated)
+    values.quotationNumber = 'Assigned when saved'
     if (client) {
       values.clientId = client.id
       values.clientName = client.name
@@ -399,7 +340,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
 
   function duplicateQuotation(quotation: Quotation) {
     const dateCreated = new Date().toISOString().slice(0, 10)
-    setDraft({ dateCreated, quotationNumber: makeQuotationNumber(dateCreated), clientId: quotation.clientId, clientName: quotation.clientName, contactId: quotation.contactId, contactPerson: quotation.contactPerson, subject: quotation.subject, projectLocation: quotation.projectLocation, leadTime: quotation.leadTime, notes: quotation.notes, terms: quotation.terms, items: quotation.items.map((line) => ({ ...line, id: crypto.randomUUID(), quantity: String(line.quantity), unitPrice: String(line.unitPrice) })), vatEnabled: quotation.vatEnabled, otherCharges: quotation.otherCharges.map((charge) => ({ ...charge, id: crypto.randomUUID(), amount: String(charge.amount) })), status: 'Draft' })
+    setDraft({ dateCreated, quotationNumber: 'Assigned when saved', clientId: quotation.clientId, clientName: quotation.clientName, contactId: quotation.contactId, contactPerson: quotation.contactPerson, subject: quotation.subject, projectLocation: quotation.projectLocation, leadTime: quotation.leadTime, notes: quotation.notes, terms: quotation.terms, items: quotation.items.map((line) => ({ ...line, id: crypto.randomUUID(), quantity: String(line.quantity), unitPrice: String(line.unitPrice) })), vatEnabled: quotation.vatEnabled, otherCharges: quotation.otherCharges.map((charge) => ({ ...charge, id: crypto.randomUUID(), amount: String(charge.amount) })), status: 'Draft' })
     setEditingId(null)
     setFormError('')
     setItemSearch('')
@@ -447,7 +388,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     }) }))
   }
 
-  function saveQuotation(event: FormEvent<HTMLFormElement>) {
+  async function saveQuotation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter
     const intent = submitter instanceof HTMLButtonElement ? submitter.dataset.intent : 'draft'
@@ -459,13 +400,29 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
       return
     }
     const previous = editingId ? quotations.find((quotation) => quotation.id === editingId) : undefined
-    const now = new Date().toISOString()
-    const values: Quotation = { id: previous?.id ?? crypto.randomUUID(), dateCreated: draft.dateCreated, quotationNumber: draft.quotationNumber, clientId: client?.id ?? draft.clientId, clientName: client?.name ?? draft.clientName, contactId: contact?.id ?? draft.contactId, contactPerson: contact?.name ?? draft.contactPerson, subject: draft.subject.trim(), projectLocation: draft.projectLocation.trim(), leadTime: draft.leadTime.trim(), notes: draft.notes.trim(), terms: draft.terms.trim(), items: draft.items.map((line) => ({ ...line, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice) })), subtotalAmount: draftSubtotal, vatEnabled: draft.vatEnabled, vatAmount: draftVatAmount, otherCharges: draft.otherCharges.map((charge) => ({ ...charge, label: charge.label.trim(), amount: Number(charge.amount) })), totalAmount: draftTotal, estimatedProfit: draftProfit, status: targetStatus, approvedAt: '', createdAt: previous?.createdAt ?? now, updatedAt: now }
-    setQuotations((current) => previous ? current.map((quotation) => quotation.id === previous.id ? values : quotation) : [values, ...current])
-    appendSystemLog({ recordId: values.id, module: 'Quotations', action: previous ? 'Updated' : 'Created', entity: values.quotationNumber, description: `${previous ? 'Quotation updated' : 'Quotation created'} for ${values.clientName}.`, actor: currentUsername, tone: previous ? 'info' : 'success', amount: values.totalAmount, status: values.status })
-    closeQuotationFormPage()
-    setEditingId(null)
-    setToast(targetStatus === 'For Approval' ? 'Quotation submitted for approval' : previous ? 'Quotation draft updated' : 'Quotation saved as draft')
+    try {
+      const saved = previous ? await updateQuotation(previous.id, quotationRequest(draft, intent === 'submit' ? 'submit' : 'draft', previous.version)) : await createQuotation(quotationRequest(draft, intent === 'submit' ? 'submit' : 'draft'))
+      const values = toQuotation(saved)
+      setQuotations((current) => previous ? current.map((quotation) => quotation.id === previous.id ? values : quotation) : [values, ...current])
+      closeQuotationFormPage()
+      setEditingId(null)
+      setStorageError('')
+      setToast(targetStatus === 'For Approval' ? 'Quotation submitted for approval' : previous ? 'Quotation draft updated' : 'Quotation saved as draft')
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'The quotation could not be saved.')
+    }
+  }
+
+  async function applyStatus(quotation: Quotation, status: QuotationStatus, reason?: string, archiveAfterVoiding = false) {
+    try {
+      const saved = toQuotation(await changeQuotationStatus(quotation.id, status, quotation.version, reason, archiveAfterVoiding))
+      setQuotations((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== quotation.id) : current.map((entry) => entry.id === quotation.id ? saved : entry))
+      setStorageError('')
+      return saved
+    } catch (error) {
+      setStorageError(error instanceof Error ? error.message : 'The quotation status could not be changed.')
+      return null
+    }
   }
 
   function updateStatus(quotation: Quotation, status: QuotationStatus) {
@@ -490,50 +447,39 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
       setToast('This quotation is locked because it is already included in an active SOA.')
       return
     }
-    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? { ...entry, status, approvedAt: '', updatedAt: new Date().toISOString() } : entry))
-    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Status changed', entity: quotation.quotationNumber, description: `Quotation status changed from ${quotation.status} to ${status}.`, actor: currentUsername, tone: 'warning', amount: quotation.totalAmount, status })
-    setToast(`Quotation marked ${status.toLowerCase()}`)
+    void applyStatus(quotation, status).then((saved) => { if (saved) setToast(`Quotation marked ${status.toLowerCase()}`) })
   }
 
-  function approveQuotation(quotation: Quotation) {
+  async function approveQuotation(quotation: Quotation) {
     if (quotation.status === 'Approved') { setApprovalReviewId(null); return }
-    const approvedAt = new Date().toISOString()
-    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? { ...entry, status: 'Approved', approvedAt, updatedAt: approvedAt } : entry))
-    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Status changed', entity: quotation.quotationNumber, description: `All ${quotation.items.length} quotation items were verified, approved, and locked for ${quotation.clientName}.`, actor: currentUsername, tone: 'success', amount: quotation.totalAmount, status: 'Approved' })
-    setApprovalReviewId(null)
-    setToast('Quotation approved and locked successfully.')
+    const saved = await applyStatus(quotation, 'Approved')
+    if (saved) { setApprovalReviewId(null); setToast('Quotation approved and locked successfully.') }
   }
 
-  function rejectQuotation(reason: string) {
+  async function rejectQuotation(reason: string) {
     const quotation = quotations.find((entry) => entry.id === pendingRejectQuotationId)
     if (!quotation) return
-    const updatedAt = new Date().toISOString()
-    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? { ...entry, status: 'Rejected', approvedAt: '', updatedAt } : entry))
-    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Status changed', entity: quotation.quotationNumber, description: `Quotation rejected. Reason: ${reason}`, actor: currentUsername, tone: 'danger', amount: quotation.totalAmount, status: 'Rejected' })
-    setPendingRejectQuotationId(null)
-    setToast('Quotation rejected with a recorded reason')
+    const saved = await applyStatus(quotation, 'Rejected', reason)
+    if (saved) { setPendingRejectQuotationId(null); setToast('Quotation rejected with a recorded reason') }
   }
 
-  function confirmVoidQuotation(reason: string, archiveAfterVoiding: boolean) {
+  async function confirmVoidQuotation(reason: string, archiveAfterVoiding: boolean) {
     const quotation = quotations.find((entry) => entry.id === pendingVoidQuotationId)
     if (!quotation) return
-    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Voided' as const, approvedAt: '', updatedAt: new Date().toISOString() }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Voided' as const, approvedAt: '', updatedAt: new Date().toISOString() }, currentUsername, reason)) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Voided', entity: quotation.quotationNumber, description: `Quotation voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, tone: 'danger', amount: quotation.totalAmount, status: 'Voided' })
-    setPendingVoidQuotationId(null)
-    setToast(archiveAfterVoiding ? 'Quotation voided and archived' : 'Quotation voided')
-    if (archiveAfterVoiding) backToQuotationRegister()
+    const saved = await applyStatus(quotation, 'Voided', reason, archiveAfterVoiding)
+    if (saved) { setPendingVoidQuotationId(null); setToast(archiveAfterVoiding ? 'Quotation voided and archived' : 'Quotation voided'); if (archiveAfterVoiding) backToQuotationRegister() }
   }
 
-  function archiveQuotation(quotation: Quotation) {
-    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? withArchived(entry, currentUsername) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Archived', entity: quotation.quotationNumber, description: 'Quotation was archived with its client and SOA links retained.', actor: currentUsername, tone: 'info', amount: quotation.totalAmount, status: quotation.status })
-    setToast('Quotation archived')
-    backToQuotationRegister()
+  async function archiveQuotation(quotation: Quotation) {
+    try {
+      await archiveQuotationRequest(quotation.id, quotation.version)
+      setQuotations((current) => current.filter((entry) => entry.id !== quotation.id))
+      setToast('Quotation archived')
+      backToQuotationRegister()
+    } catch (error) { setStorageError(error instanceof Error ? error.message : 'The quotation could not be archived.') }
   }
 
-  function removeUnapprovedQuotationItems(quotation: Quotation, itemIds: string[]) {
+  async function removeUnapprovedQuotationItems(quotation: Quotation, itemIds: string[]) {
     const removedIds = new Set(itemIds)
     const removedItems = quotation.items.filter((item) => removedIds.has(item.id))
     const remainingItems = quotation.items.filter((item) => !removedIds.has(item.id))
@@ -542,16 +488,12 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
       setToast('A quotation must retain at least one item.')
       return
     }
-    const subtotalAmount = remainingItems.reduce((total, item) => total + item.quantity * item.unitPrice, 0)
-    const vatAmount = quotation.vatEnabled ? subtotalAmount * 0.12 : 0
-    const chargesTotal = quotation.otherCharges.reduce((total, charge) => total + charge.amount, 0)
-    const totalAmount = subtotalAmount + vatAmount + chargesTotal
-    const estimatedProfit = remainingItems.reduce((total, item) => total + item.quantity * (item.unitPrice - item.unitCost), 0)
-    const updatedAt = new Date().toISOString()
-    setQuotations((current) => current.map((entry) => entry.id === quotation.id ? { ...entry, items: remainingItems, subtotalAmount, vatAmount, totalAmount, estimatedProfit, status: 'For Approval', approvedAt: '', updatedAt } : entry))
-    const removedNames = removedItems.map((item) => item.variantLabel ? `${item.itemName} (${item.variantLabel})` : item.itemName).join(', ')
-    appendSystemLog({ recordId: quotation.id, module: 'Quotations', action: 'Updated', entity: quotation.quotationNumber, description: `${removedItems.length} unapproved item${removedItems.length === 1 ? '' : 's'} removed during final review: ${removedNames}. Total revised from ${formatPeso(quotation.totalAmount)} to ${formatPeso(totalAmount)}.`, actor: currentUsername, tone: 'warning', amount: totalAmount, status: 'For Approval' })
-    setToast(`${removedItems.length} unapproved item${removedItems.length === 1 ? '' : 's'} removed and totals recalculated.`)
+    const revised = quotationDraftFrom({ ...quotation, items: remainingItems }, clients)
+    try {
+      const saved = toQuotation(await updateQuotation(quotation.id, quotationRequest(revised, 'submit', quotation.version)))
+      setQuotations((current) => current.map((entry) => entry.id === quotation.id ? saved : entry))
+      setToast(`${removedItems.length} unapproved item${removedItems.length === 1 ? '' : 's'} removed and totals recalculated.`)
+    } catch (error) { setStorageError(error instanceof Error ? error.message : 'The quotation items could not be updated.') }
   }
 
   const approvalDialog = approvalQuotation ? <QuotationApprovalDialog quotation={approvalQuotation} onClose={() => setApprovalReviewId(null)} onEdit={() => { setApprovalReviewId(null); openEditQuotation(approvalQuotation) }} onApprove={() => approveQuotation(approvalQuotation)} onRemoveItems={(itemIds) => removeUnapprovedQuotationItems(approvalQuotation, itemIds)} /> : null

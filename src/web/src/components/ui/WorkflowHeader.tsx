@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogModule } from '../../services/activityLog'
+import { Button, IconButton, type ButtonVariant } from './Button'
 
 export type WorkflowHeaderAction = {
   label: string
@@ -54,10 +55,10 @@ function statusTone(status: string) {
   return badgeTone('slate')
 }
 
-function actionClass(tone: WorkflowHeaderAction['tone'] = 'neutral') {
-  if (tone === 'primary') return 'bg-[linear-gradient(115deg,#00113f,#073078)] text-white shadow-[0_10px_24px_-12px_rgba(0,20,76,0.75)] hover:-translate-y-0.5'
-  if (tone === 'danger') return 'border border-red-200 bg-white text-red-600 hover:bg-red-50'
-  return 'border border-slate-200 bg-white text-brand-blue hover:border-brand-blue/20 hover:bg-blue-50'
+function actionVariant(tone: WorkflowHeaderAction['tone'] = 'neutral'): ButtonVariant {
+  if (tone === 'primary') return 'primary'
+  if (tone === 'danger') return 'danger'
+  return 'secondary'
 }
 
 function formatTimestamp(value: string) {
@@ -69,12 +70,31 @@ export function WorkflowHeader({ eyebrow, recordNumber, partyName, amount, creat
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [, setHistoryVersion] = useState(0)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const refresh = () => setHistoryVersion((value) => value + 1)
     window.addEventListener(systemLogsUpdatedEvent, refresh)
     return () => window.removeEventListener(systemLogsUpdatedEvent, refresh)
   }, [])
+
+  useEffect(() => {
+    if (!isMenuOpen && !isHistoryOpen) return
+    function handlePointerDown(event: PointerEvent) {
+      if (isMenuOpen && !menuRef.current?.contains(event.target as Node)) setIsMenuOpen(false)
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setIsMenuOpen(false)
+      setIsHistoryOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isHistoryOpen, isMenuOpen])
 
   const history = isHistoryOpen ? loadSystemLogs().filter((entry) => entry.module === module && entry.recordId === recordId) : []
   const stepCount = Math.max(steps.length, 1)
@@ -95,10 +115,10 @@ export function WorkflowHeader({ eyebrow, recordNumber, partyName, amount, creat
         <p className="mt-1 text-sm font-semibold text-slate-400">{[amount, createdLabel].filter(Boolean).join(' · ')}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => setIsHistoryOpen(true)}><Icon className="size-3.5" path="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2" />History</button>
-        {secondaryActions.map((action) => <button className={`inline-flex h-10 items-center rounded-xl px-4 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${actionClass(action.tone)}`} type="button" onClick={action.onClick} disabled={action.disabled} key={action.label}>{action.label}</button>)}
-        {primaryAction ? <button className={`inline-flex h-10 items-center rounded-xl px-4 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${actionClass(primaryAction.tone ?? 'primary')}`} type="button" onClick={primaryAction.onClick} disabled={primaryAction.disabled}>{primaryAction.label}</button> : null}
-        {menuActions.length ? <div className="relative"><button className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 hover:text-brand-blue" type="button" aria-haspopup="menu" aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((value) => !value)}>More<Icon className="size-3.5" path="m6 9 6 6 6-6" /></button>{isMenuOpen ? <div className="absolute right-0 top-12 z-30 min-w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_45px_-18px_rgba(0,20,76,0.45)]" role="menu">{menuActions.map((action) => <button className={`flex h-9 w-full items-center rounded-lg px-3 text-left text-xs font-bold transition ${action.tone === 'danger' ? 'text-red-600 hover:bg-red-50' : 'text-slate-600 hover:bg-slate-50 hover:text-brand-blue'}`} type="button" role="menuitem" disabled={action.disabled} onClick={() => { setIsMenuOpen(false); action.onClick() }} key={action.label}>{action.label}</button>)}</div> : null}</div> : null}
+        <Button variant="secondary" leadingIcon={<Icon path="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2" />} onClick={() => setIsHistoryOpen(true)}>History</Button>
+        {secondaryActions.map((action) => <Button variant={actionVariant(action.tone)} onClick={action.onClick} disabled={action.disabled} key={action.label}>{action.label}</Button>)}
+        {primaryAction ? <Button variant={actionVariant(primaryAction.tone ?? 'primary')} onClick={primaryAction.onClick} disabled={primaryAction.disabled}>{primaryAction.label}</Button> : null}
+        {menuActions.length ? <div className="relative" ref={menuRef}><Button variant="secondary" trailingIcon={<Icon path="m6 9 6 6 6-6" />} aria-haspopup="menu" aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((value) => !value)}>More</Button>{isMenuOpen ? <div className="absolute right-0 top-12 z-30 min-w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_45px_-18px_rgba(0,20,76,0.45)]" role="menu">{menuActions.map((action) => <Button className={`justify-start ${action.tone === 'danger' ? 'ui-button--menu-danger' : ''}`} variant="ghost" size="small" fullWidth role="menuitem" disabled={action.disabled} onClick={() => { setIsMenuOpen(false); action.onClick() }} key={action.label}>{action.label}</Button>)}</div> : null}</div> : null}
       </div>
     </div>
 
@@ -121,6 +141,6 @@ export function WorkflowHeader({ eyebrow, recordNumber, partyName, amount, creat
     </div>
     {children ? <div className="relative mt-5 border-t border-slate-100 pt-4">{children}</div> : null}
 
-    {isHistoryOpen ? <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workflow-history-title"><button className="absolute inset-0" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history" /><section className="relative w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]"><header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Record activity</p><h3 className="mt-1 text-lg font-extrabold text-brand-blue" id="workflow-history-title">{recordNumber} history</h3></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history"><Icon path="M18 6 6 18M6 6l12 12" /></button></header><div className="max-h-[65svh] overflow-y-auto p-5">{history.length ? <ol className="space-y-3">{history.map((entry) => <li className="rounded-xl border border-slate-200 bg-slate-50/55 p-3.5" key={entry.id}><div className="flex items-start justify-between gap-3"><p className="text-xs font-extrabold text-brand-blue">{entry.action}</p><time className="shrink-0 text-[9px] font-semibold text-slate-400">{formatTimestamp(entry.timestamp)}</time></div><p className="mt-1.5 text-[11px] leading-5 text-slate-600">{entry.description}</p><p className="mt-2 text-[9px] font-semibold text-slate-400">By {entry.actor}{entry.status ? ` · ${entry.status}` : ''}</p></li>)}</ol> : <div className="grid min-h-40 place-items-center text-center"><div><p className="text-sm font-extrabold text-brand-blue">No activity yet</p><p className="mt-1 text-xs text-slate-400">Changes to this record will appear here.</p></div></div>}</div></section></div> : null}
+    {isHistoryOpen ? <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workflow-history-title"><button className="absolute inset-0" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history" /><section className="relative w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]"><header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Record activity</p><h3 className="mt-1 text-lg font-extrabold text-brand-blue" id="workflow-history-title">{recordNumber} history</h3></div><IconButton size="small" variant="ghost" label="Close history" onClick={() => setIsHistoryOpen(false)}><Icon path="M18 6 6 18M6 6l12 12" /></IconButton></header><div className="max-h-[65svh] overflow-y-auto p-5">{history.length ? <ol className="space-y-3">{history.map((entry) => <li className="rounded-xl border border-slate-200 bg-slate-50/55 p-3.5" key={entry.id}><div className="flex items-start justify-between gap-3"><p className="text-xs font-extrabold text-brand-blue">{entry.action}</p><time className="shrink-0 text-[9px] font-semibold text-slate-400">{formatTimestamp(entry.timestamp)}</time></div><p className="mt-1.5 text-[11px] leading-5 text-slate-600">{entry.description}</p><p className="mt-2 text-[9px] font-semibold text-slate-400">By {entry.actor}{entry.status ? ` · ${entry.status}` : ''}</p></li>)}</ol> : <div className="grid min-h-40 place-items-center text-center"><div><p className="text-sm font-extrabold text-brand-blue">No activity yet</p><p className="mt-1 text-xs text-slate-400">Changes to this record will appear here.</p></div></div>}</div></section></div> : null}
   </section>
 }

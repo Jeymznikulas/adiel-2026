@@ -102,59 +102,6 @@ function historicalEntries(): SystemLogEntry[] {
     // Ignore malformed historical expense data.
   }
 
-  try {
-    const items: unknown = JSON.parse(window.localStorage.getItem('adiel.items') ?? '[]')
-    if (Array.isArray(items)) {
-      items.forEach((value) => {
-        if (typeof value !== 'object' || value === null) return
-        const item = value as Record<string, unknown>
-        if (typeof item.id !== 'string' || typeof item.name !== 'string') return
-        const timestamp = typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString()
-        entries.push({
-          id: `historical-item-${item.id}`,
-          recordId: item.id,
-          timestamp,
-          module: 'Items',
-          action: 'Created',
-          entity: item.name,
-          description: `${typeof item.category === 'string' ? item.category : 'Item'} added to the product catalog.`,
-          actor: 'System import',
-          tone: 'info',
-          amount: typeof item.sellingPrice === 'number' ? item.sellingPrice : undefined,
-          status: typeof item.status === 'string' ? item.status : undefined,
-        })
-      })
-    }
-  } catch {
-    // Ignore malformed historical item data.
-  }
-
-  try {
-    const suppliers: unknown = JSON.parse(window.localStorage.getItem('adiel.suppliers') ?? '[]')
-    if (Array.isArray(suppliers)) {
-      suppliers.forEach((value) => {
-        if (typeof value !== 'object' || value === null) return
-        const supplier = value as Record<string, unknown>
-        if (typeof supplier.id !== 'string' || typeof supplier.name !== 'string') return
-        const timestamp = typeof supplier.createdAt === 'string' ? supplier.createdAt : new Date().toISOString()
-        entries.push({
-          id: `historical-supplier-${supplier.id}`,
-          recordId: supplier.id,
-          timestamp,
-          module: 'Suppliers',
-          action: 'Created',
-          entity: supplier.name,
-          description: `${typeof supplier.type === 'string' ? supplier.type : 'Supplier'} added to the directory.`,
-          actor: 'System import',
-          tone: 'info',
-          status: typeof supplier.status === 'string' ? supplier.status : undefined,
-        })
-      })
-    }
-  } catch {
-    // Ignore malformed historical supplier data.
-  }
-
   return entries
 }
 

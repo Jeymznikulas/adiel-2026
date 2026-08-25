@@ -5,53 +5,26 @@ import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
-import { appendSystemLog } from '../../services/activityLog'
-import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
+import { listBusinessOptions } from '../../services/api/settings'
+import { archiveSupplier, createSupplier, listSuppliers, updateSupplier, type Supplier as ApiSupplier, type SupplierContact as ApiSupplierContact, type SupplierPerformanceNote as ApiSupplierPerformanceNote, type SupplierType } from '../../services/api/suppliers'
 import { SupplierProfile, type SupplierPurchaseOrder, type SupplierRegisteredItem } from './SupplierProfile'
 
-type SupplierType = 'Contractor' | 'Distributor' | 'Manufacturer' | 'Service provider' | 'Other'
 type SupplierFilter = 'All suppliers' | SupplierType
-type SupplierStatus = 'Active' | 'Inactive'
 
-type ContactPerson = {
-  id: string
-  name: string
-  email: string
-  phone: string
-}
+type ContactPerson = Omit<ApiSupplierContact, 'isPrimary' | 'sortOrder'>
 
-type PerformanceNote = {
-  id: string
-  text: string
-}
+type PerformanceNote = ApiSupplierPerformanceNote
 
-type Supplier = {
-  id: string
-  logo: string
-  name: string
-  type: SupplierType
-  status: SupplierStatus
-  tin: string
-  companyEmail: string
-  companyPhone: string
-  address: string
-  contacts: ContactPerson[]
-  categories: string[]
-  performanceNotes: PerformanceNote[]
-  catalogLink: string
-  createdAt: string
-  updatedAt: string
-}
+type Supplier = Omit<ApiSupplier, 'catalogUrl'> & { catalogLink: string }
 
-type SupplierDraft = Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'>
+type SupplierDraft = Omit<Supplier, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version' | 'contacts' | 'performanceNotes' | 'catalogUrl'> & { contacts: ContactPerson[]; performanceNotes: PerformanceNote[]; catalogLink: string }
 
 type SupplierPageProps = {
   currentUsername: string
 }
 
-const storageKey = 'adiel.suppliers'
 const purchaseOrderStorageKey = 'adiel.purchase-orders'
-const itemStorageKey = 'adiel.items'
+const itemStorageKey = '__items_migrated_to_api__'
 const supplierTypes: SupplierType[] = ['Contractor', 'Distributor', 'Manufacturer', 'Service provider', 'Other']
 const supplierTypeOptions = supplierTypes.map((value) => ({ value }))
 const supplierStatusOptions = [
@@ -62,7 +35,7 @@ const supplierFilterOptions: { value: SupplierFilter; label: string }[] = [
   { value: 'All suppliers', label: 'All types' },
   ...supplierTypes.map((value) => ({ value, label: value })),
 ]
-const categorySuggestions = ['Electrical', 'Metals', 'Hardware', 'Construction', 'Safety', 'Plumbing', 'Tools', 'Office supplies']
+const defaultCategorySuggestions = ['Electrical', 'Metals', 'Hardware', 'Construction', 'Safety', 'Plumbing', 'Tools', 'Office supplies']
 const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'
 const labelClassName = 'mb-2 block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500'
 
@@ -72,19 +45,6 @@ function createContact(): ContactPerson {
 
 function createPerformanceNote(text = ''): PerformanceNote {
   return { id: crypto.randomUUID(), text }
-}
-
-function normalizePerformanceNotes(value: unknown): PerformanceNote[] {
-  if (typeof value === 'string') return value.trim() ? [createPerformanceNote(value.trim())] : []
-  if (!Array.isArray(value)) return []
-
-  return value.flatMap((note) => {
-    if (typeof note === 'string') return note.trim() ? [createPerformanceNote(note.trim())] : []
-    if (typeof note !== 'object' || note === null || typeof (note as Partial<PerformanceNote>).text !== 'string') return []
-    const savedNote = note as Partial<PerformanceNote>
-    const text = savedNote.text?.trim() ?? ''
-    return text ? [{ id: typeof savedNote.id === 'string' ? savedNote.id : crypto.randomUUID(), text }] : []
-  })
 }
 
 function createEmptyDraft(): SupplierDraft {
@@ -101,36 +61,6 @@ function createEmptyDraft(): SupplierDraft {
     categories: [],
     performanceNotes: [createPerformanceNote()],
     catalogLink: '',
-  }
-}
-
-function loadSuppliers(): Supplier[] {
-  try {
-    const stored = window.localStorage.getItem(storageKey)
-    if (!stored) return []
-    const parsed: unknown = JSON.parse(stored)
-    if (!Array.isArray(parsed)) return []
-
-    const savedSuppliers = parsed.filter((value): value is Supplier => {
-      if (typeof value !== 'object' || value === null) return false
-      const supplier = value as Partial<Supplier>
-      return typeof supplier.id === 'string'
-        && typeof supplier.name === 'string'
-        && supplierTypes.includes(supplier.type as SupplierType)
-        && Array.isArray(supplier.contacts)
-        && Array.isArray(supplier.categories)
-    })
-
-    return savedSuppliers.map((supplier) => ({
-      ...supplier,
-      status: supplier.status === 'Inactive' ? 'Inactive' : 'Active',
-      companyEmail: typeof supplier.companyEmail === 'string' ? supplier.companyEmail : '',
-      companyPhone: typeof supplier.companyPhone === 'string' ? supplier.companyPhone : '',
-      address: typeof supplier.address === 'string' ? supplier.address : '',
-      performanceNotes: normalizePerformanceNotes(supplier.performanceNotes),
-    }))
-  } catch {
-    return []
   }
 }
 
@@ -282,8 +212,9 @@ function resizeLogo(file: File) {
   })
 }
 
-export function SupplierPage({ currentUsername }: SupplierPageProps) {
-  const [suppliers, setSuppliers] = useState(loadSuppliers)
+export function SupplierPage({ currentUsername: _currentUsername }: SupplierPageProps) {
+  const [categorySuggestions, setCategorySuggestions] = useState(defaultCategorySuggestions)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [purchaseOrders, setPurchaseOrders] = useState<SupplierPurchaseOrder[]>(loadSupplierPurchaseOrders)
   const [registeredItems, setRegisteredItems] = useState(loadSupplierRegisteredItems)
   const [search, setSearch] = usePersistentState('suppliers.search', '')
@@ -301,13 +232,22 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
   const logoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(suppliers))
+    let isActive = true
+    void listBusinessOptions('supplier_category').then((result) => { if (isActive) setCategorySuggestions(result.filter((option) => option.isActive).map((option) => option.name)) })
+    return () => { isActive = false }
+  }, [])
+
+  useEffect(() => {
+    let isActive = true
+    void listSuppliers().then((result) => {
+      if (!isActive) return
+      setSuppliers(result.items.map(toSupplier))
       setStorageError('')
-    } catch {
-      setStorageError('The directory could not be saved. Try using a smaller logo.')
-    }
-  }, [suppliers])
+    }).catch((failure: unknown) => {
+      if (isActive) setStorageError(failure instanceof Error ? failure.message : 'Suppliers could not be loaded.')
+    })
+    return () => { isActive = false }
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -346,7 +286,7 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
     return () => window.removeEventListener('storage', syncLinkedRecords)
   }, [])
 
-  const activeSuppliers = useMemo(() => suppliers.filter(isActiveRecord), [suppliers])
+  const activeSuppliers = useMemo(() => suppliers.filter((supplier) => supplier.archivedAt === null), [suppliers])
   const matchingSuppliers = useMemo(() => {
     const query = search.trim().toLowerCase()
     return activeSuppliers
@@ -504,9 +444,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
     }
   }
 
-  function saveSupplier(event: FormEvent<HTMLFormElement>) {
+  async function saveSupplier(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const now = new Date().toISOString()
     const normalizedDraft = {
       ...draft,
       name: draft.name.trim(),
@@ -526,34 +465,37 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
       catalogLink: draft.catalogLink.trim(),
     }
 
-    if (editingId) {
-      setSuppliers((current) => current.map((supplier) => supplier.id === editingId
-        ? { ...supplier, ...normalizedDraft, updatedAt: now }
-        : supplier))
-      setToast('Supplier details updated')
-      appendSystemLog({ recordId: editingId, module: 'Suppliers', action: 'Updated', entity: normalizedDraft.name, description: 'Supplier profile and contact details were updated.', actor: currentUsername, tone: 'info', status: normalizedDraft.status })
-    } else {
-      const supplierId = crypto.randomUUID()
-      setSuppliers((current) => [...current, {
+    try {
+      const payload = {
         ...normalizedDraft,
-        id: supplierId,
-        createdAt: now,
-        updatedAt: now,
-      }])
-      setToast('Supplier added to the directory')
-      appendSystemLog({ recordId: supplierId, module: 'Suppliers', action: 'Created', entity: normalizedDraft.name, description: `${normalizedDraft.type} added to the supplier directory.`, actor: currentUsername, tone: 'success', status: normalizedDraft.status })
+        catalogUrl: normalizedDraft.catalogLink,
+      }
+      const saved = editingId
+        ? await updateSupplier(editingId, { ...payload, version: suppliers.find((supplier) => supplier.id === editingId)?.version })
+        : await createSupplier(payload)
+      const nextSupplier = toSupplier(saved)
+      setSuppliers((current) => editingId ? current.map((supplier) => supplier.id === editingId ? nextSupplier : supplier) : [...current, nextSupplier])
+      setStorageError('')
+      setToast(editingId ? 'Supplier details updated' : 'Supplier added to the directory')
+      closeDialog()
+    } catch (failure) {
+      setStorageError(failure instanceof Error ? failure.message : 'Supplier details could not be saved.')
     }
-    closeDialog()
   }
 
-  function deleteSupplier() {
+  async function deleteSupplier() {
     if (!editingId) return
     const supplier = suppliers.find((item) => item.id === editingId)
-    setSuppliers((current) => current.map((entry) => entry.id === editingId ? withArchived(entry, currentUsername) : entry))
-    notifyLifecycleChanged()
-    setToast('Supplier archived')
-    closeDialog()
-    if (supplier) appendSystemLog({ recordId: supplier.id, module: 'Suppliers', action: 'Archived', entity: supplier.name, description: 'Supplier was archived with purchasing history retained.', actor: currentUsername, tone: 'info', status: supplier.status })
+    if (!supplier) return
+    try {
+      const archived = toSupplier(await archiveSupplier(supplier.id, supplier.version))
+      setSuppliers((current) => current.map((entry) => entry.id === archived.id ? archived : entry))
+      setStorageError('')
+      setToast('Supplier archived')
+      closeDialog()
+    } catch (failure) {
+      setStorageError(failure instanceof Error ? failure.message : 'Supplier could not be archived.')
+    }
   }
 
   const stats = [
@@ -849,4 +791,8 @@ export function SupplierPage({ currentUsername }: SupplierPageProps) {
       <SuccessToast message={toast} />
     </div>
   )
+}
+
+function toSupplier(value: ApiSupplier): Supplier {
+  return { ...value, catalogLink: value.catalogUrl }
 }

@@ -5,7 +5,7 @@ import { SuccessToast } from '../../components/ui/SuccessToast'
 import { BusinessOptionsSettings } from './BusinessOptionsSettings'
 import { DocumentNumberingSettings } from './DocumentNumberingSettings'
 import type { LateChargePolicy, LateChargeType } from '../statement-of-account/statementOfAccountTypes'
-import { loadCompanyProfile, loadDocumentDefaults, loadLateChargePolicy, saveCompanyProfile, saveDocumentDefaults, saveLateChargePolicy, type BusinessSettingsTab, type CompanyProfile, type DocumentDefaults } from './settingsStorage'
+import { getCachedSettingsVersions, hydrateSettingsCache, loadCompanyProfile, loadDocumentDefaults, loadLateChargePolicy, saveCompanyProfile, saveDocumentDefaults, saveLateChargePolicy, type BusinessSettingsTab, type CompanyProfile, type DocumentDefaults } from './settingsStorage'
 
 type SettingsSection = 'company' | 'documents' | 'numbering' | 'payments' | 'options'
 
@@ -16,7 +16,7 @@ function initialSection(): SettingsSection {
 
 function initialBusinessTab(): BusinessSettingsTab {
   const tab = new URLSearchParams(window.location.search).get('tab')
-  return tab === 'payment-methods' || tab === 'client-industries' || tab === 'item-categories' ? tab : 'expense-categories'
+  return tab === 'payment-methods' || tab === 'client-industries' || tab === 'supplier-categories' || tab === 'item-categories' ? tab : 'expense-categories'
 }
 
 const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'
@@ -38,6 +38,20 @@ export function SettingsPage() {
   const [latePolicy, setLatePolicy] = useState(loadLateChargePolicy)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+    void hydrateSettingsCache().then(() => {
+      if (!isActive) return
+      setCompany(loadCompanyProfile())
+      setDocuments(loadDocumentDefaults())
+      setLatePolicy(loadLateChargePolicy())
+      setError('')
+    }).catch((failure: unknown) => { if (isActive) setError(failure instanceof Error ? failure.message : 'Settings could not be loaded.') }).finally(() => { if (isActive) setIsLoading(false) })
+    return () => { isActive = false }
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -67,25 +81,27 @@ export function SettingsPage() {
       return
     }
     const normalized = Object.fromEntries(Object.entries(company).map(([key, value]) => [key, value.trim()])) as CompanyProfile
-    try {
-      saveCompanyProfile(normalized)
-      setCompany(normalized)
-      setToast('Company profile saved')
-    } catch {
-      setError('The company profile could not be saved in browser storage.')
-    }
+    void persistCompany(normalized)
+  }
+
+  async function persistCompany(normalized: CompanyProfile) {
+    setIsSaving(true)
+    try { await saveCompanyProfile(normalized, getCachedSettingsVersions().companyVersion); setCompany(normalized); setError(''); setToast('Company profile saved') }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'The company profile could not be saved.') }
+    finally { setIsSaving(false) }
   }
 
   function saveDocuments(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const normalized = Object.fromEntries(Object.entries(documents).map(([key, value]) => [key, value.trim()])) as DocumentDefaults
-    try {
-      saveDocumentDefaults(normalized)
-      setDocuments(normalized)
-      setToast('Document defaults saved')
-    } catch {
-      setError('The document defaults could not be saved in browser storage.')
-    }
+    void persistDocuments(normalized)
+  }
+
+  async function persistDocuments(normalized: DocumentDefaults) {
+    setIsSaving(true)
+    try { await saveDocumentDefaults(normalized, latePolicy, getCachedSettingsVersions().documentVersion); setDocuments(normalized); setError(''); setToast('Document defaults saved') }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'The document defaults could not be saved.') }
+    finally { setIsSaving(false) }
   }
 
   function savePayments(event: FormEvent<HTMLFormElement>) {
@@ -95,16 +111,19 @@ export function SettingsPage() {
       return
     }
     const normalized: LateChargePolicy = { ...latePolicy, graceDays: Math.max(0, Math.min(90, Math.round(latePolicy.graceDays))), value: Math.max(0, latePolicy.value) }
-    try {
-      saveLateChargePolicy(normalized)
-      setLatePolicy(normalized)
-      setToast('Payment and late-charge defaults saved')
-    } catch {
-      setError('Payment defaults could not be saved in browser storage.')
-    }
+    void persistPayments(normalized)
+  }
+
+  async function persistPayments(normalized: LateChargePolicy) {
+    setIsSaving(true)
+    try { await saveLateChargePolicy(normalized, getCachedSettingsVersions().documentVersion); setLatePolicy(normalized); setError(''); setToast('Payment and late-charge defaults saved') }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Payment defaults could not be saved.') }
+    finally { setIsSaving(false) }
   }
 
   return <div className="space-y-5 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
+    {isLoading ? <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-semibold text-brand-blue">Loading settings…</div> : null}
+    {isSaving ? <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-700">Saving settings…</div> : null}
     <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Settings summary">
       <div>
         <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">System configuration</p></div>

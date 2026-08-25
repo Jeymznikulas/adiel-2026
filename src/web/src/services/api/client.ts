@@ -1,4 +1,5 @@
 import { env } from '../../lib/env'
+import { supabase } from '../supabase/client'
 
 type ApiProblem = {
   title?: string
@@ -17,13 +18,17 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) throw new ApiError('Your session has expired. Sign in again.', 401)
+
+  const headers = new Headers(init?.headers)
+  headers.set('Accept', 'application/json')
+  headers.set('Authorization', `Bearer ${session.access_token}`)
+  if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+
   const response = await fetch(`${env.apiBaseUrl}${path}`, {
     ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {

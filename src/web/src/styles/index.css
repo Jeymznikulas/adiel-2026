@@ -15,6 +15,10 @@
     --app-focus: rgba(0, 20, 76, 0.08);
     --app-border: rgba(203, 213, 225, 0.78);
     --app-surface-shadow: 0 14px 38px -29px rgba(0, 20, 76, 0.34);
+    --app-button-shadow: 0 8px 20px -14px rgba(0, 20, 76, 0.42);
+    --app-button-shadow-hover: 0 13px 26px -15px rgba(0, 20, 76, 0.52);
+    --app-control-radius: 0.75rem;
+    --app-surface-radius: 1.5rem;
   }
 
   * {
@@ -23,7 +27,9 @@
 
   html {
     background: #ffffff;
+    color-scheme: light;
     font-synthesis: none;
+    scrollbar-gutter: stable;
     text-rendering: optimizeLegibility;
   }
 
@@ -280,6 +286,12 @@
   }
 }
 
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Keep the product-commerce view information-dense without sacrificing scanability. */
 .item-detail-page > div:first-child {
   gap: 0.5rem;
@@ -404,6 +416,7 @@
 }
 
 .app-shell :where(button, a[href]) {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
   transition-duration: var(--app-motion-fast);
   transition-timing-function: var(--app-ease);
 }
@@ -413,8 +426,208 @@
   outline-offset: 2px;
 }
 
-.app-shell button:not(:disabled):not([role="switch"]):active {
+.app-shell button:not(:disabled):not([role="switch"]):not([class*="absolute"]):not([class*="translate-"]):active {
   transform: scale(0.98);
+}
+
+.app-shell button:disabled {
+  filter: saturate(0.72);
+}
+
+.ui-button {
+  display: inline-flex;
+  max-width: 100%;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--app-control-radius);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-duration: var(--app-motion);
+  transition-timing-function: var(--app-ease);
+}
+
+.ui-button:focus-visible,
+.ui-icon-button:focus-visible {
+  outline: 2px solid rgba(0, 20, 76, 0.28);
+  outline-offset: 2px;
+}
+
+.ui-button:not(:disabled):active,
+.ui-icon-button:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
+}
+
+.ui-button--compact {
+  height: 2rem;
+  padding-inline: 0.625rem;
+  font-size: 0.6875rem;
+}
+
+.ui-button--small {
+  height: 2.25rem;
+  padding-inline: 0.75rem;
+  font-size: 0.75rem;
+}
+
+.ui-button--medium {
+  height: 2.5rem;
+  padding-inline: 1rem;
+  font-size: 0.8125rem;
+}
+
+.ui-button--large {
+  height: 3.5rem;
+  padding-inline: 1.25rem;
+  border-radius: 0.9rem;
+  font-size: 0.875rem;
+}
+
+.ui-button--primary {
+  border: 1px solid transparent;
+  color: white;
+  background: linear-gradient(115deg, #00113f, #073078);
+  box-shadow: 0 9px 22px -12px rgba(0, 20, 76, 0.62);
+}
+
+.ui-button--primary:not(:disabled):hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 13px 28px -14px rgba(0, 20, 76, 0.68);
+}
+
+.ui-button--secondary {
+  border: 1px solid var(--app-border);
+  color: #00144c;
+  background: white;
+  box-shadow: var(--app-button-shadow);
+}
+
+.ui-button--secondary:not(:disabled):hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 20, 76, 0.2);
+  background: #f8faff;
+  box-shadow: var(--app-button-shadow-hover);
+}
+
+.ui-button--ghost {
+  border: 1px solid transparent;
+  color: #64748b;
+  background: transparent;
+}
+
+.ui-button--ghost:not(:disabled):hover {
+  color: #00144c;
+  background: #f1f5f9;
+}
+
+.ui-button--soft {
+  border: 1px solid rgba(0, 20, 76, 0.08);
+  color: #00144c;
+  background: rgba(0, 20, 76, 0.045);
+}
+
+.ui-button--soft:not(:disabled):hover {
+  border-color: rgba(0, 20, 76, 0.14);
+  background: rgba(0, 20, 76, 0.085);
+}
+
+.ui-button--danger {
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  color: #dc2626;
+  background: white;
+}
+
+.ui-button--danger:not(:disabled):hover {
+  transform: translateY(-1px);
+  border-color: rgba(220, 38, 38, 0.32);
+  background: #fef2f2;
+  box-shadow: 0 10px 22px -16px rgba(220, 38, 38, 0.55);
+}
+
+.ui-button--menu-danger {
+  color: #dc2626;
+}
+
+.ui-button--menu-danger:not(:disabled):hover {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.ui-button--destructive {
+  border: 1px solid #dc2626;
+  color: white;
+  background: #dc2626;
+  box-shadow: 0 9px 22px -14px rgba(220, 38, 38, 0.62);
+}
+
+.ui-button--destructive:not(:disabled):hover {
+  transform: translateY(-1.5px);
+  border-color: #b91c1c;
+  background: #b91c1c;
+  box-shadow: 0 13px 26px -15px rgba(220, 38, 38, 0.68);
+}
+
+.ui-button:disabled,
+.ui-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  box-shadow: none;
+  transform: none;
+}
+
+.ui-button__icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+}
+
+.ui-button__icon > svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.ui-icon-button {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--app-control-radius);
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-duration: var(--app-motion-fast);
+  transition-timing-function: var(--app-ease);
+}
+
+.ui-icon-button--small {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.ui-icon-button--medium {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.ui-icon-button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.app-shell button[aria-busy="true"] {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.app-shell button[aria-busy="true"]::after {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  content: "";
+  opacity: 0.7;
+  animation: app-spin 650ms linear infinite;
 }
 
 .app-shell button[class*="bg-[linear-gradient(115deg,#00113f,#073078)]"] {
@@ -432,12 +645,12 @@
   transform: translateY(0) scale(0.98);
 }
 
-.app-shell button[class*="inline-flex"][class*="border-slate-200"][class*="bg-white"] {
+.app-shell button[class*="border-slate-200"][class*="bg-white"] {
   box-shadow: 0 2px 7px -5px rgba(0, 20, 76, 0.3);
   transition-property: color, background-color, border-color, box-shadow, transform;
 }
 
-.app-shell button[class*="inline-flex"][class*="border-slate-200"][class*="bg-white"]:not(:disabled):hover {
+.app-shell button[class*="border-slate-200"][class*="bg-white"]:not(:disabled):hover {
   transform: translateY(-1px);
   border-color: rgba(0, 20, 76, 0.18);
   box-shadow: 0 8px 18px -13px rgba(0, 20, 76, 0.46);
@@ -456,6 +669,17 @@
   outline: none;
 }
 
+.app-shell :where(input, textarea, select):disabled {
+  cursor: not-allowed;
+  background-color: #f8fafc;
+  color: #94a3b8;
+  opacity: 0.72;
+}
+
+body:has(.app-shell :where([role="dialog"], [role="alertdialog"])[class*="fixed"]) {
+  overflow: hidden;
+}
+
 .app-shell main table {
   font-variant-numeric: tabular-nums;
 }
@@ -466,12 +690,23 @@
   transition-timing-function: ease-out;
 }
 
-.app-shell [role="dialog"][class*="fixed"] {
+.app-shell :where([role="dialog"], [role="alertdialog"])[class*="fixed"] {
   animation: supplier-backdrop-enter var(--app-motion-fast) ease-out both;
 }
 
-.app-shell [role="dialog"] > :where(form, section) {
+.app-shell :where([role="dialog"], [role="alertdialog"]) > :where(form, section) {
   animation: app-dialog-enter var(--app-motion) var(--app-ease) both;
+  overscroll-behavior: contain;
+}
+
+.app-shell :where([role="menu"], [role="listbox"])[class*="absolute"],
+.app-shell :where([role="menu"], [role="listbox"])[class*="fixed"] {
+  transform-origin: top right;
+  animation: status-menu-enter var(--app-motion-fast) var(--app-ease) both;
+}
+
+.app-toast {
+  box-shadow: 0 18px 44px -22px rgba(0, 20, 76, 0.42);
 }
 
 .app-document-page .app-form-page {
@@ -554,7 +789,7 @@
   border-top-color: white;
   border-radius: 999px;
   content: "";
-  animation: spin 650ms linear infinite;
+  animation: app-spin 650ms linear infinite;
 }
 
 @media (min-width: 1280px) {
