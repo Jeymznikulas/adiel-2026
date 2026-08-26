@@ -5,8 +5,9 @@ import { Button } from './Button'
 export type DocumentFormAction = {
   label: string
   intent?: string
-  tone?: 'primary' | 'neutral'
+  tone?: 'primary' | 'neutral' | 'danger'
   disabled?: boolean
+  onClick?: () => void
 }
 
 type DocumentFormScaffoldProps = {
@@ -51,8 +52,8 @@ export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, tot
     const originalFooter = nextForm.lastElementChild instanceof HTMLElement ? nextForm.lastElementChild : null
     const moduleRoot = page.parentElement
     const backdrop = page.firstElementChild instanceof HTMLButtonElement ? page.firstElementChild : null
-    const closeButton = header.querySelector<HTMLButtonElement>(':scope > button:last-child')
-    const titleBlock = header.firstElementChild instanceof HTMLElement ? header.firstElementChild : null
+    const closeButton = header.querySelector<HTMLButtonElement>(':scope > button:last-child') ?? header.querySelector<HTMLButtonElement>('button[aria-label^="Close"]')
+    const titleBlock = Array.from(header.children).find((element): element is HTMLElement => element instanceof HTMLElement && !element.classList.contains('pointer-events-none')) ?? null
     const backContainer = document.createElement('div')
     const footerContainer = document.createElement('div')
     const original = {
@@ -128,7 +129,7 @@ export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, tot
 
   const back = backHost ? createPortal(<Button className="mr-3" size="small" variant="secondary" onClick={onCancel} aria-label={backLabel} leadingIcon={<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>}><span className="hidden sm:inline">{backLabel}</span></Button>, backHost) : null
 
-  const footer = footerHost && form ? createPortal(<footer className="sticky bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-16px_36px_-30px_rgba(0,20,76,0.55)] backdrop-blur sm:px-6 lg:px-8"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">{breakdown.map((item) => <div className={item.muted ? 'opacity-45' : ''} key={item.label}><p className="text-[8px] font-bold uppercase tracking-[0.1em] text-slate-400">{item.label}</p><p className="mt-0.5 text-xs font-extrabold tabular-nums text-slate-600">{item.value}</p></div>)}<div className="border-l border-slate-200 pl-5"><p className="text-[8px] font-bold uppercase tracking-[0.1em] text-brand-orange">{totalLabel}</p><p className="mt-0.5 text-base font-extrabold tabular-nums text-brand-blue">{totalValue}</p></div>{helperText ? <p className="hidden max-w-sm text-[9px] leading-4 text-slate-400 2xl:block">{helperText}</p> : null}</div><div className="flex shrink-0 flex-wrap justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button>{actions.map((action) => <Button variant={action.tone === 'primary' ? 'primary' : 'secondary'} onClick={() => submitWithIntent(form, action.intent)} disabled={action.disabled} key={action.label}>{action.label}</Button>)}</div></div></footer>, footerHost) : null
+  const footer = footerHost && form ? createPortal(<footer className="sticky bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-16px_36px_-30px_rgba(0,20,76,0.55)] backdrop-blur sm:px-6 lg:px-8"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">{breakdown.map((item) => <div className={item.muted ? 'opacity-45' : ''} key={item.label}><p className="text-[8px] font-bold uppercase tracking-[0.1em] text-slate-400">{item.label}</p><p className="mt-0.5 text-xs font-extrabold tabular-nums text-slate-600">{item.value}</p></div>)}<div className="border-l border-slate-200 pl-5"><p className="text-[8px] font-bold uppercase tracking-[0.1em] text-brand-orange">{totalLabel}</p><p className="mt-0.5 text-base font-extrabold tabular-nums text-brand-blue">{totalValue}</p></div>{helperText ? <p className="hidden max-w-sm text-[9px] leading-4 text-slate-400 2xl:block">{helperText}</p> : null}</div><div className="flex shrink-0 flex-wrap justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button>{actions.map((action) => <Button variant={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : 'secondary'} onClick={() => action.onClick ? action.onClick() : submitWithIntent(form, action.intent)} disabled={action.disabled} key={action.label}>{action.label}</Button>)}</div></div></footer>, footerHost) : null
 
   return <>{back}{footer}</>
 }

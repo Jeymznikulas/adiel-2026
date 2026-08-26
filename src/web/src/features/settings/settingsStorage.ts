@@ -31,7 +31,7 @@ export type DocumentNumberingRule = {
 
 export type DocumentNumberingSettings = Record<DocumentNumberingType, DocumentNumberingRule>
 
-export type BusinessSettingsTab = 'expense-categories' | 'payment-methods' | 'client-industries' | 'supplier-categories' | 'item-categories'
+export type BusinessSettingsTab = 'expense-categories' | 'payment-methods' | 'client-industries' | 'supplier-categories' | 'item-categories' | 'task-assignees'
 
 export const defaultCompanyProfile: CompanyProfile = {
   companyName: 'ADIEL CONSTRUCTION SUPPLIES',

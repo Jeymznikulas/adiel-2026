@@ -6,7 +6,7 @@ namespace AdielSystem.Application.Settings;
 
 public sealed class SettingsService(ISettingsRepository repository, ICurrentUserAccessor currentUserAccessor)
 {
-    private static readonly HashSet<string> OptionTypes = ["expense_category", "payment_method", "client_industry", "supplier_category", "item_category"];
+    private static readonly HashSet<string> OptionTypes = ["expense_category", "payment_method", "client_industry", "supplier_category", "item_category", "task_assignee"];
     private static readonly HashSet<string> DocumentTypes = ["quotation", "purchase_order", "statement_of_account"];
 
     public async Task<CompanySettingsDto> GetCompanyAsync(CancellationToken cancellationToken) => ToDto(await repository.GetCompanyAsync(cancellationToken));

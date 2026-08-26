@@ -1,6 +1,7 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { DocumentFormScaffold, type DocumentFormAction } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
@@ -216,22 +217,6 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     const timeout = window.setTimeout(() => setToast(''), 2800)
     return () => window.clearTimeout(timeout)
   }, [toast])
-
-  useEffect(() => {
-    if (!isDialogOpen) return
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      if (isDialogOpen) closeDialog()
-      else return
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.body.style.overflow = originalOverflow
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isDialogOpen])
 
   useEffect(() => {
     function syncPath() { setSelectedSupplierId(window.location.pathname.match(/^\/suppliers\/([^/]+)$/)?.[1] ?? null) }
@@ -467,14 +452,26 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     }
   }
 
+  const supplierFormActions: DocumentFormAction[] = isEditing
+    ? isConfirmingDelete
+      ? [
+          { label: 'Keep supplier', onClick: () => setIsConfirmingDelete(false), disabled: isProcessingLogo },
+          { label: 'Confirm archive', tone: 'danger', onClick: () => void deleteSupplier(), disabled: isProcessingLogo },
+        ]
+      : [
+          { label: 'Archive supplier', tone: 'danger', onClick: () => setIsConfirmingDelete(true), disabled: isProcessingLogo },
+          { label: 'Save changes', tone: 'primary', disabled: isProcessingLogo },
+        ]
+    : [{ label: 'Add supplier', tone: 'primary', disabled: isProcessingLogo }]
+
   const stats = [
     { label: 'Total suppliers', value: activeSuppliers.length, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
     { label: 'Active', value: activeSupplierCount, dot: 'bg-emerald-500', valueColor: 'text-emerald-600' },
     { label: 'Categories', value: categoryCount, dot: 'bg-violet-500', valueColor: 'text-violet-600' },
   ]
 
-  const supplierProfile = selectedSupplier ? <><SupplierProfile supplier={selectedSupplier} orders={selectedSupplierOrders} items={selectedSupplierItems} onBack={closeSupplierProfile} onEdit={() => { openEditDialog(selectedSupplier); closeSupplierProfile() }} onOpenPurchaseOrders={openPurchaseOrders} /><SuccessToast message={toast} /></> : null
-  if (supplierProfile) return supplierProfile
+  const supplierProfile = selectedSupplier ? <><SupplierProfile supplier={selectedSupplier} orders={selectedSupplierOrders} items={selectedSupplierItems} onBack={closeSupplierProfile} onEdit={() => openEditDialog(selectedSupplier)} onOpenPurchaseOrders={openPurchaseOrders} /><SuccessToast message={toast} /></> : null
+  if (supplierProfile && !isDialogOpen) return supplierProfile
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
@@ -644,16 +641,14 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-3 backdrop-blur-sm animate-[supplier-backdrop-enter_180ms_ease-out] sm:p-5" role="dialog" aria-modal="true" aria-labelledby="supplier-form-heading">
           <button className="absolute inset-0" type="button" onClick={closeDialog} aria-label="Close supplier form" />
           <form className="relative my-auto flex max-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[1.6rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)] sm:max-h-[calc(100svh-2.5rem)]" onSubmit={saveSupplier}>
-            <div className="relative shrink-0 overflow-hidden border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
+            <div className="relative flex shrink-0 items-start justify-between gap-4 overflow-hidden border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
               <div className="pointer-events-none absolute right-0 top-0 h-full w-64 bg-[radial-gradient(circle_at_100%_0%,rgba(0,20,76,0.06),transparent_65%)]" aria-hidden="true" />
-              <div className="relative flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-[0.17em] text-brand-orange">{isEditing ? 'Supplier details' : 'New supplier'}</p>
-                  <h2 className="mt-1.5 text-xl font-extrabold tracking-[-0.03em] text-brand-blue" id="supplier-form-heading">{isEditing ? 'Edit supplier' : 'Add a supplier'}</h2>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">Add the contact, product, and delivery details your team needs.</p>
-                </div>
-                <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeDialog} aria-label="Close dialog"><Icon path="M18 6 6 18M6 6l12 12" /></button>
+              <div className="relative">
+                <p className="text-[9px] font-bold uppercase tracking-[0.17em] text-brand-orange">{isEditing ? 'Supplier details' : 'New supplier'}</p>
+                <h2 className="mt-1.5 text-xl font-extrabold tracking-[-0.03em] text-brand-blue" id="supplier-form-heading">{isEditing ? 'Edit supplier' : 'Add a supplier'}</h2>
+                <p className="mt-1 text-xs leading-5 text-slate-400">Add the contact, product, and delivery details your team needs.</p>
               </div>
+              <button className="relative grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeDialog} aria-label="Close dialog"><Icon path="M18 6 6 18M6 6l12 12" /></button>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
@@ -756,6 +751,8 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
           </form>
         </div>
       ) : null}
+
+      {isDialogOpen ? <DocumentFormScaffold dialogTitleId="supplier-form-heading" breakdown={[{ label: 'Contacts', value: String(draft.contacts.length) }, { label: 'Categories', value: String(draft.categories.length) }]} totalLabel={isEditing ? 'Editing' : 'Creating'} totalValue={draft.name.trim() || 'New supplier'} helperText={isConfirmingDelete ? 'Archiving removes this supplier from the active directory.' : 'Supplier details, contacts, categories, and notes are saved together.'} backLabel={selectedSupplierId ? 'Back to supplier' : 'Back to suppliers'} onCancel={closeDialog} actions={supplierFormActions} /> : null}
 
       <SuccessToast message={toast} />
     </div>

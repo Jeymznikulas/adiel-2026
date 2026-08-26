@@ -3,12 +3,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
+import { listBusinessOptions, type BusinessOption } from '../../services/api/settings'
 import { addTaskSubtask, archiveTask, changeTaskStatus, createTask, listTasks, removeTaskSubtask, setTaskSubtaskCompletion, updateTask as updateTaskApi, type Task as ApiTask, type TaskPriority, type TaskStatus } from '../../services/api/tasks'
+import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 type TaskFilter = 'All' | TaskStatus
 type DueDateFilter = 'All' | 'Overdue' | 'Due today' | 'Upcoming' | 'No due date'
@@ -47,6 +50,27 @@ const emptyDraft = {
 }
 
 function normalizeTask(task: ApiTask): Task { return { ...task, dueDate: task.dueDate ?? '' } }
+
+function splitAssignees(value: string) { return value.split(',').map((name) => name.trim()).filter(Boolean) }
+function formatAssignees(names: string[]) { return Array.from(new Set(names)).join(', ') }
+
+function AssigneePicker({ id, value, options, onChange, onManage }: { id: string; value: string; options: BusinessOption[]; onChange: (value: string) => void; onManage: () => void }) {
+  const selected = splitAssignees(value)
+  const selectedSet = new Set(selected)
+  const visibleOptions = [...options.filter((option) => option.isActive), ...selected.filter((name) => !options.some((option) => option.name === name)).map((name) => ({ id: `legacy-${name}`, name, isActive: false }))]
+
+  function toggle(name: string) {
+    onChange(selectedSet.has(name) ? formatAssignees(selected.filter((item) => item !== name)) : formatAssignees([...selected, name]))
+  }
+
+  return <details className="group rounded-xl border border-slate-200 bg-white" id={id}>
+    <summary className="flex h-11 cursor-pointer list-none items-center gap-2 px-3.5 text-sm font-semibold text-brand-blue marker:hidden [&::-webkit-details-marker]:hidden"><span className="min-w-0 flex-1 truncate">{selected.length ? `${selected.length} selected — ${selected.join(', ')}` : 'Choose assignees'}</span><svg className="size-3.5 shrink-0 transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+    <div className="border-t border-slate-100 p-2">
+      {visibleOptions.length ? visibleOptions.map((option) => <label className={`flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition hover:bg-slate-50 ${option.isActive ? 'text-slate-700' : 'text-slate-400'}`} key={option.id}><input className="size-4 rounded border-slate-300 accent-brand-blue" type="checkbox" checked={selectedSet.has(option.name)} onChange={() => toggle(option.name)} /><span className="min-w-0 flex-1 truncate">{option.name}{option.isActive ? '' : ' (inactive)'}</span></label>) : <p className="px-2.5 py-2 text-xs text-slate-400">No active assignees yet.</p>}
+      <button className="mt-1 w-full rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-brand-blue transition hover:bg-blue-50" type="button" onClick={onManage}>Manage task assignees</button>
+    </div>
+  </details>
+}
 
 function initials(name: string) {
   return name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'UN'
@@ -291,6 +315,7 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
 
 export function TasksPage({ currentUsername }: TasksPageProps) {
   const [tasks, setTasks] = useState<Task[]>([])
+  const [configuredAssignees, setConfiguredAssignees] = useState<BusinessOption[]>([])
   const [activeFilter, setActiveFilter] = usePersistentState<TaskFilter>('tasks.status', 'All')
   const [activeView, setActiveView] = useState<'Table' | 'Calendar'>('Table')
   const [searchQuery, setSearchQuery] = usePersistentState('tasks.search', '')
@@ -329,6 +354,16 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   }, [openNewOnLoad, taskIdOnLoad])
 
   useEffect(() => {
+    let active = true
+    const loadAssignees = () => void listBusinessOptions('task_assignee').then((result) => { if (active) setConfiguredAssignees(result) }).catch((failure: unknown) => {
+      if (active) setClientError(failure instanceof Error ? failure.message : 'Task assignees could not be loaded.')
+    })
+    loadAssignees()
+    window.addEventListener('adiel:settings-changed', loadAssignees)
+    return () => { active = false; window.removeEventListener('adiel:settings-changed', loadAssignees) }
+  }, [])
+
+  useEffect(() => {
     if (!toast) return
     const timeout = window.setTimeout(() => setToast(''), 2800)
     return () => window.clearTimeout(timeout)
@@ -348,7 +383,8 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     }
   }, [activeTasks])
 
-  const assignees = useMemo(() => Array.from(new Set(activeTasks.map((task) => task.assignedTo))).sort(), [activeTasks])
+  const assignees = useMemo(() => Array.from(new Set([...configuredAssignees.filter((option) => option.isActive).map((option) => option.name), ...activeTasks.map((task) => task.assignedTo).filter(Boolean)])).sort(), [activeTasks, configuredAssignees])
+  const hasActiveAssignees = configuredAssignees.some((option) => option.isActive)
   const activeAdvancedFilterCount = Number(assigneeFilter !== 'All') + Number(priorityFilter !== 'All') + Number(dueDateFilter !== 'All')
 
   const matchingTasks = useMemo(() => {
@@ -356,7 +392,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     const today = new Date().toISOString().slice(0, 10)
     return tasks.filter((task) => {
       const matchesStatus = activeFilter === 'All' || task.status === activeFilter
-      const matchesAssignee = assigneeFilter === 'All' || task.assignedTo === assigneeFilter
+      const matchesAssignee = assigneeFilter === 'All' || splitAssignees(task.assignedTo).includes(assigneeFilter)
       const matchesPriority = priorityFilter === 'All' || task.priority === priorityFilter
       const matchesDueDate = dueDateFilter === 'All'
         || (dueDateFilter === 'Overdue' && Boolean(task.dueDate && task.dueDate < today && task.status !== 'Completed'))
@@ -389,6 +425,10 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   function openTaskDialog(status: TaskStatus = 'To do') {
     setDraft({ ...emptyDraft, status })
     setIsAddingTask(true)
+  }
+
+  function openAssigneeSettings() {
+    navigateToBusinessSettings('task-assignees')
   }
 
   function openTaskDetails(task: Task) {
@@ -429,7 +469,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     try {
       let current: ApiTask = selectedTask
       if (editDraft.status !== selectedTask.status) current = await changeTaskStatus(selectedTask.id, editDraft.status, selectedTask.version)
-      current = await updateTaskApi(selectedTask.id, { title: editDraft.title.trim(), description: editDraft.description.trim(), priority: editDraft.priority, assignedToId: current.assignedToId, assignedTo: editDraft.assignedTo.trim(), dueDate: editDraft.dueDate, version: current.version })
+      current = await updateTaskApi(selectedTask.id, { title: editDraft.title.trim(), description: editDraft.description.trim(), priority: editDraft.priority, assignedToId: null, assignedTo: editDraft.assignedTo.trim(), dueDate: editDraft.dueDate, version: current.version })
       replaceTask(current)
       setIsEditingTask(false)
       setClientError('')
@@ -452,6 +492,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     event.preventDefault()
     const title = draft.title.trim()
     const assignedTo = draft.assignedTo.trim()
+    if (!hasActiveAssignees) { setClientError('Add an active task assignee in Settings before creating a task.'); return }
     if (!title || !assignedTo || !draft.dueDate) return
 
     try {
@@ -639,7 +680,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
         )}
       </section>
 
-      {selectedTask ? (
+      {selectedTask && !isEditingTask ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="task-details-title">
           <button className="absolute inset-0" type="button" onClick={closeTaskDetails} aria-label="Close task details" />
           <section className="relative my-6 w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.3)]">
@@ -660,7 +701,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                     <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-priority">Priority</label><AnimatedDropdown id="edit-task-priority" value={editDraft.priority} options={priorityOptions} onChange={(priority) => setEditDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-assignee">Assigned to</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 font-medium text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-assignee" value={editDraft.assignedTo} onChange={(event) => setEditDraft((current) => ({ ...current, assignedTo: event.target.value }))} required /></div>
+                    <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-assignee">Assigned to</label><AssigneePicker id="edit-task-assignee" value={editDraft.assignedTo} options={configuredAssignees} onChange={(assignedTo) => setEditDraft((current) => ({ ...current, assignedTo }))} onManage={openAssigneeSettings} /></div>
                     <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-due-date">Due date</label><AnimatedDatePicker id="edit-task-due-date" value={editDraft.dueDate} onChange={(dueDate) => setEditDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" required /></div>
                   </div>
                 </div>
@@ -716,15 +757,38 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
         </div>
       ) : null}
 
+      {selectedTask && isEditingTask ? (
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="edit-task-form-title">
+          <button className="absolute inset-0" type="button" onClick={() => setIsEditingTask(false)} aria-label="Close edit task form" />
+          <form className="relative my-6 w-full max-w-3xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.28)] [&_input]:!text-sm [&_label]:!text-[11px] [&_select]:!text-sm [&_textarea]:!text-sm" onSubmit={saveTask}>
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+              <div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">Task details</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="edit-task-form-title">Edit task</h2><p className="mt-1 text-sm text-slate-500">Update the work, owner, priority, and delivery date.</p></div>
+              <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsEditingTask(false)} aria-label="Close edit task form"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
+            </div>
+            <div className="space-y-5 px-6 py-5">
+              <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-title">Task title</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 font-medium text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-page-title" value={editDraft.title} onChange={(event) => setEditDraft((current) => ({ ...current, title: event.target.value }))} required autoFocus /></div>
+              <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-description">Description</label><textarea className="min-h-36 w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 leading-6 text-brand-blue outline-none transition focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="edit-task-page-description" value={editDraft.description} onChange={(event) => setEditDraft((current) => ({ ...current, description: event.target.value }))} /></div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-status">Status</label><AnimatedDropdown id="edit-task-page-status" value={editDraft.status} options={statusOptions} onChange={(status) => setEditDraft((current) => ({ ...current, status }))} ariaLabel="Task status" /></div>
+                <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-priority">Priority</label><AnimatedDropdown id="edit-task-page-priority" value={editDraft.priority} options={priorityOptions} onChange={(priority) => setEditDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>
+                <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-assignee">Assigned to</label><AssigneePicker id="edit-task-page-assignee" value={editDraft.assignedTo} options={configuredAssignees} onChange={(assignedTo) => setEditDraft((current) => ({ ...current, assignedTo }))} onManage={openAssigneeSettings} /></div>
+                <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-due-date">Due date</label><AnimatedDatePicker id="edit-task-page-due-date" value={editDraft.dueDate} onChange={(dueDate) => setEditDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" required /></div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsEditingTask(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white" type="submit">Save changes</button></div>
+          </form>
+        </div>
+      ) : null}
+      {selectedTask && isEditingTask ? <DocumentFormScaffold dialogTitleId="edit-task-form-title" breakdown={[{ label: 'Status', value: editDraft.status }, { label: 'Priority', value: editDraft.priority }]} totalLabel="Assigned to" totalValue={editDraft.assignedTo.trim() || 'Unassigned'} helperText="Task updates keep the current activity and subtask history." backLabel="Back to task" onCancel={() => setIsEditingTask(false)} actions={[{ label: 'Save changes', tone: 'primary' }]} /> : null}
+
       {isAddingTask ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="add-task-title">
           <button className="absolute inset-0" type="button" onClick={() => setIsAddingTask(false)} aria-label="Close add task dialog" />
           <form className="relative my-6 w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.28)] [&_input]:!text-sm [&_label]:!text-[11px] [&_select]:!text-sm [&_textarea]:!text-sm" onSubmit={addTask}>
-            <div className="border-b border-slate-100 px-6 py-5">
-              <div className="flex items-start justify-between gap-4">
-                <div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">New work item</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="add-task-title">Add a task</h2><p className="mt-1 text-sm text-slate-500">Define the work, owner, and delivery date.</p></div>
-                <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsAddingTask(false)} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
-              </div>
+            <div className="relative flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#ff9b37,#00113f_42%,#073078)]" />
+              <div className="relative"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">New work item</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="add-task-title">Add a task</h2><p className="mt-1 text-sm text-slate-500">Define the work, owners, and delivery date.</p></div>
+              <button className="relative grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsAddingTask(false)} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
             </div>
             <div className="space-y-4 px-6 py-5">
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-title">Task title</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-title" value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="What needs to be done?" autoFocus required /></div>
@@ -734,7 +798,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-priority">Priority</label><AnimatedDropdown id="task-priority" value={draft.priority} options={priorityOptions} onChange={(priority) => setDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assignee">Assigned to</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-assignee" value={draft.assignedTo} onChange={(event) => setDraft((current) => ({ ...current, assignedTo: event.target.value }))} placeholder="Assignee name" required /></div>
+                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assignee">Assigned to</label><AssigneePicker id="task-assignee" value={draft.assignedTo} options={configuredAssignees} onChange={(assignedTo) => setDraft((current) => ({ ...current, assignedTo }))} onManage={openAssigneeSettings} />{!hasActiveAssignees ? <p className="mt-1.5 text-[10px] font-semibold text-amber-700">Add an assignee in Settings first.</p> : null}</div>
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-due-date">Due date</label><AnimatedDatePicker id="task-due-date" value={draft.dueDate} onChange={(dueDate) => setDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" min={new Date().toISOString().slice(0, 10)} required /></div>
               </div>
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assigner">Assigned by</label><input className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-400" id="task-assigner" value={currentUsername} readOnly /></div>
@@ -746,6 +810,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
           </form>
         </div>
       ) : null}
+      {isAddingTask ? <DocumentFormScaffold dialogTitleId="add-task-title" breakdown={[{ label: 'Status', value: draft.status }, { label: 'Priority', value: draft.priority }]} totalLabel="Assigned to" totalValue={draft.assignedTo.trim() || 'Unassigned'} helperText="Set the task owner and due date before creating the work item." backLabel="Back to tasks" onCancel={() => setIsAddingTask(false)} actions={[{ label: 'Create task', tone: 'primary' }]} /> : null}
       <SuccessToast message={toast} />
     </div>
   )

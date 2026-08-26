@@ -221,7 +221,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = Transaction.Current is null ? await connection.BeginTransactionAsync(cancellationToken) : null;
         var previous = await GetOptionAsync(connection, transaction, id, cancellationToken);
-        if (!isActive && previous.IsActive)
+        if (!isActive && previous.IsActive && previous.Type != "task_assignee")
         {
             await using var active = connection.CreateCommand();
             active.Transaction = transaction;
@@ -278,7 +278,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
         await using var transaction = Transaction.Current is null ? await connection.BeginTransactionAsync(cancellationToken) : null;
         var option = await GetOptionAsync(connection, transaction, id, cancellationToken);
         if (option.UsageCount > 0) throw new ResourceConflictException($"{option.Name} is currently used and cannot be deleted.");
-        if (option.IsActive)
+        if (option.IsActive && option.Type != "task_assignee")
         {
             await using var active = connection.CreateCommand();
             active.Transaction = transaction;
@@ -315,6 +315,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
         "item_category" => "(select count(*) from public.items record where record.deleted_at is null and lower(record.category)=lower(option.name))",
         "expense_category" => "(select count(*) from public.expenses record where record.deleted_at is null and lower(record.category)=lower(option.name))",
         "payment_method" => "(select count(*) from public.expenses record where record.deleted_at is null and lower(record.payment_method)=lower(option.name))",
+        "task_assignee" => "(select count(*) from public.tasks record where record.deleted_at is null and exists (select 1 from unnest(string_to_array(record.assigned_to_name, ',')) name where lower(btrim(name))=lower(option.name)))",
         _ => throw new RequestValidationException("Unsupported business-option type."),
     };
 
@@ -327,6 +328,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
             "item_category" => "update public.items set category=@name, updated_by=@actor_id where deleted_at is null and lower(category)=lower(@previous_name)",
             "expense_category" => "update public.expenses set category=@name, updated_by=@actor_id where deleted_at is null and lower(category)=lower(@previous_name)",
             "payment_method" => "update public.expenses set payment_method=@name, updated_by=@actor_id where deleted_at is null and lower(payment_method)=lower(@previous_name)",
+            "task_assignee" => "update public.tasks set assigned_to_name=replace(assigned_to_name, @previous_name, @name) where deleted_at is null and lower(assigned_to_name) like '%' || lower(@previous_name) || '%'",
             _ => throw new RequestValidationException("Unsupported business-option type."),
         };
         await using var command = connection.CreateCommand();

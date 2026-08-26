@@ -39,7 +39,7 @@ export type DocumentNumberingRule = {
 }
 export type DocumentNumberPreview = { documentType: DocumentNumberingType; documentDate: string; number: string }
 
-export type BusinessOptionType = 'expense_category' | 'payment_method' | 'client_industry' | 'supplier_category' | 'item_category'
+export type BusinessOptionType = 'expense_category' | 'payment_method' | 'client_industry' | 'supplier_category' | 'item_category' | 'task_assignee'
 export type BusinessOption = { id: string; type: BusinessOptionType; name: string; isActive: boolean; sortOrder: number; usageCount: number; updatedAt: string; version: number }
 
 export const getCompanySettings = () => apiRequest<CompanySettings>('/settings/company')

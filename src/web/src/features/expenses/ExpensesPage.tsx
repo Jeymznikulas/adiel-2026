@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { ChartLoadingState } from '../../components/charts/ChartSupport'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { DocumentFormScaffold, type DocumentFormAction } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
@@ -490,6 +491,11 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     try { const saved = existing ? await updateExpense(existing.id, expenseRequest(values, existing.version)) : await createExpense(expenseRequest(values)); const apiExpense = toExpense(saved); setExpenses((current) => existing ? current.map((entry) => entry.id === existing.id ? apiExpense : entry) : [apiExpense, ...current]); closeExpenseDialog(); setToast(wasEditing ? 'Expense updated successfully' : 'Expense added successfully') } catch { setToast('Expense could not be saved') }
   }
 
+  const expenseFormActions: DocumentFormAction[] = [
+    ...(isEditingExpense && editingExpenseId !== null ? [{ label: 'Archive expense', tone: 'danger' as const, onClick: () => void archiveExpense(editingExpenseId) }] : []),
+    { label: isEditingExpense ? 'Save changes' : 'Save expense', tone: 'primary' },
+  ]
+
   const summaryCards = [
     { label: `${selectedMonthLabel} total`, value: formatPeso(selectedMonthTotal), detail: 'Selected month', accent: 'bg-brand-orange', valueClass: 'text-brand-blue', trend: null, insight: 'categories' as const },
     { label: 'Project costs', value: formatPeso(selectedMonthProjectTotal), detail: selectedMonthLabel, accent: 'bg-violet-500', valueClass: 'text-violet-700', trend: null, insight: null },
@@ -656,6 +662,8 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           </form>
         </div>
       ) : null}
+
+      {isAddingExpense ? <DocumentFormScaffold dialogTitleId="expense-form-title" breakdown={[{ label: 'Category', value: draft.category || 'Not selected' }, { label: 'Status', value: draft.status }]} totalLabel="Amount" totalValue={formatPeso(Number(draft.amount) || 0)} helperText="Project allocations affect project profit; general expenses affect company net profit." backLabel="Back to expenses" onCancel={closeExpenseDialog} actions={expenseFormActions} /> : null}
 
       {pendingVoidExpenseId !== null ? <VoidRecordDialog recordLabel="expense" onClose={() => setPendingVoidExpenseId(null)} onConfirm={confirmVoidExpense} /> : null}
       <SuccessToast message={toast} />

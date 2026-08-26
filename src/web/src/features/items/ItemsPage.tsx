@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { DocumentFormScaffold, type DocumentFormAction } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
@@ -244,7 +245,7 @@ function PriceAdjustmentDialog({ target, draft, error, onChange, onClose, onSubm
   const newMargin = newSellingPrice > 0 ? (newProfit / newSellingPrice) * 100 : 0
   const sellingChange = newSellingPrice - target.currentSellingPrice
 
-  return <div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="price-adjustment-title">
+  return <><div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="price-adjustment-title">
     <button className="absolute inset-0" type="button" onClick={onClose} aria-label="Close price adjustment form" />
     <form className="relative my-6 w-full max-w-3xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.36)]" onSubmit={onSubmit}>
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Price update</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="price-adjustment-title">Adjust price</h2><p className="mt-1 text-xs text-slate-400">{target.itemName} · {target.targetName}</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={onClose} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></div>
@@ -260,7 +261,7 @@ function PriceAdjustmentDialog({ target, draft, error, onChange, onClose, onSubm
       </div>
       <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={onClose}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">Save adjustment</button></div>
     </form>
-  </div>
+  </div><DocumentFormScaffold dialogTitleId="price-adjustment-title" breakdown={[{ label: 'Current price', value: formatPeso(target.currentSellingPrice) }, { label: 'Change', value: `${sellingChange > 0 ? '+' : ''}${formatPeso(sellingChange)}`, muted: sellingChange === 0 }]} totalLabel="New price" totalValue={formatPeso(newSellingPrice)} helperText="Saving creates a permanent price-history entry." backLabel="Back to item" onCancel={onClose} actions={[{ label: 'Save adjustment', tone: 'primary' }]} /></>
 }
 
 function BasePriceHistory({ item, onAdjustPrice }: { item: Item; onAdjustPrice: () => void }) {
@@ -397,11 +398,11 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   }, [toast])
 
   useEffect(() => {
-    if (!isDialogOpen && !isCategoryManagerOpen && !isVariantDialogOpen && !priceAdjustmentTarget) return
+    if (!isCategoryManagerOpen) return
     const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = originalOverflow }
-  }, [isCategoryManagerOpen, isDialogOpen, isVariantDialogOpen, priceAdjustmentTarget])
+  }, [isCategoryManagerOpen])
 
   const supplierMap = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers])
   const detailItem = detailItemId ? items.find((item) => item.id === detailItemId && isActiveRecord(item)) : undefined
@@ -491,6 +492,14 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setIsVariantDialogOpen(false)
     setIsConfirmingDelete(false)
     setFormError('')
+    setPhotoError('')
+  }
+
+  function closeVariantForm() {
+    setIsVariantDialogOpen(false)
+    setVariantParentItemId(null)
+    setEditingVariantId(null)
+    setVariantFormError('')
     setPhotoError('')
   }
 
@@ -811,6 +820,23 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     catch (failure) { setFormError(failure instanceof Error ? failure.message : 'The item could not be archived.') }
   }
 
+  const itemFormActions: DocumentFormAction[] = editingId
+    ? isConfirmingDelete
+      ? [
+          { label: 'Keep item', onClick: () => setIsConfirmingDelete(false), disabled: isProcessingPhoto },
+          { label: 'Confirm archive', tone: 'danger', onClick: () => void deleteItem(), disabled: isProcessingPhoto },
+        ]
+      : [
+          { label: 'Archive item', tone: 'danger', onClick: () => setIsConfirmingDelete(true), disabled: isProcessingPhoto },
+          { label: 'Save changes', tone: 'primary', disabled: !suppliers.length || isProcessingPhoto },
+        ]
+    : [{ label: 'Create item', tone: 'primary', disabled: !suppliers.length || isProcessingPhoto }]
+
+  const variantFormActions: DocumentFormAction[] = [
+    ...(editingVariantId ? [{ label: 'Remove variant', tone: 'danger' as const, onClick: () => void deleteVariant() }] : []),
+    { label: editingVariantId ? 'Save changes' : 'Add variant', tone: 'primary' as const, disabled: processingVariantPhotoId === variantDraft.id },
+  ]
+
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
       {detailItemId ? detailItem ? <ItemDetailsView item={detailItem} supplier={detailSupplier} onBack={returnToItems} onEdit={() => openEditDialog(detailItem)} onAddVariant={() => addVariant(detailItem)} onEditVariant={(variant) => editVariant(detailItem, variant)} onAdjustPrice={(variant) => openPriceAdjustment(detailItem, variant)} /> : <section className="grid min-h-[28rem] place-items-center rounded-[1.5rem] border border-slate-200/80 bg-white p-8 text-center shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="max-w-sm"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-slate-50 text-brand-blue"><Icon className="size-6" path="m21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5" /></span><h2 className="mt-5 text-xl font-bold text-brand-blue">Product not found</h2><p className="mt-2 text-sm leading-6 text-slate-500">This product may have been removed or the link is no longer available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={returnToItems}>Back to items</button></div></section> : <>
@@ -894,7 +920,10 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
         <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingId ? isConfirmingDelete ? <div className="flex items-center gap-2"><span className="text-xs font-bold text-red-600">Archive this item?</span><button className="h-9 rounded-xl px-3 text-xs font-bold text-slate-500" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="h-9 rounded-xl bg-red-600 px-3 text-xs font-bold text-white" type="button" onClick={deleteItem}>Archive</button></div> : <button className="h-9 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={() => setIsConfirmingDelete(true)}>Archive item</button> : <span />}<div className="ml-auto flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={closeDialog}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit" disabled={!suppliers.length}>{editingId ? 'Save changes' : 'Create item'}</button></div></div>
       </form></div> : null}
 
+      {isDialogOpen ? <DocumentFormScaffold dialogTitleId="item-dialog-title" breakdown={[{ label: 'Raw cost', value: formatPeso(draftRawCost) }, { label: 'Margin', value: `${draftMargin.toFixed(1)}%`, muted: draftMargin <= 0 }]} totalLabel="Selling price" totalValue={formatPeso(draftSellingPrice)} helperText={isConfirmingDelete ? 'Archiving removes this item from the active inventory.' : 'Product details, pricing, supplier, and photo are saved together.'} backLabel="Back to items" onCancel={closeDialog} actions={itemFormActions} /> : null}
+
       {isVariantDialogOpen ? <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-slate-950/65 p-4 backdrop-blur-sm animate-[content-enter_160ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="variant-dialog-title"><button className="absolute inset-0" type="button" onClick={() => setIsVariantDialogOpen(false)} aria-label="Close variant form" /><form className="relative my-6 w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.36)]" onSubmit={saveVariant}><div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Product option</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="variant-dialog-title">{editingVariantId ? 'Edit variant' : 'Add a new variant'}</h2><p className="mt-1 text-xs text-slate-400">Manage this option’s photo and individual pricing.</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsVariantDialogOpen(false)} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="px-6 py-5">{variantFormError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{variantFormError}</div> : null}{photoError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{photoError}</div> : null}<VariantEditor variant={variantDraft} index={variantDialogIndex} isProcessingPhoto={processingVariantPhotoId === variantDraft.id} onUpdate={updateVariant} onPhotoChange={(id, event) => void handleVariantPhotoChange(id, event)} onRemove={() => undefined} showRemove={false} /></div><div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingVariantId ? <button className="h-10 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={deleteVariant}>Remove variant</button> : <span />}<div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsVariantDialogOpen(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{editingVariantId ? 'Save changes' : 'Add variant'}</button></div></div></form></div> : null}
+      {isVariantDialogOpen ? <DocumentFormScaffold dialogTitleId="variant-dialog-title" breakdown={[{ label: 'Raw cost', value: formatPeso(variantDraft.rawCost) }, { label: 'Profit', value: formatPeso(variantDraft.sellingPrice - variantDraft.rawCost), muted: variantDraft.sellingPrice < variantDraft.rawCost }]} totalLabel="Selling price" totalValue={formatPeso(variantDraft.sellingPrice)} helperText="Variant identification, specifications, pricing, and photo are saved together." backLabel="Back to item" onCancel={closeVariantForm} actions={variantFormActions} /> : null}
 
       {priceAdjustmentTarget ? <PriceAdjustmentDialog target={priceAdjustmentTarget} draft={priceAdjustmentDraft} error={priceAdjustmentError} onChange={(field, value) => { setPriceAdjustmentDraft((current) => ({ ...current, [field]: value })); setPriceAdjustmentError('') }} onClose={() => { setPriceAdjustmentTarget(null); setPriceAdjustmentError('') }} onSubmit={savePriceAdjustment} /> : null}
 

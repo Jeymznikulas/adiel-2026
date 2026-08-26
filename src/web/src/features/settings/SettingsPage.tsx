@@ -16,7 +16,7 @@ function initialSection(): SettingsSection {
 
 function initialBusinessTab(): BusinessSettingsTab {
   const tab = new URLSearchParams(window.location.search).get('tab')
-  return tab === 'payment-methods' || tab === 'client-industries' || tab === 'supplier-categories' || tab === 'item-categories' ? tab : 'expense-categories'
+  return tab === 'payment-methods' || tab === 'client-industries' || tab === 'supplier-categories' || tab === 'item-categories' || tab === 'task-assignees' ? tab : 'expense-categories'
 }
 
 const fieldClassName = 'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]'

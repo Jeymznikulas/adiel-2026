@@ -3,12 +3,13 @@ import { useEffect, useState } from 'react'
 import { createBusinessOption, deleteBusinessOption, listBusinessOptions, renameBusinessOption, reorderBusinessOptions, setBusinessOptionActive, type BusinessOption, type BusinessOptionType } from '../../services/api/settings'
 import type { BusinessSettingsTab } from './settingsStorage'
 
-const tabs: Array<{ id: BusinessSettingsTab; type: BusinessOptionType; label: string; singular: string; description: string }> = [
+const tabs: Array<{ id: BusinessSettingsTab; type: BusinessOptionType; label: string; singular: string; description: string; allowEmpty?: boolean }> = [
   { id: 'expense-categories', type: 'expense_category', label: 'Expense categories', singular: 'expense category', description: 'Classify business and project spending.' },
   { id: 'payment-methods', type: 'payment_method', label: 'Payment methods', singular: 'payment method', description: 'Control the methods available when recording expenses.' },
   { id: 'client-industries', type: 'client_industry', label: 'Client industries', singular: 'client industry', description: 'Keep client classifications consistent.' },
   { id: 'supplier-categories', type: 'supplier_category', label: 'Supplier categories', singular: 'supplier category', description: 'Standardize supplier capability tags.' },
   { id: 'item-categories', type: 'item_category', label: 'Item categories', singular: 'item category', description: 'Organize the product and service catalogue.' },
+  { id: 'task-assignees', type: 'task_assignee', label: 'Task assignees', singular: 'task assignee', description: 'Choose who can be assigned to a task.', allowEmpty: true },
 ]
 
 function Icon({ path }: { path: string }) {
@@ -61,7 +62,7 @@ export function BusinessOptionsSettings({ initialTab }: { initialTab: BusinessSe
   }
 
   function toggle(option: BusinessOption) {
-    if (option.isActive && activeCount === 1) { setError('At least one option must remain active.'); return }
+    if (!detail.allowEmpty && option.isActive && activeCount === 1) { setError('At least one option must remain active.'); return }
     void run(async () => { const saved = await setBusinessOptionActive(option.id, !option.isActive, option.version); setOptions((current) => current.map((entry) => entry.id === saved.id ? saved : entry)); setMessage(`${saved.name} ${saved.isActive ? 'activated' : 'deactivated'}`) })
   }
 

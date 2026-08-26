@@ -81,6 +81,31 @@
     font-size: 0.8125rem !important;
     line-height: 1.2rem !important;
   }
+
+  /* Shared dialog treatment: every supporting dialog uses the same centered,
+     viewport-safe frame as global search. */
+  .app-shell :where([role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]) {
+    isolation: isolate;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    place-items: center !important;
+    padding: 0.75rem !important;
+  }
+
+  /* Only active modal dialogs rise above the sidebar and app header. */
+  .app-shell main:has([role="dialog"][aria-modal="true"]),
+  .app-shell main:has([role="alertdialog"][aria-modal="true"]) {
+    position: relative;
+    z-index: 100;
+  }
+
+  .app-shell :where([role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]) > :where(form, section) {
+    width: calc(100% - 1.5rem);
+    max-height: calc(100svh - 1.5rem);
+    margin: auto !important;
+    animation: app-dialog-enter var(--app-motion-slow) var(--app-ease) both;
+    box-shadow: 0 28px 80px -32px rgba(0, 20, 76, 0.52);
+  }
 }
 
 @keyframes content-enter {
