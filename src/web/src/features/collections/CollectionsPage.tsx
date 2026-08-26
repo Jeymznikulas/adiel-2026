@@ -3,7 +3,8 @@ import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { Button } from '../../components/ui/Button'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { collectionRows } from '../statement-of-account/latePayment'
-import { loadStatements } from '../statement-of-account/StatementOfAccountPage'
+import { listStatements } from '../../services/api/statements'
+import { toStatement } from '../statement-of-account/StatementOfAccountPage'
 import type { StatementOfAccount } from '../statement-of-account/statementOfAccountTypes'
 import { isActiveRecord } from '../../services/recordLifecycle'
 
@@ -30,18 +31,12 @@ function statusTone(status: string) {
 }
 
 export function CollectionsPage() {
-  const [statements, setStatements] = useState<StatementOfAccount[]>(loadStatements)
+  const [statements, setStatements] = useState<StatementOfAccount[]>([])
   const [filter, setFilter] = useState('All open')
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    const refresh = () => setStatements(loadStatements())
-    window.addEventListener('storage', refresh)
-    window.addEventListener('adiel:statements-changed', refresh)
-    return () => {
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('adiel:statements-changed', refresh)
-    }
+    void listStatements({ pageSize: 100 }).then((result) => setStatements(result.items.map(toStatement)))
   }, [])
 
   const rows = useMemo(() => collectionRows(statements.filter(isActiveRecord)), [statements])

@@ -4,12 +4,14 @@ import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { PrivateImage } from '../../components/ui/PrivateImage'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
 import { addItemPriceAdjustment, archiveItem, createItem, createItemVariant, deleteItemVariant, listItems, updateItem, updateItemVariant, type Item as ApiItem } from '../../services/api/items'
 import { listBusinessOptions } from '../../services/api/settings'
 import { listSuppliers } from '../../services/api/suppliers'
+import { removeImage, uploadImage } from '../../services/api/images'
 import { isActiveRecord } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
@@ -160,38 +162,6 @@ function createPriceRecord(rawCost: number, sellingPrice: number, date: string, 
   return { id: crypto.randomUUID(), date, recordedAt: new Date().toISOString(), previousRawCost, previousSellingPrice, rawCost, sellingPrice, reason, notes, createdBy }
 }
 
-function resizeItemPhoto(file: File, maxSize = 800, quality = 0.84) {
-  return new Promise<string>((resolve, reject) => {
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      reject(new Error('Upload a PNG, JPG, or WebP image.'))
-      return
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      reject(new Error('The photo must be smaller than 5 MB.'))
-      return
-    }
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('The photo could not be read.'))
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') return reject(new Error('The photo could not be read.'))
-      const image = new Image()
-      image.onerror = () => reject(new Error('The image appears to be invalid.'))
-      image.onload = () => {
-        const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.max(1, Math.round(image.width * scale))
-        canvas.height = Math.max(1, Math.round(image.height * scale))
-        const context = canvas.getContext('2d')
-        if (!context) return reject(new Error('The photo could not be processed.'))
-        context.drawImage(image, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/webp', quality))
-      }
-      image.src = reader.result
-    }
-    reader.readAsDataURL(file)
-  })
-}
-
 function formatPeso(value: number) {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value)
 }
@@ -214,10 +184,10 @@ function Icon({ path, className = 'size-4' }: { path: string; className?: string
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={path} /></svg>
 }
 
-function ProductPhoto({ item, size = 'large' }: { item: Pick<Item, 'photo' | 'name'>; size?: 'hero' | 'large' | 'small' }) {
+function ProductPhoto({ item, size = 'large' }: { item: Pick<Item, 'photo' | 'name'> & { id?: string; variantId?: string }; size?: 'hero' | 'large' | 'small' }) {
   const sizeClass = size === 'hero' ? 'size-28 rounded-[1.75rem] sm:size-36' : size === 'large' ? 'size-16 rounded-2xl' : 'size-11 rounded-xl'
   const iconClass = size === 'hero' ? 'size-10' : size === 'large' ? 'size-6' : 'size-4'
-  return item.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><img className={`size-full ${size === 'hero' ? 'object-contain p-2' : 'object-cover'}`} src={item.photo} alt={item.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#e2e9f5)] text-brand-blue`}><Icon className={iconClass} path="M4 5h16v14H4V5Zm0 10 4-4 4 4 2-2 6 6M16 9h.01" /></span>
+  return item.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><PrivateImage className={`size-full ${size === 'hero' ? 'object-contain p-2' : 'object-cover'}`} target="items" entityId={item.id} variantId={item.variantId} objectPath={item.photo} alt={item.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#e2e9f5)] text-brand-blue`}><Icon className={iconClass} path="M4 5h16v14H4V5Zm0 10 4-4 4 4 2-2 6 6M16 9h.01" /></span>
 }
 
 function DetailField({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -367,10 +337,12 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<ItemDraft>(() => createEmptyDraft())
+  const [pendingItemPhoto, setPendingItemPhoto] = useState<File | null>(null)
   const [isVariantDialogOpen, setIsVariantDialogOpen] = useState(false)
   const [variantParentItemId, setVariantParentItemId] = useState<string | null>(null)
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null)
   const [variantDraft, setVariantDraft] = useState<ItemVariant>(() => createEmptyVariant())
+  const [pendingVariantPhoto, setPendingVariantPhoto] = useState<File | null>(null)
   const [variantFormError, setVariantFormError] = useState('')
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<string | null>(null)
@@ -483,6 +455,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   function openAddDialog() {
     setDraft(createEmptyDraft(suppliers.find((supplier) => supplier.status === 'Active')?.id ?? suppliers[0]?.id ?? '', categories[0] ?? ''))
     setEditingId(null)
+    setPendingItemPhoto(null)
     setPhotoError('')
     setFormError('')
     setIsConfirmingDelete(false)
@@ -492,6 +465,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   function openEditDialog(item: Item) {
     setDraft({ ...item, unitWeight: item.unitWeight ? String(item.unitWeight) : '', rawCost: String(item.rawCost), sellingPrice: String(item.sellingPrice) })
     setEditingId(item.id)
+    setPendingItemPhoto(null)
     setPhotoError('')
     setFormError('')
     setIsConfirmingDelete(false)
@@ -523,6 +497,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   function addVariant(item: Item) {
     setVariantParentItemId(item.id)
     setEditingVariantId(null)
+    setPendingVariantPhoto(null)
     setVariantDraft(createEmptyVariant(item.rawCost, item.sellingPrice, `${item.productCode}-V${String(item.variants.length + 1).padStart(2, '0')}`, item.unitOfMeasure, item.unitWeight, item.status))
     setVariantFormError('')
     setPhotoError('')
@@ -577,6 +552,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   function editVariant(item: Item, variant: ItemVariant) {
     setVariantParentItemId(item.id)
     setEditingVariantId(variant.id)
+    setPendingVariantPhoto(null)
     setVariantDraft({ ...variant, specifications: variant.specifications.map((specification) => ({ ...specification })), priceHistory: [...variant.priceHistory] })
     setVariantFormError('')
     setPhotoError('')
@@ -606,8 +582,12 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
       return
     }
     try {
-      const payload = { name: variantDraft.name.trim(), value: variantDraft.value.trim(), photo: variantDraft.photo, productCode, barcode: variantDraft.barcode.trim(), unitOfMeasure: variantDraft.unitOfMeasure, unitWeight: variantDraft.unitWeight, status: variantDraft.status, rawCost: variantDraft.rawCost, sellingPrice: variantDraft.sellingPrice, specifications: variantDraft.specifications.map((specification) => ({ id: specification.id, name: specification.name.trim(), value: specification.value.trim() })), version: editingVariantId ? variantDraft.version : undefined }
-      const saved = toItem(editingVariantId ? await updateItemVariant(parentItem.id, editingVariantId, payload) : await createItemVariant(parentItem.id, payload))
+      const previousVariant = editingVariantId ? parentItem.variants.find((variant) => variant.id === editingVariantId) : undefined
+      const payload = { name: variantDraft.name.trim(), value: variantDraft.value.trim(), photo: previousVariant?.photo ?? '', productCode, barcode: variantDraft.barcode.trim(), unitOfMeasure: variantDraft.unitOfMeasure, unitWeight: variantDraft.unitWeight, status: variantDraft.status, rawCost: variantDraft.rawCost, sellingPrice: variantDraft.sellingPrice, specifications: variantDraft.specifications.map((specification) => ({ id: specification.id, name: specification.name.trim(), value: specification.value.trim() })), version: editingVariantId ? variantDraft.version : undefined }
+      let saved = toItem(editingVariantId ? await updateItemVariant(parentItem.id, editingVariantId, payload) : await createItemVariant(parentItem.id, payload))
+      let savedVariant = saved.variants.find((variant) => variant.id === editingVariantId) ?? saved.variants.find((variant) => variant.productCode === productCode)!
+      if (pendingVariantPhoto) { const image = await uploadImage('items', saved.id, savedVariant.version, pendingVariantPhoto, savedVariant.id); savedVariant = { ...savedVariant, photo: image.objectPath, version: image.version }; saved = { ...saved, variants: saved.variants.map((variant) => variant.id === savedVariant.id ? savedVariant : variant) } }
+      else if (previousVariant?.photo && !variantDraft.photo) { const removed = await removeImage('items', saved.id, savedVariant.version, savedVariant.id); savedVariant = { ...savedVariant, photo: '', version: removed.version }; saved = { ...saved, variants: saved.variants.map((variant) => variant.id === savedVariant.id ? savedVariant : variant) } }
       setItems((current) => current.map((item) => item.id === saved.id ? saved : item))
       setIsVariantDialogOpen(false); setVariantParentItemId(null); setVariantFormError(''); setToast(editingVariantId ? 'Variant updated successfully' : 'Variant added successfully')
     } catch (failure) { setVariantFormError(failure instanceof Error ? failure.message : 'The variant could not be saved.') }
@@ -629,8 +609,9 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setPhotoError('')
     setProcessingVariantPhotoId(id)
     try {
-      const photo = await resizeItemPhoto(file, 520, 0.78)
-      setVariantDraft((current) => current.id === id ? { ...current, photo } : current)
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Upload a PNG, JPG, or WebP image up to 5 MB.')
+      setPendingVariantPhoto(file)
+      setVariantDraft((current) => current.id === id ? { ...current, photo: URL.createObjectURL(file) } : current)
     } catch (error) {
       setPhotoError(error instanceof Error ? error.message : 'The variant photo could not be uploaded.')
     } finally {
@@ -730,8 +711,9 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setPhotoError('')
     setIsProcessingPhoto(true)
     try {
-      const photo = await resizeItemPhoto(file)
-      setDraft((current) => ({ ...current, photo }))
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Upload a PNG, JPG, or WebP image up to 5 MB.')
+      setPendingItemPhoto(file)
+      setDraft((current) => ({ ...current, photo: URL.createObjectURL(file) }))
     } catch (error) {
       setPhotoError(error instanceof Error ? error.message : 'The photo could not be uploaded.')
     } finally {
@@ -811,7 +793,10 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     }
     try {
       const { id: _id, variants: _variants, priceHistory: _priceHistory, createdAt: _createdAt, updatedAt: _updatedAt, archivedAt: _archivedAt, ...payload } = values
-      const saved = toItem(editingId ? await updateItem(editingId, { ...payload, supplierId: payload.supplierId || null, version: existingItem?.version }) : await createItem({ ...payload, supplierId: payload.supplierId || null }))
+      payload.photo = existingItem?.photo ?? ''
+      let saved = toItem(editingId ? await updateItem(editingId, { ...payload, supplierId: payload.supplierId || null, version: existingItem?.version }) : await createItem({ ...payload, supplierId: payload.supplierId || null }))
+      if (pendingItemPhoto) { const image = await uploadImage('items', saved.id, saved.version, pendingItemPhoto); saved = { ...saved, photo: image.objectPath, version: image.version } }
+      else if (existingItem?.photo && !draft.photo) { const removed = await removeImage('items', saved.id, saved.version); saved = { ...saved, photo: '', version: removed.version } }
       setItems((current) => editingId ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current])
       setToast(editingId ? 'Item updated successfully' : 'Item added successfully')
       closeDialog()

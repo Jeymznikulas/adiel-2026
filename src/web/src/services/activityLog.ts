@@ -50,33 +50,7 @@ function historicalEntries(): SystemLogEntry[] {
   const entries: SystemLogEntry[] = []
 
   try {
-    const tasks: unknown = JSON.parse(window.localStorage.getItem('adiel.tasks') ?? '[]')
-    if (Array.isArray(tasks)) {
-      tasks.forEach((value) => {
-        if (typeof value !== 'object' || value === null) return
-        const task = value as Record<string, unknown>
-        if (typeof task.id !== 'number' || typeof task.title !== 'string') return
-        const date = typeof task.createdAt === 'string' ? task.createdAt : new Date().toISOString().slice(0, 10)
-        entries.push({
-          id: `historical-task-${task.id}`,
-          recordId: String(task.id),
-          timestamp: `${date}T09:00:00`,
-          module: 'Tasks',
-          action: 'Created',
-          entity: task.title,
-          description: `Task created and assigned to ${typeof task.assignedTo === 'string' ? task.assignedTo : 'the team'}.`,
-          actor: typeof task.assignedBy === 'string' ? task.assignedBy : 'System import',
-          tone: 'info',
-          status: typeof task.status === 'string' ? task.status : undefined,
-        })
-      })
-    }
-  } catch {
-    // Ignore malformed historical task data.
-  }
-
-  try {
-    const expenses: unknown = JSON.parse(window.localStorage.getItem('adiel.expenses') ?? '[]')
+    const expenses: unknown = JSON.parse(window.localStorage.getItem('__expenses_migrated_to_api__') ?? '[]')
     if (Array.isArray(expenses)) {
       expenses.forEach((value) => {
         if (typeof value !== 'object' || value === null) return

@@ -101,4 +101,7 @@ export type StatementOfAccount = {
   terms: string
   createdAt: string
   updatedAt: string
+  archivedAt: string | null
+  voidReason: string | null
+  version: number
 }

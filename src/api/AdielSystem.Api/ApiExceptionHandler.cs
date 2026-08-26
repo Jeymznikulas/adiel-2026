@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AdielSystem.Api;
 
-internal sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : IExceptionHandler
+internal sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger, IHostEnvironment environment) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken)
     {
@@ -18,7 +18,7 @@ internal sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) :
             _ => (500, "Unexpected server error", "The server could not complete the request."),
         };
         if (status >= 500) logger.LogError(exception, "Unhandled API error. Trace ID: {TraceId}", context.TraceIdentifier);
-        var problem = new ProblemDetails { Status = status, Title = title, Detail = detail, Instance = context.Request.Path };
+        var problem = new ProblemDetails { Status = status, Title = title, Detail = status >= 500 && environment.IsDevelopment() ? exception.Message : detail, Instance = context.Request.Path };
         problem.Extensions["traceId"] = context.TraceIdentifier;
         context.Response.StatusCode = status;
         await context.Response.WriteAsJsonAsync(problem, cancellationToken);

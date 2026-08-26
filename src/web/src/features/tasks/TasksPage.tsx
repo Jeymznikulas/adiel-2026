@@ -8,38 +8,16 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
-import { appendSystemLog } from '../../services/activityLog'
-import { isActiveRecord, notifyLifecycleChanged, withArchived } from '../../services/recordLifecycle'
+import { addTaskSubtask, archiveTask, changeTaskStatus, createTask, listTasks, removeTaskSubtask, setTaskSubtaskCompletion, updateTask as updateTaskApi, type Task as ApiTask, type TaskPriority, type TaskStatus } from '../../services/api/tasks'
 
-type TaskStatus = 'To do' | 'In progress' | 'Completed'
-type TaskPriority = 'Low' | 'Medium' | 'High'
 type TaskFilter = 'All' | TaskStatus
 type DueDateFilter = 'All' | 'Overdue' | 'Due today' | 'Upcoming' | 'No due date'
-
-type Subtask = {
-  id: number
-  title: string
-  completed: boolean
-}
-
-type Task = {
-  id: number
-  title: string
-  description: string
-  status: TaskStatus
-  priority: TaskPriority
-  assignedTo: string
-  assignedBy: string
-  createdAt: string
-  dueDate: string
-  subtasks: Subtask[]
-}
+type Task = Omit<ApiTask, 'dueDate'> & { dueDate: string }
 
 type TasksPageProps = {
   currentUsername: string
 }
 
-const storageKey = 'adiel.tasks'
 const statusFilters: TaskFilter[] = ['All', 'To do', 'In progress', 'Completed']
 const statusGroups = [
   { status: 'To do' as const, accent: 'bg-sky-500', border: 'border-l-sky-500', soft: 'bg-sky-50', text: 'text-sky-700' },
@@ -59,12 +37,6 @@ const priorityOptions = [
 const priorityFilterOptions = [{ value: 'All' as const }, ...priorityOptions]
 const dueDateOptions: { value: DueDateFilter }[] = ['All', 'Overdue', 'Due today', 'Upcoming', 'No due date'].map((value) => ({ value: value as DueDateFilter }))
 
-const initialTasks: Task[] = [
-  { id: 1, title: 'Review material requirements', description: 'Confirm quantities needed for upcoming site deliveries.', status: 'To do', priority: 'High', assignedTo: 'Alex Morgan', assignedBy: 'Operations', createdAt: '2026-07-31', dueDate: '2026-08-03', subtasks: [] },
-  { id: 2, title: 'Prepare client quotation', description: 'Complete the prices and payment terms.', status: 'In progress', priority: 'Medium', assignedTo: 'Jamie Lee', assignedBy: 'Sales Team', createdAt: '2026-07-31', dueDate: '2026-08-01', subtasks: [] },
-  { id: 3, title: 'Update supplier details', description: 'Check the contact details for active material suppliers.', status: 'Completed', priority: 'Low', assignedTo: 'Taylor Cruz', assignedBy: 'Operations', createdAt: '2026-07-30', dueDate: '2026-07-30', subtasks: [] },
-]
-
 const emptyDraft = {
   title: '',
   description: '',
@@ -74,19 +46,7 @@ const emptyDraft = {
   dueDate: '',
 }
 
-function loadTasks() {
-  try {
-    const savedTasks = window.localStorage.getItem(storageKey)
-    if (!savedTasks) return initialTasks
-    return (JSON.parse(savedTasks) as Task[]).map((task) => ({
-      ...task,
-      dueDate: task.dueDate ?? '',
-      subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
-    }))
-  } catch {
-    return initialTasks
-  }
-}
+function normalizeTask(task: ApiTask): Task { return { ...task, dueDate: task.dueDate ?? '' } }
 
 function initials(name: string) {
   return name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'UN'
@@ -94,7 +54,7 @@ function initials(name: string) {
 
 function formatDate(value: string) {
   if (!value) return 'No date'
-  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T00:00:00`))
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value.slice(0, 10)}T00:00:00`))
 }
 
 function dueDateClass(task: Task) {
@@ -330,7 +290,7 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
 }
 
 export function TasksPage({ currentUsername }: TasksPageProps) {
-  const [tasks, setTasks] = useState<Task[]>(loadTasks)
+  const [tasks, setTasks] = useState<Task[]>([])
   const [activeFilter, setActiveFilter] = usePersistentState<TaskFilter>('tasks.status', 'All')
   const [activeView, setActiveView] = useState<'Table' | 'Calendar'>('Table')
   const [searchQuery, setSearchQuery] = usePersistentState('tasks.search', '')
@@ -341,26 +301,32 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const initialQuery = new URLSearchParams(window.location.search)
   const openNewOnLoad = initialQuery.get('new') === '1'
   const taskIdParam = initialQuery.get('task')
-  const taskIdOnLoad = taskIdParam ? Number(taskIdParam) : null
+  const taskIdOnLoad = taskIdParam || null
   const [isAddingTask, setIsAddingTask] = useState(openNewOnLoad)
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(() => typeof taskIdOnLoad === 'number' && Number.isFinite(taskIdOnLoad) && tasks.some((task) => task.id === taskIdOnLoad) ? taskIdOnLoad : null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [isEditingTask, setIsEditingTask] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [toast, setToast] = useState('')
+  const [clientError, setClientError] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<TaskStatus>>(() => new Set())
   const [draft, setDraft] = useState(emptyDraft)
   const [editDraft, setEditDraft] = useState(emptyDraft)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const selectedTask = selectedTaskId === null ? null : tasks.find((task) => task.id === selectedTaskId) ?? null
-  const activeTasks = useMemo(() => tasks.filter(isActiveRecord), [tasks])
+  const activeTasks = tasks
 
   useEffect(() => {
-    if (openNewOnLoad || taskIdOnLoad !== null) window.history.replaceState(null, '', window.location.pathname)
+    let active = true
+    void listTasks().then((result) => {
+      if (!active) return
+      const loaded = result.items.map(normalizeTask)
+      setTasks(loaded)
+      if (taskIdOnLoad && loaded.some((task) => task.id === taskIdOnLoad)) setSelectedTaskId(taskIdOnLoad)
+      setClientError('')
+      if (openNewOnLoad || taskIdOnLoad) window.history.replaceState(null, '', window.location.pathname)
+    }).catch((failure) => { if (active) setClientError(failure instanceof Error ? failure.message : 'Tasks could not be loaded.') })
+    return () => { active = false }
   }, [openNewOnLoad, taskIdOnLoad])
-
-  useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(tasks))
-  }, [tasks])
 
   useEffect(() => {
     if (!toast) return
@@ -388,7 +354,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const matchingTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     const today = new Date().toISOString().slice(0, 10)
-    return tasks.filter(isActiveRecord).filter((task) => {
+    return tasks.filter((task) => {
       const matchesStatus = activeFilter === 'All' || task.status === activeFilter
       const matchesAssignee = assigneeFilter === 'All' || task.assignedTo === assigneeFilter
       const matchesPriority = priorityFilter === 'All' || task.priority === priorityFilter
@@ -452,100 +418,91 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     setIsEditingTask(true)
   }
 
-  function saveTask(event: FormEvent<HTMLFormElement>) {
+  function replaceTask(saved: ApiTask) {
+    const normalized = normalizeTask(saved)
+    setTasks((current) => current.map((task) => task.id === normalized.id ? normalized : task))
+  }
+
+  async function saveTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedTask || !editDraft.title.trim() || !editDraft.assignedTo.trim() || !editDraft.dueDate) return
-    setTasks((current) => current.map((task) => task.id === selectedTask.id ? {
-      ...task,
-      title: editDraft.title.trim(),
-      description: editDraft.description.trim(),
-      status: editDraft.status,
-      priority: editDraft.priority,
-      assignedTo: editDraft.assignedTo.trim(),
-      dueDate: editDraft.dueDate,
-    } : task))
-    setIsEditingTask(false)
-    setToast('Task updated successfully')
-    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Updated', entity: editDraft.title.trim(), description: 'Task details were updated.', actor: currentUsername, tone: 'info', status: editDraft.status })
+    try {
+      let current: ApiTask = selectedTask
+      if (editDraft.status !== selectedTask.status) current = await changeTaskStatus(selectedTask.id, editDraft.status, selectedTask.version)
+      current = await updateTaskApi(selectedTask.id, { title: editDraft.title.trim(), description: editDraft.description.trim(), priority: editDraft.priority, assignedToId: current.assignedToId, assignedTo: editDraft.assignedTo.trim(), dueDate: editDraft.dueDate, version: current.version })
+      replaceTask(current)
+      setIsEditingTask(false)
+      setClientError('')
+      setToast('Task updated successfully')
+    } catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The task could not be updated.') }
   }
 
-  function removeSelectedTask() {
+  async function removeSelectedTask() {
     if (!selectedTask) return
-    setTasks((current) => current.map((task) => task.id === selectedTask.id ? withArchived(task, currentUsername) : task))
-    notifyLifecycleChanged()
-    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Archived', entity: selectedTask.title, description: 'Task and its subtasks were archived.', actor: currentUsername, tone: 'info', status: selectedTask.status })
-    closeTaskDetails()
-    setToast('Task archived successfully')
+    try {
+      await archiveTask(selectedTask.id, selectedTask.version)
+      setTasks((current) => current.filter((task) => task.id !== selectedTask.id))
+      closeTaskDetails()
+      setClientError('')
+      setToast('Task archived successfully')
+    } catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The task could not be archived.') }
   }
 
-  function addTask(event: FormEvent<HTMLFormElement>) {
+  async function addTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const title = draft.title.trim()
     const assignedTo = draft.assignedTo.trim()
     if (!title || !assignedTo || !draft.dueDate) return
 
-    const taskId = Date.now()
-    setTasks((current) => [{
-      id: taskId, title, description: draft.description.trim(), status: draft.status,
-      priority: draft.priority, assignedTo, assignedBy: currentUsername,
-      createdAt: new Date().toISOString().slice(0, 10), dueDate: draft.dueDate,
-      subtasks: [],
-    }, ...current])
-    setIsAddingTask(false)
-    setToast('Task created successfully')
-    appendSystemLog({ recordId: String(taskId), module: 'Tasks', action: 'Created', entity: title, description: `Task created and assigned to ${assignedTo}.`, actor: currentUsername, tone: 'success', status: draft.status })
+    try {
+      const created = normalizeTask(await createTask({ title, description: draft.description.trim(), status: draft.status, priority: draft.priority, assignedToId: null, assignedTo, dueDate: draft.dueDate }))
+      setTasks((current) => [created, ...current])
+      setIsAddingTask(false)
+      setClientError('')
+      setToast('Task created successfully')
+    } catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The task could not be created.') }
   }
 
-  function updateTask(id: number, changes: Partial<Pick<Task, 'status' | 'priority' | 'dueDate'>>) {
+  async function updateTask(id: string, changes: Partial<Pick<Task, 'status' | 'priority' | 'dueDate'>>) {
     const task = tasks.find((item) => item.id === id)
-    setTasks((current) => current.map((task) => task.id === id ? { ...task, ...changes } : task))
-    setToast(changes.status === 'Completed'
-      ? 'Task marked as completed'
-      : changes.status ? 'Task status updated'
-        : changes.priority ? 'Task priority updated'
-          : 'Task due date updated')
-    if (task) {
-      const action = changes.status ? 'Status changed' : 'Updated'
-      const description = changes.status
-        ? `Task status changed from ${task.status} to ${changes.status}.`
-        : changes.priority
-          ? `Task priority changed from ${task.priority} to ${changes.priority}.`
-          : `Task due date changed to ${changes.dueDate || 'no due date'}.`
-      appendSystemLog({ recordId: String(id), module: 'Tasks', action, entity: task.title, description, actor: currentUsername, tone: changes.status === 'Completed' ? 'success' : 'info', status: changes.status ?? task.status })
-    }
+    if (!task) return
+    try {
+      const saved = changes.status
+        ? await changeTaskStatus(id, changes.status, task.version)
+        : await updateTaskApi(id, { title: task.title, description: task.description, priority: changes.priority ?? task.priority, assignedToId: task.assignedToId, assignedTo: task.assignedTo, dueDate: (changes.dueDate ?? task.dueDate) || null, version: task.version })
+      replaceTask(saved)
+      setClientError('')
+      setToast(changes.status === 'Completed' ? 'Task marked as completed' : changes.status ? 'Task status updated' : changes.priority ? 'Task priority updated' : 'Task due date updated')
+    } catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The task could not be updated.') }
   }
 
-  function addSubtask(event: FormEvent<HTMLFormElement>) {
+  async function addSubtask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const title = newSubtaskTitle.trim()
     if (!selectedTask || !title) return
 
-    const subtask: Subtask = { id: Date.now(), title, completed: false }
-    setTasks((current) => current.map((task) => task.id === selectedTask.id
-      ? { ...task, subtasks: [...task.subtasks, subtask] }
-      : task))
-    setNewSubtaskTitle('')
-    setToast('Subtask added successfully')
-    appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Subtask added', entity: selectedTask.title, description: `Subtask added: ${title}.`, actor: currentUsername, tone: 'info', status: selectedTask.status })
+    try {
+      replaceTask(await addTaskSubtask(selectedTask.id, title, selectedTask.version))
+      setNewSubtaskTitle('')
+      setClientError('')
+      setToast('Subtask added successfully')
+    } catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The subtask could not be added.') }
   }
 
-  function toggleSubtask(subtaskId: number) {
+  async function toggleSubtask(subtaskId: string) {
     if (!selectedTask) return
     const subtask = selectedTask.subtasks.find((item) => item.id === subtaskId)
-    setTasks((current) => current.map((task) => task.id === selectedTask.id
-      ? { ...task, subtasks: task.subtasks.map((subtask) => subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask) }
-      : task))
-    if (subtask) appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Subtask updated', entity: selectedTask.title, description: `${subtask.completed ? 'Reopened' : 'Completed'} subtask: ${subtask.title}.`, actor: currentUsername, tone: subtask.completed ? 'info' : 'success', status: selectedTask.status })
+    if (!subtask) return
+    try { replaceTask(await setTaskSubtaskCompletion(selectedTask.id, subtask.id, !subtask.completed, subtask.version, selectedTask.version)); setClientError('') }
+    catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The subtask could not be updated.') }
   }
 
-  function removeSubtask(subtaskId: number) {
+  async function removeSubtask(subtaskId: string) {
     if (!selectedTask) return
     const subtask = selectedTask.subtasks.find((item) => item.id === subtaskId)
-    setTasks((current) => current.map((task) => task.id === selectedTask.id
-      ? { ...task, subtasks: task.subtasks.filter((subtask) => subtask.id !== subtaskId) }
-      : task))
-    setToast('Subtask removed')
-    if (subtask) appendSystemLog({ recordId: String(selectedTask.id), module: 'Tasks', action: 'Subtask removed', entity: selectedTask.title, description: `Subtask removed: ${subtask.title}.`, actor: currentUsername, tone: 'warning', status: selectedTask.status })
+    if (!subtask) return
+    try { replaceTask(await removeTaskSubtask(selectedTask.id, subtask.id, subtask.version, selectedTask.version)); setClientError(''); setToast('Subtask removed') }
+    catch (failure) { setClientError(failure instanceof Error ? failure.message : 'The subtask could not be removed.') }
   }
 
   function toggleGroup(status: TaskStatus) {
@@ -566,6 +523,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
+      {clientError ? <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600" role="alert">{clientError}</p> : null}
       <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
         <div>
           <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Task management</p></div>
@@ -657,7 +615,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                         <tr className="group border-b border-slate-100 transition-colors hover:bg-[#fbfcfe] animate-[task-group-row-enter_200ms_cubic-bezier(0.22,1,0.36,1)_both]" key={task.id} style={{ animationDelay: `${Math.min(index, 5) * 28}ms` }}>
                           <td className={`border-l-4 ${group.border} px-4 py-3.5`}>
                             <div className="flex min-w-0 items-start gap-3">
-                              <button className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition ${task.status === 'Completed' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 text-transparent hover:border-brand-blue/40 hover:text-brand-blue/30'}`} type="button" onClick={() => updateTask(task.id, { status: task.status === 'Completed' ? 'To do' : 'Completed' })} aria-label={task.status === 'Completed' ? `Reopen ${task.title}` : `Complete ${task.title}`}><svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                              <button className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition ${task.status === 'Completed' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-200 text-transparent hover:border-brand-blue/40 hover:text-brand-blue/30'}`} type="button" onClick={() => updateTask(task.id, { status: task.status === 'Completed' ? 'In progress' : task.status === 'To do' ? 'In progress' : 'Completed' })} aria-label={task.status === 'Completed' ? `Reopen ${task.title}` : task.status === 'To do' ? `Start ${task.title}` : `Complete ${task.title}`}><svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
                               <div className="min-w-0"><button className={`block max-w-full truncate text-left text-sm font-bold transition hover:text-brand-orange focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue ${task.status === 'Completed' ? 'text-slate-400 line-through' : 'text-brand-blue'}`} type="button" onClick={() => openTaskDetails(task)}>{task.title}</button><p className="mt-1 truncate text-xs leading-5 text-slate-500">{task.description || 'No description'}</p>{task.subtasks.length ? <p className="mt-1 text-[10px] font-bold text-slate-400">{task.subtasks.filter((subtask) => subtask.completed).length}/{task.subtasks.length} subtasks completed</p> : null}</div>
                             </div>
                           </td>

@@ -1,0 +1,18 @@
+namespace AdielSystem.Application.Statements;
+
+public sealed record StatementScheduleRequest(string Label, DateOnly DueDate, decimal Amount, bool? LateChargeEnabled, int? LateChargeGraceDays, string? LateChargeType, decimal? LateChargeValue);
+public sealed record SaveStatementRequest(DateOnly StatementDate, DateOnly CoverageFrom, DateOnly CoverageTo, DateOnly DueDate, Guid ClientId, string? ContactPerson, decimal OpeningBalance, string PaymentArrangement, string PaymentFrequency, bool LateChargeEnabled, int LateChargeGraceDays, string LateChargeType, decimal LateChargeValue, string? Notes, string? Terms, IReadOnlyList<Guid> QuotationIds, IReadOnlyList<StatementScheduleRequest> PaymentSchedule, string? Intent = "draft", long? Version = null);
+public sealed record ChangeStatementStatusRequest(string Status, string? Reason, long Version, bool ArchiveAfterVoiding = false);
+public sealed record ChangeStatementArchiveRequest(long Version);
+public sealed record ApplyLateChargeRequest(long Version);
+public sealed record WaiveLateChargeRequest(string Reason, long Version);
+public sealed record RecordStatementPaymentRequest(DateOnly PaymentDate, decimal Amount, string Method, string? ReferenceNumber, string? Notes, string IdempotencyKey, long Version);
+public sealed record ReverseStatementPaymentRequest(DateOnly ReversalDate, string Reason, long Version);
+public sealed record StatementItemDto(Guid Id, Guid? ItemId, Guid? VariantId, string Photo, string ItemName, string VariantLabel, string ProductCode, string UnitOfMeasure, decimal Quantity, decimal UnitPrice, decimal Amount);
+public sealed record StatementChargeDto(Guid Id, string Label, decimal Amount, int Position);
+public sealed record StatementQuotationDto(Guid Id, Guid? QuotationId, string QuotationNumber, DateOnly QuotationDate, string Subject, string ProjectLocation, decimal SubtotalAmount, bool VatEnabled, decimal VatAmount, decimal TotalAmount, IReadOnlyList<StatementItemDto> Items, IReadOnlyList<StatementChargeDto> Charges);
+public sealed record StatementScheduleDto(Guid Id, int Position, string Label, DateOnly DueDate, decimal Amount, bool? LateChargeEnabled, int? LateChargeGraceDays, string? LateChargeType, decimal? LateChargeValue, long Version);
+public sealed record StatementLateChargeDto(Guid Id, Guid ScheduleId, DateOnly AppliedDate, string Type, decimal RateValue, decimal CalculatedAmount, decimal Amount, string Status, string Reason, string CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, long Version);
+public sealed record StatementPaymentDto(Guid Id, string EntryType, Guid? ReversesPaymentId, DateOnly PaymentDate, decimal Amount, decimal PrincipalAmount, decimal LateChargeAmount, string Method, string ReferenceNumber, string Notes, DateTimeOffset CreatedAt, string CreatedBy);
+public sealed record StatementDto(Guid Id, string SoaNumber, DateOnly StatementDate, DateOnly CoverageFrom, DateOnly CoverageTo, DateOnly DueDate, Guid? ClientId, string ClientName, string ContactPerson, decimal OpeningBalance, decimal TotalCharges, decimal TotalPayments, decimal Balance, string PaymentArrangement, string PaymentFrequency, bool LateChargeEnabled, int LateChargeGraceDays, string LateChargeType, decimal LateChargeValue, string Status, string Notes, string Terms, string? VoidReason, IReadOnlyList<StatementQuotationDto> Quotations, IReadOnlyList<StatementScheduleDto> PaymentSchedule, IReadOnlyList<StatementLateChargeDto> LateCharges, IReadOnlyList<StatementPaymentDto> Payments, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? ArchivedAt, long Version);
+public sealed record StatementPageDto(IReadOnlyList<StatementDto> Items, int Page, int PageSize, long Total);

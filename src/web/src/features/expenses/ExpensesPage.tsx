@@ -10,10 +10,10 @@ import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
 import type { ExpenseOption, ExpenseOptionKind } from './ExpenseSettingsDialog'
-import { appendSystemLog } from '../../services/activityLog'
 import { listBusinessOptions } from '../../services/api/settings'
 import { listQuotations } from '../../services/api/quotations'
-import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
+import { archiveExpense as archiveExpenseRequest, changeExpenseStatus, createExpense, listExpenses, updateExpense, type Expense as ApiExpense, type SaveExpense } from '../../services/api/expenses'
+import { isActiveRecord } from '../../services/recordLifecycle'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 const ExpenseTrendRechart = lazy(() => import('./ExpenseCharts').then((module) => ({ default: module.ExpenseTrendRechart })))
@@ -23,7 +23,7 @@ type DateFilterMode = 'all' | 'month' | 'range'
 type ExpenseStatus = 'Paid' | 'Verifying' | 'To pay' | 'Overdue' | 'Cancelled'
 
 type Expense = {
-  id: number
+  id: string
   date: string
   payee: string
   category: string
@@ -37,6 +37,9 @@ type Expense = {
   quotationId: string
   quotationNumber: string
   projectName: string
+  purchaseOrderId: string
+  version: number
+  archivedAt: string | null
 }
 
 type ApprovedQuotationOption = {
@@ -48,7 +51,7 @@ type ApprovedQuotationOption = {
   status: string
 }
 
-type ExpenseDraft = Omit<Expense, 'id' | 'amount'> & {
+type ExpenseDraft = Omit<Expense, 'id' | 'amount' | 'version' | 'archivedAt'> & {
   amount: string
 }
 
@@ -56,10 +59,8 @@ type ExpensesPageProps = {
   currentUsername: string
 }
 
-const storageKey = 'adiel.expenses'
 const defaultCategoryNames = ['Materials', 'Transportation', 'Office supplies', 'Utilities', 'Meals', 'Equipment', 'Professional fees', 'Other']
 const defaultPaymentMethodNames = ['Cash', 'GCash', 'Bank transfer', 'Credit card', 'Cheque', 'Other']
-const expenseStatuses: ExpenseStatus[] = ['Paid', 'Verifying', 'To pay', 'Overdue', 'Cancelled']
 const expenseStatusOptions = [
   { value: 'Paid' as const, dotClassName: 'bg-emerald-500', toneClassName: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
   { value: 'Verifying' as const, dotClassName: 'bg-amber-500', toneClassName: 'border-amber-100 bg-amber-50 text-amber-700' },
@@ -89,25 +90,11 @@ const emptyDraft: ExpenseDraft = {
   quotationId: '',
   quotationNumber: '',
   projectName: '',
+  purchaseOrderId: '',
 }
 
-function loadExpenses(): Expense[] {
-  try {
-    const stored = window.localStorage.getItem(storageKey)
-    if (!stored) return []
-    const parsed: unknown = JSON.parse(stored)
-    if (!Array.isArray(parsed)) return []
-    return (parsed as Expense[]).map((expense) => ({
-      ...expense,
-      status: expenseStatuses.includes(expense.status) ? expense.status : 'To pay',
-      quotationId: typeof expense.quotationId === 'string' ? expense.quotationId : '',
-      quotationNumber: typeof expense.quotationNumber === 'string' ? expense.quotationNumber : '',
-      projectName: typeof expense.projectName === 'string' ? expense.projectName : '',
-    }))
-  } catch {
-    return []
-  }
-}
+function toExpense(value: ApiExpense): Expense { return { id: value.id, date: value.expenseDate, payee: value.payee, category: value.category, description: value.description, amount: value.amount, paymentMethod: value.paymentMethod, purchaser: value.purchaser, status: value.status, invoiceLink: value.invoiceUrl, notes: value.notes, quotationId: value.quotationId ?? '', quotationNumber: value.quotationNumber, projectName: value.projectName, purchaseOrderId: value.purchaseOrderId ?? '', version: value.version, archivedAt: value.archivedAt } }
+function expenseRequest(value: ExpenseDraft, version?: number): SaveExpense { return { expenseDate: value.date, payee: value.payee, category: value.category, description: value.description, amount: Number(value.amount), paymentMethod: value.paymentMethod, purchaser: value.purchaser, status: value.status, invoiceUrl: value.invoiceLink, notes: value.notes, quotationId: value.quotationId || null, quotationNumber: value.quotationNumber, projectName: value.projectName, purchaseOrderId: value.purchaseOrderId || null, version } }
 
 function formatPeso(amount: number) {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount)
@@ -269,7 +256,7 @@ function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLab
 }
 
 export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
-  const [expenses, setExpenses] = useState<Expense[]>(loadExpenses)
+  const [expenses, setExpenses] = useState<Expense[]>([])
   const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>([])
   const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(defaultCategoryOptions)
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<ExpenseOption[]>(defaultPaymentMethodOptions)
@@ -285,10 +272,10 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const openNewOnLoad = initialQuery.get('new') === '1'
   const linkedPoIdOnLoad = initialQuery.get('poId')
   const [isAddingExpense, setIsAddingExpense] = useState(openNewOnLoad)
-  const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null)
-  const [selectedExpenseId, setSelectedExpenseId] = useState<number | null>(() => linkedPoIdOnLoad ? expenses.find((expense) => expense.notes.includes(`PO ID: ${linkedPoIdOnLoad}`))?.id ?? null : null)
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
+  const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null)
   const [toast, setToast] = useState('')
-  const [pendingVoidExpenseId, setPendingVoidExpenseId] = useState<number | null>(null)
+  const [pendingVoidExpenseId, setPendingVoidExpenseId] = useState<string | null>(null)
   const categories = categoryOptions.filter((option) => option.isActive).map((option) => option.name)
   const paymentMethods = paymentMethodOptions.filter((option) => option.isActive).map((option) => option.name)
   const [draft, setDraft] = useState<ExpenseDraft>(() => ({ ...emptyDraft, category: categories[0] ?? emptyDraft.category, paymentMethod: paymentMethods[0] ?? emptyDraft.paymentMethod, purchaser: currentUsername }))
@@ -308,13 +295,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     })),
   ], [approvedQuotations])
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(expenses))
-    } catch {
-      // Expense tracking remains usable when browser storage is unavailable.
-    }
-  }, [expenses])
+  useEffect(() => { void listExpenses({ pageSize: 100 }).then((result) => setExpenses(result.items.map(toExpense))).catch(() => undefined) }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -347,7 +328,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           || (dateFilterMode === 'range' && (!fromDate || expense.date >= fromDate) && (!toDate || expense.date <= toDate))
         return matchesSearch && matchesCategory && matchesDate
       })
-      .sort((left, right) => right.date.localeCompare(left.date) || right.id - left.id)
+      .sort((left, right) => right.date.localeCompare(left.date) || right.id.localeCompare(left.id))
   }, [categoryFilter, dateFilterMode, expenses, fromDate, searchQuery, selectedMonth, toDate])
 
   const expenseSortOptions = [
@@ -441,6 +422,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       quotationId: expense.quotationId,
       quotationNumber: expense.quotationNumber,
       projectName: expense.projectName,
+      purchaseOrderId: expense.purchaseOrderId,
     })
     setIsAddingExpense(true)
   }
@@ -459,39 +441,29 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     setCategoryFilter('All')
   }
 
-  function updateExpenseStatus(id: number, status: ExpenseStatus) {
+  function updateExpenseStatus(id: string, status: ExpenseStatus) {
     const expense = expenses.find((item) => item.id === id)
     if (status === 'Cancelled' && expense?.status !== 'Cancelled') {
       setPendingVoidExpenseId(id)
       return
     }
-    setExpenses((current) => current.map((expense) => expense.id === id ? { ...expense, status } : expense))
-    setToast('Expense status updated')
-    if (expense) appendSystemLog({ recordId: String(id), module: 'Expenses', action: 'Status changed', entity: expense.payee, description: `Expense status changed from ${expense.status} to ${status}.`, actor: currentUsername, tone: status === 'Paid' ? 'success' : status === 'Overdue' ? 'warning' : 'info', amount: expense.amount, status })
+    if (!expense) return
+    void changeExpenseStatus(id, { status, version: expense.version }).then((saved) => { setExpenses((current) => current.map((entry) => entry.id === id ? toExpense(saved) : entry)); setToast('Expense status updated') }).catch(() => setToast('Expense status could not be updated'))
   }
 
-  function confirmVoidExpense(reason: string, archiveAfterVoiding: boolean) {
+  async function confirmVoidExpense(reason: string, archiveAfterVoiding: boolean) {
     const expense = expenses.find((entry) => entry.id === pendingVoidExpenseId)
     if (!expense) return
-    setExpenses((current) => current.map((entry) => entry.id === expense.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Cancelled' as const }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Cancelled' as const }, currentUsername, reason)) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ recordId: String(expense.id), module: 'Expenses', action: 'Voided', entity: expense.payee, description: `Expense voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, tone: 'danger', amount: expense.amount, status: 'Cancelled' })
-    setPendingVoidExpenseId(null)
-    setToast(archiveAfterVoiding ? 'Expense voided and archived' : 'Expense voided')
+    try { const saved = await changeExpenseStatus(expense.id, { status: 'Cancelled', reason, version: expense.version, archiveAfterVoiding }); setExpenses((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== expense.id) : current.map((entry) => entry.id === expense.id ? toExpense(saved) : entry)); setPendingVoidExpenseId(null); setToast(archiveAfterVoiding ? 'Expense voided and archived' : 'Expense voided') } catch { setToast('Expense could not be voided') }
   }
 
-  function archiveExpense(id: number) {
+  async function archiveExpense(id: string) {
     const expense = expenses.find((entry) => entry.id === id)
     if (!expense) return
-    setExpenses((current) => current.map((entry) => entry.id === id ? withArchived(entry, currentUsername) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ recordId: String(expense.id), module: 'Expenses', action: 'Archived', entity: expense.payee, description: 'Expense was archived with project and purchase-order links retained.', actor: currentUsername, tone: 'info', amount: expense.amount, status: expense.status })
-    closeExpenseDialog()
-    setSelectedExpenseId(null)
-    setToast('Expense archived')
+    try { await archiveExpenseRequest(id, expense.version); setExpenses((current) => current.filter((entry) => entry.id !== id)); closeExpenseDialog(); setSelectedExpenseId(null); setToast('Expense archived') } catch { setToast('Expense could not be archived') }
   }
 
-  function saveExpense(event: FormEvent<HTMLFormElement>) {
+  async function saveExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const amount = Number(draft.amount)
     if (!draft.date || !draft.payee.trim() || !draft.description.trim() || !draft.purchaser.trim() || !Number.isFinite(amount) || amount <= 0) return
@@ -503,7 +475,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       payee: draft.payee.trim(),
       category: draft.category,
       description: draft.description.trim(),
-      amount,
+      amount: String(amount),
       paymentMethod: draft.paymentMethod,
       purchaser: draft.purchaser.trim(),
       status: draft.status,
@@ -512,14 +484,10 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
       quotationId: linkedQuotation?.id ?? '',
       quotationNumber: linkedQuotation?.quotationNumber ?? '',
       projectName: linkedQuotation ? (linkedQuotation.subject || linkedQuotation.clientName) : '',
+      purchaseOrderId: '',
     }
-    const expenseId = editingExpenseId ?? Date.now()
-    setExpenses((current) => editingExpenseId === null
-      ? [{ id: expenseId, ...values }, ...current]
-      : current.map((expense) => expense.id === editingExpenseId ? { id: expense.id, ...values } : expense))
-    closeExpenseDialog()
-    setToast(wasEditing ? 'Expense updated successfully' : 'Expense added successfully')
-    appendSystemLog({ recordId: String(expenseId), module: 'Expenses', action: wasEditing ? 'Updated' : 'Created', entity: values.payee, description: wasEditing ? `Expense record updated: ${values.description}.` : values.description, actor: currentUsername, tone: values.status === 'Overdue' ? 'warning' : 'success', amount: values.amount, status: values.status })
+    const existing = editingExpenseId ? expenses.find((entry) => entry.id === editingExpenseId) : undefined
+    try { const saved = existing ? await updateExpense(existing.id, expenseRequest(values, existing.version)) : await createExpense(expenseRequest(values)); const apiExpense = toExpense(saved); setExpenses((current) => existing ? current.map((entry) => entry.id === existing.id ? apiExpense : entry) : [apiExpense, ...current]); closeExpenseDialog(); setToast(wasEditing ? 'Expense updated successfully' : 'Expense added successfully') } catch { setToast('Expense could not be saved') }
   }
 
   const summaryCards = [

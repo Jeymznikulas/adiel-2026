@@ -1,0 +1,11 @@
+namespace AdielSystem.Application.PurchaseOrders;
+
+public sealed record SavePurchaseOrderLineRequest(Guid? ItemId, Guid? VariantId, string? Photo, string ItemName, string? VariantLabel, string? ProductCode, string UnitOfMeasure, decimal Quantity, decimal UnitCost);
+public sealed record SavePurchaseOrderChargeRequest(string Label, decimal Amount);
+public sealed record SavePurchaseOrderRequest(DateOnly OrderDate, Guid? ClientId, string ClientName, Guid? SupplierId, string SupplierName, string? ContactPerson, string? Subject, Guid? QuotationId, string? PaymentMethod, string? PaymentTerm, string? DeliveryLocation, string? DeliveryMode, string? Notes, string? Terms, bool VatEnabled, IReadOnlyList<SavePurchaseOrderLineRequest> Lines, IReadOnlyList<SavePurchaseOrderChargeRequest> Charges, string? Intent = "draft", long? Version = null);
+public sealed record ChangePurchaseOrderStatusRequest(string? DocumentStatus, string? DeliveryStatus, string? PaymentStatus, string? Reason, long Version, bool ArchiveAfterVoiding = false);
+public sealed record ChangePurchaseOrderArchiveRequest(long Version);
+public sealed record PurchaseOrderLineDto(Guid Id, Guid? ItemId, Guid? VariantId, string Photo, string ItemName, string VariantLabel, string ProductCode, string UnitOfMeasure, decimal Quantity, decimal UnitCost, decimal LineAmount);
+public sealed record PurchaseOrderChargeDto(Guid Id, string Label, decimal Amount, int Position);
+public sealed record PurchaseOrderDto(Guid Id, string PoNumber, DateOnly OrderDate, Guid? ClientId, string ClientName, Guid? SupplierId, string SupplierName, string ContactPerson, string Subject, Guid? QuotationId, string QuotationNumber, string PaymentMethod, string PaymentTerm, string DeliveryLocation, string DeliveryMode, string Notes, string Terms, decimal SubtotalAmount, bool VatEnabled, decimal VatRate, decimal VatAmount, decimal TotalAmount, string Status, string DocumentStatus, string DeliveryStatus, string PaymentStatus, string? VoidReason, IReadOnlyList<PurchaseOrderLineDto> Lines, IReadOnlyList<PurchaseOrderChargeDto> Charges, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? ArchivedAt, long Version);
+public sealed record PurchaseOrderPageDto(IReadOnlyList<PurchaseOrderDto> Items, int Page, int PageSize, long Total);

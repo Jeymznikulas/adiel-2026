@@ -9,6 +9,18 @@ using AdielSystem.Application.Items;
 using AdielSystem.Infrastructure.Items;
 using AdielSystem.Application.Quotations;
 using AdielSystem.Infrastructure.Quotations;
+using AdielSystem.Application.PurchaseOrders;
+using AdielSystem.Infrastructure.PurchaseOrders;
+using AdielSystem.Application.Expenses;
+using AdielSystem.Infrastructure.Expenses;
+using AdielSystem.Application.Statements;
+using AdielSystem.Infrastructure.Statements;
+using AdielSystem.Application.Tasks;
+using AdielSystem.Infrastructure.Tasks;
+using AdielSystem.Application.Insights;
+using AdielSystem.Infrastructure.Insights;
+using AdielSystem.Application.Storage;
+using AdielSystem.Infrastructure.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -26,6 +38,7 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(SupabaseOptions.SectionName))
             .Validate(options => options.Url.IsAbsoluteUri, "Supabase:Url must be an absolute URL.")
             .ValidateOnStart();
+        services.AddOptions<SupabaseStorageOptions>().Bind(configuration.GetSection(SupabaseStorageOptions.SectionName));
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
@@ -36,6 +49,17 @@ public static class DependencyInjection
         services.AddScoped<ISupplierRepository, SupplierRepository>();
         services.AddScoped<IItemRepository, ItemRepository>();
         services.AddScoped<IQuotationRepository, QuotationRepository>();
+        services.AddScoped<IPurchaseOrderRepository, PurchaseOrderRepository>();
+        services.AddScoped<IExpenseRepository, ExpenseRepository>();
+        services.AddScoped<IStatementRepository, StatementRepository>();
+        services.AddScoped<ITaskRepository, TaskRepository>();
+        services.AddScoped<IInsightsRepository, InsightsRepository>();
+        services.AddScoped<IImageReferenceRepository, ImageReferenceRepository>();
+        services.AddHttpClient<IBusinessImageStorage, SupabaseBusinessImageStorage>();
+        services.AddSingleton<ImageCleanupQueue>();
+        services.AddSingleton<IImageCleanupQueue>(provider => provider.GetRequiredService<ImageCleanupQueue>());
+        services.AddHostedService(provider => provider.GetRequiredService<ImageCleanupQueue>());
+        services.AddHostedService<StorageBucketInitializer>();
         services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
         return services;

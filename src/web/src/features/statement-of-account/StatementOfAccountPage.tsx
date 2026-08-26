@@ -10,18 +10,17 @@ import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
-import { appendSystemLog } from '../../services/activityLog'
 import { listClients as fetchClients } from '../../services/api/clients'
 import { listQuotations } from '../../services/api/quotations'
-import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
+import { applyStatementLateCharge, archiveStatement as archiveStatementRequest, changeStatementStatus, createStatement, listStatements, recordStatementPayment, updateStatement, waiveStatementLateCharge, type SaveStatement, type Statement as ApiStatement } from '../../services/api/statements'
+import { isActiveRecord } from '../../services/recordLifecycle'
 import { PurchaseOrderClientPickerDialog } from '../purchase-orders/PurchaseOrderClientPickerDialog'
-import { loadDocumentDefaults, loadLateChargePolicy, nextDocumentNumber } from '../settings/settingsStorage'
-import { effectiveStatementStatus, lateChargeProgress, normalizeLateChargePolicy, paymentAllocation, principalPayments, scheduleLateChargePolicy, statementFinancials, statementScheduleProgress, suggestedLateCharge } from './latePayment'
+import { loadDocumentDefaults, loadLateChargePolicy } from '../settings/settingsStorage'
+import { effectiveStatementStatus, scheduleLateChargePolicy, statementScheduleProgress, suggestedLateCharge } from './latePayment'
 import { PaymentArrangementDialog, type PaymentArrangementValues } from './PaymentArrangementDialog'
 import { PaymentScheduleOverview } from './PaymentScheduleOverview'
-import { getNextScheduleEntry } from './statementPaymentSchedule'
 import { StatementOfAccountProfile } from './StatementOfAccountProfile'
-import type { LateChargeType, PaymentArrangement, PaymentFrequency, PaymentScheduleEntry, StatementLateCharge, StatementOfAccount, StatementPayment, StatementQuotation, StatementStatus } from './statementOfAccountTypes'
+import type { LateChargeType, PaymentArrangement, PaymentFrequency, PaymentScheduleEntry, StatementOfAccount, StatementStatus } from './statementOfAccountTypes'
 
 type Client = {
   id: string
@@ -100,10 +99,7 @@ type LateChargeDraft = {
 
 type StatementOfAccountPageProps = { currentUsername: string }
 
-const statementStorageKey = 'adiel.statements-of-account'
 const statuses: StatementStatus[] = ['Draft', 'Issued', 'Partially Settled', 'Settled', 'Overdue', 'Cancelled']
-const paymentArrangements: PaymentArrangement[] = ['Full payment', 'Installment', 'Custom schedule']
-const paymentFrequencies: PaymentFrequency[] = ['Weekly', 'Every 2 weeks', 'Monthly', 'Quarterly', 'Custom']
 const statusOptions = statuses.map((value) => ({ value }))
 const filterOptions = [{ value: 'All statuses' }, ...statusOptions]
 const paymentMethodOptions = ['Bank transfer', 'Cash', 'Check', 'GCash', 'Other'].map((value) => ({ value }))
@@ -136,65 +132,24 @@ function loadClients(): Client[] {
   return []
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
-export function loadStatements(): StatementOfAccount[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(statementStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const saved = value as Partial<StatementOfAccount>
-      if (typeof saved.id !== 'string' || typeof saved.soaNumber !== 'string') return []
-      const quotations = Array.isArray(saved.quotations) ? saved.quotations : []
-      const payments = Array.isArray(saved.payments) ? saved.payments.map((payment) => {
-        const amount = Number(payment.amount) || 0
-        return { ...payment, amount, principalAmount: typeof payment.principalAmount === 'number' ? payment.principalAmount : amount, lateChargeAmount: typeof payment.lateChargeAmount === 'number' ? payment.lateChargeAmount : 0 }
-      }) : []
-      const totalCharges = quotations.reduce((total, quotation) => total + (Number(quotation.totalAmount) || 0), 0)
-      const totalPayments = payments.reduce((total, payment) => total + payment.amount, 0)
-      const totalPrincipalPayments = payments.reduce((total, payment) => total + payment.principalAmount, 0)
-      const openingBalance = Number(saved.openingBalance) || 0
-      const accountTotal = openingBalance + totalCharges
-      const paymentArrangement = paymentArrangements.includes(saved.paymentArrangement as PaymentArrangement) ? saved.paymentArrangement as PaymentArrangement : 'Full payment'
-      const paymentFrequency = paymentFrequencies.includes(saved.paymentFrequency as PaymentFrequency) ? saved.paymentFrequency as PaymentFrequency : 'Custom'
-      const savedSchedule = Array.isArray(saved.paymentSchedule) ? saved.paymentSchedule.filter((entry): entry is PaymentScheduleEntry => typeof entry?.id === 'string' && typeof entry.label === 'string' && typeof entry.dueDate === 'string' && typeof entry.amount === 'number' && entry.amount > 0) : []
-      const paymentSchedule = savedSchedule.length ? savedSchedule : [{ id: `legacy-${saved.id}`, label: 'Full payment', dueDate: saved.dueDate ?? saved.statementDate ?? '', amount: accountTotal }]
-      const nextScheduledPayment = getNextScheduleEntry(paymentSchedule, totalPrincipalPayments)
-      const lateChargePolicy = normalizeLateChargePolicy(saved.lateChargePolicy)
-      const lateCharges = Array.isArray(saved.lateCharges) ? saved.lateCharges.filter((charge): charge is StatementLateCharge => typeof charge?.id === 'string' && typeof charge.scheduleEntryId === 'string' && typeof charge.amount === 'number').map((charge) => ({ ...charge, status: charge.status === 'Waived' ? 'Waived' as const : 'Applied' as const, type: charge.type === 'Fixed amount' ? 'Fixed amount' as const : 'Percentage' as const, rateValue: Number(charge.rateValue) || 0, calculatedAmount: Number(charge.calculatedAmount) || 0, reason: charge.reason ?? '', createdBy: charge.createdBy ?? '', appliedDate: charge.appliedDate ?? saved.statementDate ?? '', createdAt: charge.createdAt ?? new Date().toISOString(), updatedAt: charge.updatedAt ?? new Date().toISOString() })) : []
-      const activeChargeTotal = lateCharges.filter((charge) => charge.status === 'Applied').reduce((total, charge) => total + charge.amount, 0)
-      const lateChargePaid = payments.reduce((total, payment) => total + payment.lateChargeAmount, 0)
-      return [{
-        id: saved.id,
-        soaNumber: saved.soaNumber,
-        statementDate: saved.statementDate ?? new Date().toISOString().slice(0, 10),
-        coverageFrom: saved.coverageFrom ?? saved.statementDate ?? '',
-        coverageTo: saved.coverageTo ?? saved.statementDate ?? '',
-        dueDate: nextScheduledPayment?.dueDate ?? saved.dueDate ?? saved.statementDate ?? '',
-        clientId: saved.clientId ?? '',
-        clientName: saved.clientName ?? '',
-        contactPerson: saved.contactPerson ?? '',
-        quotations,
-        openingBalance,
-        totalCharges,
-        payments,
-        totalPayments,
-        balance: Math.max(0, openingBalance + totalCharges - totalPrincipalPayments) + Math.max(0, activeChargeTotal - lateChargePaid),
-        paymentArrangement,
-        paymentFrequency,
-        paymentSchedule,
-        lateChargePolicy,
-        lateCharges,
-        status: statuses.includes(saved.status as StatementStatus) ? saved.status as StatementStatus : 'Draft',
-        notes: saved.notes ?? '',
-        terms: typeof saved.terms === 'string' ? saved.terms : loadDocumentDefaults().statementPaymentInstructions,
-        createdAt: saved.createdAt ?? new Date().toISOString(),
-        updatedAt: saved.updatedAt ?? new Date().toISOString(),
-      }]
-    })
-  } catch {
-    return []
+// Phase 10 will replace the Collections consumer with its own API query.
+export function loadStatements(): StatementOfAccount[] { return [] }
+
+export function toStatement(value: ApiStatement): StatementOfAccount {
+  return {
+    id: value.id, soaNumber: value.soaNumber, statementDate: value.statementDate, coverageFrom: value.coverageFrom, coverageTo: value.coverageTo, dueDate: value.dueDate,
+    clientId: value.clientId ?? '', clientName: value.clientName, contactPerson: value.contactPerson, openingBalance: value.openingBalance, totalCharges: value.totalCharges,
+    payments: value.payments.map((payment) => ({ id: payment.id, date: payment.paymentDate, amount: payment.entryType === 'Reversal' ? -payment.amount : payment.amount, method: payment.method, referenceNumber: payment.referenceNumber, notes: payment.notes, principalAmount: payment.entryType === 'Reversal' ? -payment.principalAmount : payment.principalAmount, lateChargeAmount: payment.entryType === 'Reversal' ? -payment.lateChargeAmount : payment.lateChargeAmount, createdAt: payment.createdAt })), totalPayments: value.totalPayments, balance: value.balance, paymentArrangement: value.paymentArrangement, paymentFrequency: value.paymentFrequency,
+    paymentSchedule: value.paymentSchedule.map((entry) => ({ id: entry.id, label: entry.label, dueDate: entry.dueDate, amount: entry.amount, lateChargePolicy: entry.lateChargeEnabled === null ? undefined : { enabled: entry.lateChargeEnabled, graceDays: entry.lateChargeGraceDays ?? value.lateChargeGraceDays, type: entry.lateChargeType ?? value.lateChargeType, value: entry.lateChargeValue ?? value.lateChargeValue } })),
+    lateChargePolicy: { enabled: value.lateChargeEnabled, graceDays: value.lateChargeGraceDays, type: value.lateChargeType, value: value.lateChargeValue },
+    lateCharges: value.lateCharges.map((charge) => ({ id: charge.id, scheduleEntryId: charge.scheduleId, appliedDate: charge.appliedDate, type: charge.type, rateValue: charge.rateValue, calculatedAmount: charge.calculatedAmount, amount: charge.amount, status: charge.status, reason: charge.reason, createdBy: charge.createdBy, createdAt: charge.createdAt, updatedAt: charge.updatedAt })),
+    quotations: value.quotations.map((quotation) => ({ id: quotation.quotationId ?? quotation.id, quotationNumber: quotation.quotationNumber, dateCreated: quotation.quotationDate, subject: quotation.subject, projectLocation: quotation.projectLocation, subtotalAmount: quotation.subtotalAmount, vatEnabled: quotation.vatEnabled, vatAmount: quotation.vatAmount, otherCharges: quotation.charges.map((charge) => ({ id: charge.id, label: charge.label, amount: charge.amount })), totalAmount: quotation.totalAmount, items: quotation.items.map((item) => ({ id: item.id, quotationId: quotation.quotationId ?? quotation.id, quotationNumber: quotation.quotationNumber, itemId: item.itemId ?? '', variantId: item.variantId ?? '', photo: item.photo, itemName: item.itemName, variantLabel: item.variantLabel, productCode: item.productCode, unitOfMeasure: item.unitOfMeasure, quantity: item.quantity, unitPrice: item.unitPrice, amount: item.amount })) })),
+    status: value.status, notes: value.notes, terms: value.terms, createdAt: value.createdAt, updatedAt: value.updatedAt, archivedAt: value.archivedAt, voidReason: value.voidReason, version: value.version,
   }
+}
+
+function statementRequest(draft: StatementDraft, arrangement: PaymentArrangementValues, intent: SaveStatement['intent'], version?: number): SaveStatement {
+  return { statementDate: draft.statementDate, coverageFrom: draft.coverageFrom, coverageTo: draft.coverageTo, dueDate: draft.dueDate, clientId: draft.clientId, contactPerson: draft.contactPerson.trim(), openingBalance: Number(draft.openingBalance), paymentArrangement: arrangement.paymentArrangement, paymentFrequency: arrangement.paymentFrequency, lateChargeEnabled: arrangement.lateChargePolicy.enabled, lateChargeGraceDays: arrangement.lateChargePolicy.graceDays, lateChargeType: arrangement.lateChargePolicy.type, lateChargeValue: arrangement.lateChargePolicy.value, notes: draft.notes.trim(), terms: draft.terms.trim(), quotationIds: draft.quotationIds, paymentSchedule: arrangement.paymentSchedule.map((entry) => ({ label: entry.label, dueDate: entry.dueDate, amount: entry.amount, lateChargeEnabled: entry.lateChargePolicy?.enabled ?? null, lateChargeGraceDays: entry.lateChargePolicy?.graceDays ?? null, lateChargeType: entry.lateChargePolicy?.type ?? null, lateChargeValue: entry.lateChargePolicy?.value ?? null })), intent, version }
 }
 
 function effectiveStatus(statement: StatementOfAccount): StatementStatus {
@@ -213,8 +168,8 @@ function statementDraftFrom(statement: StatementOfAccount): StatementDraft {
   return { soaNumber: statement.soaNumber, statementDate: statement.statementDate, coverageFrom: statement.coverageFrom, coverageTo: statement.coverageTo, dueDate: statement.dueDate, clientId: statement.clientId, contactPerson: statement.contactPerson, quotationIds: statement.quotations.map((quotation) => quotation.id), openingBalance: String(statement.openingBalance), paymentArrangement: statement.paymentArrangement, paymentFrequency: statement.paymentFrequency, paymentSchedule: statement.paymentSchedule, status: statement.status, notes: statement.notes, terms: statement.terms }
 }
 
-export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPageProps) {
-  const [statements, setStatements] = useState<StatementOfAccount[]>(loadStatements)
+export function StatementOfAccountPage({ currentUsername: _currentUsername }: StatementOfAccountPageProps) {
+  const [statements, setStatements] = useState<StatementOfAccount[]>([])
   const [clients, setClients] = useState<Client[]>(loadClients)
   const [quotations, setQuotations] = useState<SourceQuotation[]>([])
   const initialQuery = new URLSearchParams(window.location.search)
@@ -262,15 +217,12 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
   const [isPaymentArrangementOpen, setIsPaymentArrangementOpen] = useState(false)
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
   const statementSubmitIntent = useRef<'draft' | 'issue' | 'preserve'>('draft')
+  const paymentIdempotencyKey = useRef<string | null>(null)
 
-  function makeNumber(date: string) {
-    return nextDocumentNumber('statementOfAccount', statements.map((statement) => statement.soaNumber), date)
-  }
-
-  function emptyDraft(statementList = statements, clientList = clients): StatementDraft {
+  function emptyDraft(_statementList = statements, clientList = clients): StatementDraft {
     const today = new Date().toISOString().slice(0, 10)
     const firstClient = clientList.find((client) => client.status === 'Active')
-    return { soaNumber: nextDocumentNumber('statementOfAccount', statementList.map((statement) => statement.soaNumber), today), statementDate: today, coverageFrom: today, coverageTo: today, dueDate: datePlusDays(today, 30), clientId: firstClient?.id ?? '', contactPerson: firstClient?.contactPerson ?? '', quotationIds: [], openingBalance: '0', paymentArrangement: 'Full payment', paymentFrequency: 'Custom', paymentSchedule: [], status: 'Draft', notes: '', terms: '' }
+    return { soaNumber: 'Reserved on save', statementDate: today, coverageFrom: today, coverageTo: today, dueDate: datePlusDays(today, 30), clientId: firstClient?.id ?? '', contactPerson: firstClient?.contactPerson ?? '', quotationIds: [], openingBalance: '0', paymentArrangement: 'Full payment', paymentFrequency: 'Custom', paymentSchedule: [], status: 'Draft', notes: '', terms: '' }
   }
 
   function emptyPayment(): PaymentDraft {
@@ -287,6 +239,7 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
 
   useEffect(() => {
     function refreshData() {
+      void listStatements({ pageSize: 100 }).then((result) => setStatements(result.items.map(toStatement))).catch(() => setStorageError('Statements could not be loaded from the API.'))
       void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
       void listQuotations({ pageSize: 100 }).then((result) => setQuotations(result.items.map((quotation) => ({ id: quotation.id, dateCreated: quotation.quotationDate, quotationNumber: quotation.quotationNumber, clientId: quotation.clientId ?? '', clientName: quotation.clientName, contactPerson: quotation.contactPerson, subject: quotation.subject, projectLocation: quotation.projectLocation, items: quotation.lines.map((line) => ({ id: line.id, itemId: line.itemId ?? '', variantId: line.variantId ?? '', photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: line.quantity, unitPrice: line.unitPrice })), subtotalAmount: quotation.subtotalAmount, vatEnabled: quotation.vatEnabled, vatAmount: quotation.vatAmount, otherCharges: quotation.charges.map((charge) => ({ id: charge.id, label: charge.label, amount: charge.amount })), totalAmount: quotation.totalAmount, status: quotation.status })))).catch(() => setStorageError('Quotations could not be loaded from the API.'))
     }
@@ -305,14 +258,11 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
   }, [])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(statementStorageKey, JSON.stringify(statements))
-      window.dispatchEvent(new Event('adiel:statements-changed'))
-      setStorageError('')
-    } catch {
-      setStorageError('Statements could not be saved in this browser. Free some storage and try again.')
-    }
-  }, [statements])
+    if (!editStatementIdOnLoad || editingId) return
+    const statement = statements.find((entry) => entry.id === decodeURIComponent(editStatementIdOnLoad))
+    if (!statement) return
+    setEditingId(statement.id); setDraft(statementDraftFrom(statement)); setIsFormOpen(true)
+  }, [editStatementIdOnLoad, editingId, statements])
 
   useEffect(() => {
     if (!toast) return
@@ -411,22 +361,6 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     setDraft((current) => ({ ...current, quotationIds: current.quotationIds.includes(quotationId) ? current.quotationIds.filter((id) => id !== quotationId) : [...current.quotationIds, quotationId] }))
   }
 
-  function snapshotQuotation(quotation: SourceQuotation): StatementQuotation {
-    return {
-      id: quotation.id,
-      quotationNumber: quotation.quotationNumber,
-      dateCreated: quotation.dateCreated,
-      subject: quotation.subject,
-      projectLocation: quotation.projectLocation,
-      subtotalAmount: quotation.subtotalAmount,
-      vatEnabled: quotation.vatEnabled,
-      vatAmount: quotation.vatAmount,
-      otherCharges: quotation.otherCharges.map((charge) => ({ ...charge })),
-      totalAmount: quotation.totalAmount,
-      items: quotation.items.map((line) => ({ id: crypto.randomUUID(), quotationId: quotation.id, quotationNumber: quotation.quotationNumber, itemId: line.itemId, variantId: line.variantId, photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: line.quantity, unitPrice: line.unitPrice, amount: line.quantity * line.unitPrice })),
-    }
-  }
-
   function saveStatement(event: FormEvent) {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter
@@ -446,7 +380,7 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     setIsPaymentArrangementOpen(true)
   }
 
-  function confirmPaymentArrangement(arrangementValues: PaymentArrangementValues) {
+  async function confirmPaymentArrangement(arrangementValues: PaymentArrangementValues) {
     const client = clients.find((entry) => entry.id === draft.clientId)
     if (!client) return
     const sourceQuotations = quotations.filter((quotation) => draft.quotationIds.includes(quotation.id) && quotation.status === 'Approved' && quotation.clientId === client.id)
@@ -455,92 +389,54 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
       setFormError('One or more quotations are no longer available. Refresh your selection and try again.')
       return
     }
-    const now = new Date().toISOString()
-    const quotationSnapshots = sourceQuotations.map(snapshotQuotation)
-    const payments = editingStatement?.payments ?? []
-    const lateCharges = editingStatement?.lateCharges ?? []
-    const lateChargePolicy = arrangementValues.lateChargePolicy
-    const openingBalance = Number(draft.openingBalance) || 0
-    const totalCharges = quotationSnapshots.reduce((total, quotation) => total + quotation.totalAmount, 0)
-    const totalPayments = payments.reduce((total, payment) => total + payment.amount, 0)
-    const totalPrincipalPayments = payments.reduce((total, payment) => total + payment.principalAmount, 0)
-    const totalLateChargePayments = payments.reduce((total, payment) => total + payment.lateChargeAmount, 0)
-    const activeLateCharges = lateCharges.filter((charge) => charge.status === 'Applied').reduce((total, charge) => total + charge.amount, 0)
-    const balance = Math.max(0, openingBalance + totalCharges - totalPrincipalPayments) + Math.max(0, activeLateCharges - totalLateChargePayments)
-    let status: StatementStatus = statementSubmitIntent.current === 'issue' ? 'Issued' : statementSubmitIntent.current === 'draft' ? 'Draft' : draft.status
-    if (status !== 'Cancelled' && status !== 'Draft' && totalPayments > 0) status = balance <= 0 ? 'Settled' : 'Partially Settled'
-    const nextPayment = getNextScheduleEntry(arrangementValues.paymentSchedule, totalPrincipalPayments)
-    const statementValues: StatementOfAccount = { id: editingStatement?.id ?? crypto.randomUUID(), soaNumber: editingStatement?.soaNumber ?? makeNumber(draft.statementDate), statementDate: draft.statementDate, coverageFrom: draft.coverageFrom, coverageTo: draft.coverageTo, dueDate: nextPayment?.dueDate ?? arrangementValues.paymentSchedule.at(-1)?.dueDate ?? draft.dueDate, clientId: client.id, clientName: client.name, contactPerson: draft.contactPerson.trim() || client.contactPerson, quotations: quotationSnapshots, openingBalance, totalCharges, payments, totalPayments, balance, paymentArrangement: arrangementValues.paymentArrangement, paymentFrequency: arrangementValues.paymentFrequency, paymentSchedule: arrangementValues.paymentSchedule, lateChargePolicy, lateCharges, status, notes: draft.notes.trim(), terms: draft.terms.trim(), createdAt: editingStatement?.createdAt ?? now, updatedAt: now }
-    setStatements((current) => editingStatement ? current.map((statement) => statement.id === editingStatement.id ? statementValues : statement) : [statementValues, ...current])
-    appendSystemLog({ module: 'Statements of Account', action: editingStatement ? 'Updated' : 'Created', recordId: statementValues.id, entity: statementValues.soaNumber, description: `${editingStatement ? 'Updated' : 'Created'} for ${statementValues.clientName} with a ${statementValues.paymentArrangement.toLowerCase()} arrangement.`, actor: currentUsername, amount: statementValues.balance, status: statementValues.status, tone: editingStatement ? 'info' : 'success' })
-    setDraft((current) => ({ ...current, ...arrangementValues, dueDate: statementValues.dueDate }))
-    setIsPaymentArrangementOpen(false)
-    closeStatementFormPage()
-    setEditingId(null)
-    setToast(statementSubmitIntent.current === 'issue' ? 'Statement reviewed and issued.' : editingStatement ? 'Statement and payment arrangement updated.' : 'Statement saved as draft with its payment arrangement.')
-    if (profileStatement) navigate(`/statement-of-account/${statementValues.id}`)
+    try {
+      const intent = statementSubmitIntent.current
+      const saved = editingStatement ? await updateStatement(editingStatement.id, statementRequest(draft, arrangementValues, intent, editingStatement.version)) : await createStatement(statementRequest(draft, arrangementValues, intent))
+      const statement = toStatement(saved)
+      setStatements((current) => editingStatement ? current.map((entry) => entry.id === editingStatement.id ? statement : entry) : [statement, ...current])
+      setDraft((current) => ({ ...current, ...arrangementValues, dueDate: statement.dueDate }))
+      setIsPaymentArrangementOpen(false); closeStatementFormPage(); setEditingId(null)
+      setToast(intent === 'issue' ? 'Statement reviewed and issued.' : editingStatement ? 'Statement and payment arrangement updated.' : 'Statement saved as draft with its payment arrangement.')
+      if (profileStatement) navigate(`/statement-of-account/${statement.id}`)
+    } catch (failure) { setIsPaymentArrangementOpen(false); setFormError(failure instanceof Error ? failure.message : 'Statement could not be saved.') }
   }
 
-  function updateStatementStatus(statement: StatementOfAccount, status: StatementStatus) {
+  async function updateStatementStatus(statement: StatementOfAccount, status: StatementStatus) {
     if (status === 'Cancelled' && statement.status !== 'Cancelled') {
       setPendingVoidStatementId(statement.id)
       return
     }
-    const previousStatus = statement.status
-    setStatements((current) => current.map((entry) => entry.id === statement.id ? { ...entry, status, updatedAt: new Date().toISOString() } : entry))
-    appendSystemLog({ module: 'Statements of Account', action: 'Status changed', recordId: statement.id, entity: statement.soaNumber, description: `Status changed from ${previousStatus} to ${status}.`, actor: currentUsername, amount: statement.balance, status, tone: status === 'Settled' ? 'success' : status === 'Overdue' ? 'warning' : 'info' })
-    setToast(`Statement marked ${status.toLowerCase()}.`)
+    try { const saved = await changeStatementStatus(statement.id, { status, version: statement.version }); setStatements((current) => current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setToast(`Statement marked ${status.toLowerCase()}.`) }
+    catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement status could not be changed.') }
   }
 
   function openPayment(statement: StatementOfAccount) {
-    setPaymentStatementId(statement.id)
-    const financials = statementFinancials(statement)
-    const nextPayment = getNextScheduleEntry(statement.paymentSchedule, principalPayments(statement))
-    const suggestedAmount = Math.min(financials.totalBalance, financials.chargeBalance + (nextPayment?.balance ?? 0))
-    setPaymentDraft({ ...emptyPayment(), amount: suggestedAmount > 0 ? String(suggestedAmount) : '' })
     setPaymentError('')
+    setPaymentDraft(emptyPayment())
+    paymentIdempotencyKey.current = crypto.randomUUID()
+    setPaymentStatementId(statement.id)
   }
 
-  function recordPayment(event: FormEvent) {
+  async function recordPayment(event: FormEvent) {
     event.preventDefault()
     const statement = statements.find((entry) => entry.id === paymentStatementId)
-    const amount = Number(paymentDraft.amount)
-    const financials = statement ? statementFinancials(statement) : null
-    if (!statement || !financials || !paymentDraft.date || amount <= 0 || amount > financials.totalBalance) {
-      setPaymentError(`Enter a payment between ${formatPeso(0.01)} and ${formatPeso(financials?.totalBalance ?? 0)}.`)
-      return
-    }
-    const allocation = paymentAllocation(statement, amount)
-    const payment: StatementPayment = { id: crypto.randomUUID(), date: paymentDraft.date, amount, method: paymentDraft.method, referenceNumber: paymentDraft.referenceNumber.trim(), notes: paymentDraft.notes.trim(), principalAmount: allocation.principalAmount, lateChargeAmount: allocation.lateChargeAmount, createdAt: new Date().toISOString() }
-    const totalPayments = statement.totalPayments + amount
-    const updatedPayments = [payment, ...statement.payments]
-    const updatedStatement = { ...statement, payments: updatedPayments, totalPayments }
-    const balance = statementFinancials(updatedStatement).totalBalance
-    const status: StatementStatus = balance <= 0 ? 'Settled' : 'Partially Settled'
-    const nextPayment = getNextScheduleEntry(statement.paymentSchedule, principalPayments(updatedStatement))
-    setStatements((current) => current.map((entry) => entry.id === statement.id ? { ...entry, payments: updatedPayments, totalPayments, balance, dueDate: nextPayment?.dueDate ?? entry.dueDate, status, updatedAt: new Date().toISOString() } : entry))
-    appendSystemLog({ module: 'Statements of Account', action: 'Payment recorded', recordId: statement.id, entity: statement.soaNumber, description: `${payment.method} payment recorded for ${statement.clientName}; ${formatPeso(allocation.lateChargeAmount)} to late charges and ${formatPeso(allocation.principalAmount)} to principal.`, actor: currentUsername, amount, status, tone: 'success' })
-    setPaymentStatementId(null)
-    setToast('Payment recorded and account balance updated.')
+    if (!statement) return
+    try {
+      const saved = await recordStatementPayment(statement.id, { paymentDate: paymentDraft.date, amount: Number(paymentDraft.amount), method: paymentDraft.method, referenceNumber: paymentDraft.referenceNumber.trim(), notes: paymentDraft.notes.trim(), idempotencyKey: paymentIdempotencyKey.current ?? (paymentIdempotencyKey.current = crypto.randomUUID()), version: statement.version })
+      setStatements((current) => current.map((entry) => entry.id === saved.id ? toStatement(saved) : entry)); setPaymentStatementId(null); paymentIdempotencyKey.current = null; setToast('Payment recorded.')
+    } catch (failure) { setPaymentError(failure instanceof Error ? failure.message : 'Payment could not be recorded.') }
   }
 
-  function confirmVoidStatement(reason: string, archiveAfterVoiding: boolean) {
+  async function confirmVoidStatement(reason: string, archiveAfterVoiding: boolean) {
     const statement = statements.find((entry) => entry.id === pendingVoidStatementId)
     if (!statement) return
-    setStatements((current) => current.map((entry) => entry.id === statement.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason)) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ module: 'Statements of Account', action: 'Voided', recordId: statement.id, entity: statement.soaNumber, description: `Statement voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, amount: statement.balance, status: 'Cancelled', tone: 'danger' })
-    setPendingVoidStatementId(null)
-    setToast(archiveAfterVoiding ? 'Statement voided and archived' : 'Statement voided')
-    if (archiveAfterVoiding) navigate('/statement-of-account')
+    try { const saved = await changeStatementStatus(statement.id, { status: 'Cancelled', reason, version: statement.version, archiveAfterVoiding }); setStatements((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== statement.id) : current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setPendingVoidStatementId(null); setToast(archiveAfterVoiding ? 'Statement voided and archived' : 'Statement voided'); if (archiveAfterVoiding) navigate('/statement-of-account') }
+    catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement could not be voided.') }
   }
 
-  function archiveStatement(statement: StatementOfAccount) {
-    setStatements((current) => current.map((entry) => entry.id === statement.id ? withArchived(entry, currentUsername) : entry))
-    notifyLifecycleChanged()
-    appendSystemLog({ module: 'Statements of Account', action: 'Archived', recordId: statement.id, entity: statement.soaNumber, description: 'Statement was archived with payments, schedules, and late charges retained.', actor: currentUsername, amount: statement.balance, status: statement.status, tone: 'info' })
-    setToast('Statement archived')
-    navigate('/statement-of-account')
+  async function archiveStatement(statement: StatementOfAccount) {
+    try { await archiveStatementRequest(statement.id, statement.version); setStatements((current) => current.filter((entry) => entry.id !== statement.id)); setToast('Statement archived'); navigate('/statement-of-account') }
+    catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement could not be archived.') }
   }
 
   function openLateCharge(statement: StatementOfAccount, scheduleEntryId: string) {
@@ -559,7 +455,7 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
     setLateChargeError('')
   }
 
-  function applyLateCharge(event: FormEvent) {
+  async function applyLateCharge(event: FormEvent) {
     event.preventDefault()
     if (!lateChargeDraft) return
     const statement = statements.find((entry) => entry.id === lateChargeDraft.statementId)
@@ -568,26 +464,11 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
       setLateChargeError('Enter a rate or fixed value and a final charge greater than zero.')
       return
     }
-    const existing = statement.lateCharges.find((charge) => charge.scheduleEntryId === schedule.id)
-    const paid = existing ? lateChargeProgress(statement).find((charge) => charge.id === existing.id)?.paidAmount ?? 0 : 0
-    if (lateChargeDraft.finalAmount + 0.009 < paid) {
-      setLateChargeError(`The charge cannot be lower than the ${formatPeso(paid)} already paid toward it.`)
-      return
-    }
-    const now = new Date().toISOString()
-    const schedulePolicy = scheduleLateChargePolicy(statement, schedule)
-    const calculatedAmount = suggestedLateCharge(schedule.balance, { enabled: true, graceDays: schedulePolicy.graceDays, type: lateChargeDraft.type, value: lateChargeDraft.rateValue })
-    const charge: StatementLateCharge = { id: existing?.id ?? crypto.randomUUID(), scheduleEntryId: schedule.id, appliedDate: now.slice(0, 10), type: lateChargeDraft.type, rateValue: lateChargeDraft.rateValue, calculatedAmount, amount: lateChargeDraft.finalAmount, status: 'Applied', reason: lateChargeDraft.reason.trim(), createdBy: existing?.createdBy ?? currentUsername, createdAt: existing?.createdAt ?? now, updatedAt: now }
-    const lateCharges = existing ? statement.lateCharges.map((item) => item.id === existing.id ? charge : item) : [charge, ...statement.lateCharges]
-    const updatedStatement = { ...statement, lateCharges }
-    const balance = statementFinancials(updatedStatement).totalBalance
-    setStatements((current) => current.map((entry) => entry.id === statement.id ? { ...entry, lateCharges, balance, updatedAt: now } : entry))
-    appendSystemLog({ module: 'Statements of Account', action: 'Updated', recordId: statement.id, entity: statement.soaNumber, description: `${formatPeso(charge.amount)} late charge ${existing ? 'updated' : 'applied'} for ${schedule.label}.`, actor: currentUsername, amount: charge.amount, status: effectiveStatus(updatedStatement), tone: 'warning' })
-    setLateChargeDraft(null)
-    setToast(existing ? 'Late charge updated.' : 'Late charge applied.')
+    try { const saved = await applyStatementLateCharge(statement.id, schedule.id, statement.version); setStatements((current) => current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setLateChargeDraft(null); setToast('Backend-calculated late charge applied.') }
+    catch (failure) { setLateChargeError(failure instanceof Error ? failure.message : 'Late charge could not be applied.') }
   }
 
-  function waiveLateCharge() {
+  async function waiveLateCharge() {
     if (!lateChargeDraft) return
     const statement = statements.find((entry) => entry.id === lateChargeDraft.statementId)
     const schedule = statement ? statementScheduleProgress(statement).find((entry) => entry.id === lateChargeDraft.scheduleEntryId) : undefined
@@ -596,21 +477,8 @@ export function StatementOfAccountPage({ currentUsername }: StatementOfAccountPa
       setLateChargeError('Add a reason before waiving the late charge.')
       return
     }
-    const existing = statement.lateCharges.find((charge) => charge.scheduleEntryId === schedule.id)
-    const paid = existing ? lateChargeProgress(statement).find((charge) => charge.id === existing.id)?.paidAmount ?? 0 : 0
-    if (paid > 0.009) {
-      setLateChargeError('This charge already has a payment allocation and cannot be waived.')
-      return
-    }
-    const now = new Date().toISOString()
-    const charge: StatementLateCharge = { id: existing?.id ?? crypto.randomUUID(), scheduleEntryId: schedule.id, appliedDate: existing?.appliedDate ?? now.slice(0, 10), type: lateChargeDraft.type, rateValue: lateChargeDraft.rateValue, calculatedAmount: existing?.calculatedAmount ?? 0, amount: existing?.amount ?? lateChargeDraft.finalAmount, status: 'Waived', reason: lateChargeDraft.reason.trim(), createdBy: existing?.createdBy ?? currentUsername, createdAt: existing?.createdAt ?? now, updatedAt: now }
-    const lateCharges = existing ? statement.lateCharges.map((item) => item.id === existing.id ? charge : item) : [charge, ...statement.lateCharges]
-    const updatedStatement = { ...statement, lateCharges }
-    const balance = statementFinancials(updatedStatement).totalBalance
-    setStatements((current) => current.map((entry) => entry.id === statement.id ? { ...entry, lateCharges, balance, updatedAt: now } : entry))
-    appendSystemLog({ module: 'Statements of Account', action: 'Updated', recordId: statement.id, entity: statement.soaNumber, description: `Late charge waived for ${schedule.label}. Reason: ${charge.reason}`, actor: currentUsername, amount: charge.amount, status: effectiveStatus(updatedStatement), tone: 'info' })
-    setLateChargeDraft(null)
-    setToast('Late charge waived.')
+    try { const saved = await waiveStatementLateCharge(statement.id, schedule.id, lateChargeDraft.reason, statement.version); setStatements((current) => current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setLateChargeDraft(null); setToast('Late charge waived.') }
+    catch (failure) { setLateChargeError(failure instanceof Error ? failure.message : 'Late charge could not be waived.') }
   }
 
   if (profileStatement && !isFormOpen) {

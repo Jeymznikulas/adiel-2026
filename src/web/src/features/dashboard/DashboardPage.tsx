@@ -1,10 +1,8 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SummarySurface } from '../../components/ui/SummarySurface'
-import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogEntry } from '../../services/activityLog'
-import { listClients } from '../../services/api/clients'
-import { listQuotations } from '../../services/api/quotations'
-import { isActiveRecord } from '../../services/recordLifecycle'
+import { type SystemLogEntry } from '../../services/activityLog'
+import { getDashboard, type Dashboard } from '../../services/api/insights'
 
 const BusinessTrendChart = lazy(() => import('./BusinessTrendChart'))
 
@@ -145,14 +143,7 @@ function DashboardInfo({ title, source, included, calculation }: DashboardInfoPr
   </>
 }
 
-function readArray(storageKey: string): unknown[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter(isActiveRecord) : []
-  } catch {
-    return []
-  }
-}
+function readArray(_storageKey: string): unknown[] { return [] }
 
 function loadDashboardData(): DashboardData {
   const actionQuotations = readArray('__quotations_migrated_to_api__').flatMap((value): DashboardQuotation[] => {
@@ -174,7 +165,7 @@ function loadDashboardData(): DashboardData {
   })
   const quotations = actionQuotations.filter((quotation) => quotation.status === 'Approved')
 
-  const expenses = readArray('adiel.expenses').flatMap((value): DashboardExpense[] => {
+  const expenses = readArray('__expenses_migrated_to_api__').flatMap((value): DashboardExpense[] => {
     if (typeof value !== 'object' || value === null) return []
     const entry = value as Record<string, unknown>
     if (typeof entry.id !== 'number' || entry.status === 'Cancelled') return []
@@ -183,14 +174,9 @@ function loadDashboardData(): DashboardData {
 
   const clients: DashboardClient[] = []
 
-  const tasks = readArray('adiel.tasks').flatMap((value): DashboardTask[] => {
-    if (typeof value !== 'object' || value === null) return []
-    const entry = value as Record<string, unknown>
-    if (typeof entry.id !== 'number' || typeof entry.title !== 'string') return []
-    return [{ id: entry.id, title: entry.title, status: typeof entry.status === 'string' ? entry.status : 'To do', priority: typeof entry.priority === 'string' ? entry.priority : 'Medium', dueDate: typeof entry.dueDate === 'string' ? entry.dueDate.slice(0, 10) : '', assignedTo: typeof entry.assignedTo === 'string' ? entry.assignedTo : 'Unassigned' }]
-  })
+  const tasks: DashboardTask[] = []
 
-  const statements = readArray('adiel.statements-of-account').flatMap((value): DashboardStatement[] => {
+  const statements = readArray('__statements_migrated_to_api__').flatMap((value): DashboardStatement[] => {
     if (typeof value !== 'object' || value === null) return []
     const entry = value as Record<string, unknown>
     if (typeof entry.id !== 'string' || typeof entry.soaNumber !== 'string') return []
@@ -207,14 +193,14 @@ function loadDashboardData(): DashboardData {
     return [{ id: entry.id, soaNumber: entry.soaNumber, clientName: typeof entry.clientName === 'string' ? entry.clientName : 'Unknown client', dueDate: typeof entry.dueDate === 'string' ? entry.dueDate.slice(0, 10) : '', balance: Number(entry.balance) || 0, status: typeof entry.status === 'string' ? entry.status : 'Draft', quotationIds, payments }]
   })
 
-  const purchaseOrders = readArray('adiel.purchase-orders').flatMap((value): DashboardPurchaseOrder[] => {
+  const purchaseOrders = readArray('__purchase_orders_migrated_to_api__').flatMap((value): DashboardPurchaseOrder[] => {
     if (typeof value !== 'object' || value === null) return []
     const entry = value as Record<string, unknown>
     if (typeof entry.id !== 'string' || typeof entry.poNumber !== 'string') return []
     return [{ id: entry.id, poNumber: entry.poNumber, supplierName: typeof entry.supplierName === 'string' ? entry.supplierName : 'Unknown supplier', totalAmount: Number(entry.totalAmount) || 0, status: typeof entry.status === 'string' ? entry.status : 'Not yet sent' }]
   })
 
-  return { quotations, actionQuotations, expenses, clients, tasks, statements, purchaseOrders, logs: loadSystemLogs() }
+  return { quotations, actionQuotations, expenses, clients, tasks, statements, purchaseOrders, logs: [] }
 }
 
 function dateKey(date: Date) {
@@ -347,27 +333,17 @@ function ActionCenter({ actions, expanded, onToggle }: { actions: DashboardActio
 
 export function DashboardPage({ username }: { username: string }) {
   const [data, setData] = useState<DashboardData>(emptyData)
+  const [dashboardData, setDashboardData] = useState<Dashboard | null>(null)
   const [trendMonths, setTrendMonths] = useState<6 | 12>(6)
   const [showAllActions, setShowAllActions] = useState(false)
+  void setData
+  void loadDashboardData
 
   useEffect(() => {
-    const refresh = () => {
-      setData(loadDashboardData())
-      void listClients({ pageSize: 100 }).then((result) => setData((current) => ({ ...current, clients: result.items.map((client) => ({ id: client.id, name: client.name, photo: client.photo, status: client.status, clientSince: client.clientSince, transactions: [] })) })))
-      void listQuotations({ pageSize: 100 }).then((result) => { const actionQuotations = result.items.map((quotation) => ({ id: quotation.id, quotationNumber: quotation.quotationNumber, dateCreated: quotation.quotationDate, clientId: quotation.clientId ?? '', clientName: quotation.clientName, subject: quotation.subject, subtotalAmount: quotation.subtotalAmount, totalAmount: quotation.totalAmount, estimatedProfit: quotation.estimatedProfit, status: quotation.status })); setData((current) => ({ ...current, actionQuotations, quotations: actionQuotations.filter((quotation) => quotation.status === 'Approved') })) })
-    }
-    refresh()
-    window.addEventListener('storage', refresh)
-    window.addEventListener('adiel:navigate', refresh)
-    window.addEventListener(systemLogsUpdatedEvent, refresh)
-    return () => {
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('adiel:navigate', refresh)
-      window.removeEventListener(systemLogsUpdatedEvent, refresh)
-    }
-  }, [])
+    void getDashboard(trendMonths).then(setDashboardData)
+  }, [trendMonths])
 
-  const dashboard = useMemo(() => {
+  const legacyDashboard = useMemo(() => {
     const ranges = currentRanges()
     const sales = {
       today: sumPeriod(data.quotations, (entry) => entry.dateCreated, (entry) => entry.totalAmount, ranges.today.start, ranges.today.end),
@@ -517,6 +493,11 @@ export function DashboardPage({ username }: { username: string }) {
     }
   }, [data, trendMonths, username])
 
+  const dashboard = useMemo(() => dashboardData ? {
+    ...dashboardData,
+    actionItems: dashboardData.actions.map((action) => ({ ...action, icon: action.path.startsWith('/tasks') ? 'M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5' : action.path.startsWith('/purchase-orders') ? 'M3 3h2l2.4 12.3a2 2 0 0 0 2 1.7h7.7a2 2 0 0 0 2-1.6L21 7H6' : 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6' })),
+  } : legacyDashboard, [dashboardData, legacyDashboard])
+
   const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening'
 
   return <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
@@ -562,8 +543,8 @@ export function DashboardPage({ username }: { username: string }) {
       </article>
       <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)] animate-[po-card-enter_300ms_90ms_cubic-bezier(0.22,1,0.36,1)_both]">
         <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Client metrics</h3><p className="mt-1 text-[10px] text-slate-400">Current client health and growth</p></div><div className="flex shrink-0 items-center gap-1"><DashboardInfo title="Client metrics" source="Clients and Approved Quotations" included="Active client profiles, clients added this month, and clients with multiple approved sales." calculation="Repeat clients have more than one approved quotation; ranking uses order count then total sales." /><button className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-bold text-brand-blue transition hover:bg-blue-50" type="button" onClick={() => navigate('/clients')}>View clients<Icon className="size-3" path="m9 18 6-6-6-6" /></button></div></header>
-        <div className="grid grid-cols-2 gap-2 p-4 sm:p-5"><div className="rounded-xl bg-slate-50/75 p-3"><p className="text-[9px] font-bold uppercase text-slate-400">Total</p><p className="mt-1.5 text-xl font-extrabold text-brand-blue">{data.clients.length}</p></div><div className="rounded-xl bg-emerald-50/60 p-3"><p className="text-[9px] font-bold uppercase text-emerald-600">Active</p><p className="mt-1.5 text-xl font-extrabold text-emerald-700">{dashboard.activeClients}</p></div><div className="rounded-xl bg-blue-50/65 p-3"><p className="text-[9px] font-bold uppercase text-sky-600">New this month</p><p className="mt-1.5 text-xl font-extrabold text-sky-700">{dashboard.newClients}</p></div><div className="rounded-xl bg-violet-50/65 p-3"><p className="text-[9px] font-bold uppercase text-violet-600">Repeat</p><p className="mt-1.5 text-xl font-extrabold text-violet-700">{dashboard.repeatClients}</p></div></div>
-        <section className="border-t border-slate-100" aria-labelledby="top-repeat-clients-title"><div className="flex items-center justify-between gap-3 bg-slate-50/55 px-5 py-3"><div><h4 className="text-[11px] font-extrabold text-brand-blue" id="top-repeat-clients-title">Top repeat clients</h4><p className="mt-0.5 text-[9px] text-slate-400">Multiple approved sales</p></div><span className="rounded-lg bg-violet-50 px-2 py-1 text-[9px] font-bold text-violet-700">Top {Math.min(dashboard.topClients.length, 3)}</span></div>{dashboard.topClients.length ? <div className="divide-y divide-slate-100">{dashboard.topClients.slice(0, 3).map((client, index) => { const profile = data.clients.find((entry) => entry.id === client.id || entry.name === client.name); return <button className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-slate-50/75" type="button" onClick={() => navigate(client.id ? `/clients/${client.id}` : '/clients')} key={`${client.id}-${client.name}`}><span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-lg bg-blue-50 text-[9px] font-extrabold text-brand-blue">{profile?.photo ? <img className="size-full object-cover" src={profile.photo} alt="" /> : initials(client.name)}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-bold text-slate-700">{client.name}</span><span className="mt-0.5 block text-[9px] text-slate-400">{client.orders} approved sales</span></span><span className="shrink-0 text-right"><span className="block text-[11px] font-extrabold text-brand-blue">{formatCompactPeso(client.sales)}</span><span className="mt-0.5 block text-[8px] font-bold text-slate-300">#{index + 1}</span></span></button>})}</div> : <div className="px-5 py-5 text-center text-[10px] font-semibold text-slate-400">Repeat clients will appear after multiple approved sales.</div>}</section>
+        <div className="grid grid-cols-2 gap-2 p-4 sm:p-5"><div className="rounded-xl bg-slate-50/75 p-3"><p className="text-[9px] font-bold uppercase text-slate-400">Total</p><p className="mt-1.5 text-xl font-extrabold text-brand-blue">{dashboardData?.totalClients ?? data.clients.length}</p></div><div className="rounded-xl bg-emerald-50/60 p-3"><p className="text-[9px] font-bold uppercase text-emerald-600">Active</p><p className="mt-1.5 text-xl font-extrabold text-emerald-700">{dashboard.activeClients}</p></div><div className="rounded-xl bg-blue-50/65 p-3"><p className="text-[9px] font-bold uppercase text-sky-600">New this month</p><p className="mt-1.5 text-xl font-extrabold text-sky-700">{dashboard.newClients}</p></div><div className="rounded-xl bg-violet-50/65 p-3"><p className="text-[9px] font-bold uppercase text-violet-600">Repeat</p><p className="mt-1.5 text-xl font-extrabold text-violet-700">{dashboard.repeatClients}</p></div></div>
+        <section className="border-t border-slate-100" aria-labelledby="top-repeat-clients-title"><div className="flex items-center justify-between gap-3 bg-slate-50/55 px-5 py-3"><div><h4 className="text-[11px] font-extrabold text-brand-blue" id="top-repeat-clients-title">Top repeat clients</h4><p className="mt-0.5 text-[9px] text-slate-400">Multiple approved sales</p></div><span className="rounded-lg bg-violet-50 px-2 py-1 text-[9px] font-bold text-violet-700">Top {Math.min(dashboard.topClients.length, 3)}</span></div>{dashboard.topClients.length ? <div className="divide-y divide-slate-100">{dashboard.topClients.slice(0, 3).map((client, index) => <button className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-slate-50/75" type="button" onClick={() => navigate(client.id ? `/clients/${client.id}` : '/clients')} key={`${client.id}-${client.name}`}><span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-lg bg-blue-50 text-[9px] font-extrabold text-brand-blue">{(client as { photo?: string }).photo ? <img className="size-full object-cover" src={(client as { photo?: string }).photo} alt="" /> : initials(client.name)}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-bold text-slate-700">{client.name}</span><span className="mt-0.5 block text-[9px] text-slate-400">{client.orders} approved sales</span></span><span className="shrink-0 text-right"><span className="block text-[11px] font-extrabold text-brand-blue">{formatCompactPeso(client.sales)}</span><span className="mt-0.5 block text-[8px] font-bold text-slate-300">#{index + 1}</span></span></button>)}</div> : <div className="px-5 py-5 text-center text-[10px] font-semibold text-slate-400">Repeat clients will appear after multiple approved sales.</div>}</section>
       </article>
     </section>
 
@@ -573,9 +554,9 @@ export function DashboardPage({ username }: { username: string }) {
     </section>
 
     <section className="grid gap-4 lg:grid-cols-2" aria-label="Dashboard details">
-      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><div className="flex items-center gap-2"><span className="size-2 rounded-full bg-red-500 ring-4 ring-red-50" /><h3 className="text-sm font-extrabold text-brand-blue">Urgent task reminders</h3></div><p className="mt-1 text-[10px] text-slate-400">High priority, overdue, or due within three days</p></div><div className="flex shrink-0 items-center gap-1"><DashboardInfo title="Urgent task reminders" source="Tasks" included="Incomplete high-priority tasks plus tasks overdue or due within three days." calculation="Shows up to five tasks, prioritizing overdue, assigned-to-you, and high-priority work." /><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/tasks')}>View all</button></div></header>{dashboard.urgentTasks.length ? <div className="divide-y divide-slate-100">{dashboard.urgentTasks.map((task) => { const overdue = Boolean(task.dueDate && task.dueDate < dashboard.ranges.today.end); return <button className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50/75" type="button" onClick={() => navigate('/tasks')} key={task.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg ${overdue ? 'bg-red-50 text-red-600' : task.priority === 'High' ? 'bg-orange-50 text-brand-orange' : 'bg-amber-50 text-amber-700'}`}><Icon className="size-3.5" path="M12 8v4l3 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-700">{task.title}</span><span className="mt-1 block truncate text-[10px] text-slate-400">{task.assignedTo}</span></span><span className={`shrink-0 text-[10px] font-bold ${overdue ? 'text-red-600' : 'text-slate-500'}`}>{overdue ? 'Overdue' : formatDate(task.dueDate)}</span></button>})}</div> : <EmptyState message="No urgent tasks. You are all caught up." />}</article>
+      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><div className="flex items-center gap-2"><span className="size-2 rounded-full bg-red-500 ring-4 ring-red-50" /><h3 className="text-sm font-extrabold text-brand-blue">Urgent task reminders</h3></div><p className="mt-1 text-[10px] text-slate-400">High priority, overdue, or due within three days</p></div><div className="flex shrink-0 items-center gap-1"><DashboardInfo title="Urgent task reminders" source="Tasks" included="Incomplete high-priority tasks plus tasks overdue or due within three days." calculation="Shows up to five tasks, prioritizing overdue, assigned-to-you, and high-priority work." /><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/tasks')}>View all</button></div></header>{dashboard.urgentTasks.length ? <div className="divide-y divide-slate-100">{dashboard.urgentTasks.map((task) => { const overdue = Boolean(task.dueDate && task.dueDate < dashboard.ranges.today.end); return <button className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50/75" type="button" onClick={() => navigate('/tasks')} key={task.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg ${overdue ? 'bg-red-50 text-red-600' : task.priority === 'High' ? 'bg-orange-50 text-brand-orange' : 'bg-amber-50 text-amber-700'}`}><Icon className="size-3.5" path="M12 8v4l3 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-700">{task.title}</span><span className="mt-1 block truncate text-[10px] text-slate-400">{task.assignedTo}</span></span><span className={`shrink-0 text-[10px] font-bold ${overdue ? 'text-red-600' : 'text-slate-500'}`}>{overdue ? 'Overdue' : formatDate(task.dueDate ?? '')}</span></button>})}</div> : <EmptyState message="No urgent tasks. You are all caught up." />}</article>
 
-      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Recent activity</h3><p className="mt-1 text-[10px] text-slate-400">Latest changes across the system</p></div><div className="flex shrink-0 items-center gap-1"><DashboardInfo title="Recent activity" source="System Logs" included="Actions recorded by Quotations, SOAs, Payments, POs, Clients, and other modules." calculation="Shows the six newest activity entries by timestamp." /><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/logs')}>View log</button></div></header>{data.logs.length ? <div className="divide-y divide-slate-100">{data.logs.slice(0, 6).map((entry) => <div className="flex items-start gap-3 px-5 py-3.5" key={entry.id}><span className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg ${entry.tone === 'danger' ? 'bg-red-50 text-red-600' : entry.tone === 'warning' ? 'bg-amber-50 text-amber-700' : entry.tone === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-brand-blue'}`}><Icon className="size-3.5" path={entry.action === 'Deleted' ? 'M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6' : entry.action.includes('Payment') ? 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' : 'M12 5v14M5 12h14'} /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-slate-700">{entry.entity}</p><p className="mt-1 truncate text-[10px] text-slate-400">{entry.action} · {entry.module}</p></div><span className="shrink-0 text-[9px] font-semibold text-slate-300">{formatActivityTime(entry.timestamp)}</span></div>)}</div> : <EmptyState message="Activity will appear as the team works." />}</article>
+      <article className="overflow-hidden rounded-[1.4rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_-28px_rgba(0,20,76,0.34)]"><header className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h3 className="text-sm font-extrabold text-brand-blue">Recent activity</h3><p className="mt-1 text-[10px] text-slate-400">Latest changes across the system</p></div><div className="flex shrink-0 items-center gap-1"><DashboardInfo title="Recent activity" source="Audit records" included="Owner-scoped changes across the system." calculation="Shows the six newest audit entries by timestamp." /><button className="text-[10px] font-bold text-brand-blue hover:text-brand-orange" type="button" onClick={() => navigate('/logs')}>View log</button></div></header>{dashboardData?.recentActivity.length ? <div className="divide-y divide-slate-100">{dashboardData.recentActivity.map((entry) => <div className="flex items-start gap-3 px-5 py-3.5" key={entry.id}><span className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg ${entry.tone === 'danger' ? 'bg-red-50 text-red-600' : entry.tone === 'warning' ? 'bg-amber-50 text-amber-700' : entry.tone === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-brand-blue'}`}><Icon className="size-3.5" path={entry.action === 'Deleted' ? 'M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6' : entry.action.includes('Payment') ? 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' : 'M12 5v14M5 12h14'} /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-slate-700">{entry.entity}</p><p className="mt-1 truncate text-[10px] text-slate-400">{entry.action} · {entry.module}</p></div><span className="shrink-0 text-[9px] font-semibold text-slate-300">{formatActivityTime(entry.timestamp)}</span></div>)}</div> : <EmptyState message="Activity will appear as the team works." />}</article>
     </section>
   </div>
 }

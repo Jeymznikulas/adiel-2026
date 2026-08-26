@@ -13,6 +13,7 @@ import { appendSystemLog } from '../../services/activityLog'
 import { listClients as fetchClients } from '../../services/api/clients'
 import { createSupplier, listSuppliers, type Supplier as ApiSupplier } from '../../services/api/suppliers'
 import { listItems, type Item as ApiItem } from '../../services/api/items'
+import { archivePurchaseOrder, changePurchaseOrderStatus, createPurchaseOrder, listPurchaseOrders, updatePurchaseOrder, type PurchaseOrder as ApiPurchaseOrder, type SavePurchaseOrder } from '../../services/api/purchaseOrders'
 import { listQuotations } from '../../services/api/quotations'
 import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { loadDocumentDefaults, nextDocumentNumber } from '../settings/settingsStorage'
@@ -83,16 +84,17 @@ export type PurchaseOrder = {
   addedToExpenses: boolean
   createdAt: string
   updatedAt: string
+  archivedAt: string | null
+  version: number
 }
 
 type LineDraft = Omit<PurchaseOrderLine, 'quantity' | 'unitCost'> & { quantity: string; unitCost: string }
 type ChargeDraft = Omit<PurchaseOrderCharge, 'amount'> & { amount: string }
-type PurchaseOrderDraft = Omit<PurchaseOrder, 'id' | 'supplierName' | 'items' | 'subtotalAmount' | 'vatAmount' | 'otherCharges' | 'totalAmount' | 'status' | 'documentStatus' | 'deliveryStatus' | 'paymentStatus' | 'addedToExpenses' | 'createdAt' | 'updatedAt'> & { items: LineDraft[]; otherCharges: ChargeDraft[] }
+type PurchaseOrderDraft = Omit<PurchaseOrder, 'id' | 'supplierName' | 'items' | 'subtotalAmount' | 'vatAmount' | 'otherCharges' | 'totalAmount' | 'status' | 'documentStatus' | 'deliveryStatus' | 'paymentStatus' | 'addedToExpenses' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'version'> & { items: LineDraft[]; otherCharges: ChargeDraft[] }
 type PurchaseOrdersPageProps = { currentUsername: string }
 
-const storageKey = 'adiel.purchase-orders'
-const expenseStorageKey = 'adiel.expenses'
 const addSupplierOptionValue = '__add_supplier__'
+const expenseStorageKey = '__expenses_migrated_to_api__'
 const purchaseOrderStatuses: PurchaseOrderStatus[] = ['Delivered', 'For Payment', 'Waiting for Delivery', 'Cancelled', 'Sent', 'Not yet sent']
 const statusOptions: { value: PurchaseOrderStatus }[] = purchaseOrderStatuses.map((value) => ({ value }))
 const statusFilterOptions: { value: 'All statuses' | PurchaseOrderStatus }[] = [{ value: 'All statuses' }, ...statusOptions]
@@ -128,31 +130,16 @@ function loadClients(): Client[] {
 
 function toCatalogItem(item: ApiItem): CatalogItem { return { id: item.id, photo: item.photo, name: item.name, category: item.category, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, supplierId: item.supplierId ?? '', rawCost: item.rawCost, variants: item.variants.filter((variant) => variant.status === 'Active').map((variant) => ({ id: variant.id, name: variant.name, value: variant.value, photo: variant.photo, productCode: variant.productCode || item.productCode, unitOfMeasure: variant.unitOfMeasure, status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })), status: item.status } }
 
-function loadPurchaseOrders(): PurchaseOrder[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const order = value as Partial<PurchaseOrder>
-      if (typeof order.id !== 'string' || typeof order.poNumber !== 'string' || !Array.isArray(order.items)) return []
-      const items = order.items.map((line) => ({ ...line, photo: typeof line.photo === 'string' ? line.photo : '' }))
-      const subtotalAmount = typeof order.subtotalAmount === 'number' ? order.subtotalAmount : items.reduce((total, line) => total + (Number(line.quantity) || 0) * (Number(line.unitCost) || 0), 0)
-      const vatEnabled = order.vatEnabled === true
-      const vatAmount = typeof order.vatAmount === 'number' ? order.vatAmount : vatEnabled ? subtotalAmount * 0.12 : 0
-      const otherCharges = Array.isArray(order.otherCharges) ? order.otherCharges.filter((charge): charge is PurchaseOrderCharge => typeof charge?.id === 'string' && typeof charge.label === 'string' && typeof charge.amount === 'number') : []
-      const totalAmount = typeof order.totalAmount === 'number' ? order.totalAmount : subtotalAmount + vatAmount + otherCharges.reduce((total, charge) => total + charge.amount, 0)
-      const legacyStatus = purchaseOrderStatuses.includes(order.status as PurchaseOrderStatus) ? order.status as PurchaseOrderStatus : 'Not yet sent'
-      const documentStatus: PurchaseOrderDocumentStatus = order.documentStatus === 'Draft' || order.documentStatus === 'Sent' || order.documentStatus === 'Cancelled' ? order.documentStatus : legacyStatus === 'Cancelled' ? 'Cancelled' : legacyStatus === 'Not yet sent' ? 'Draft' : 'Sent'
-      const deliveryStatus: PurchaseOrderDeliveryStatus = order.deliveryStatus === 'Pending' || order.deliveryStatus === 'Partially Delivered' || order.deliveryStatus === 'Delivered' ? order.deliveryStatus : legacyStatus === 'Delivered' ? 'Delivered' : 'Pending'
-      const paymentStatus: PurchaseOrderPaymentStatus = order.paymentStatus === 'Not Due' || order.paymentStatus === 'To Pay' || order.paymentStatus === 'Overdue' || order.paymentStatus === 'Paid' ? order.paymentStatus : legacyStatus === 'For Payment' || order.addedToExpenses ? 'To Pay' : 'Not Due'
-      return [{ ...(order as PurchaseOrder), clientId: typeof order.clientId === 'string' ? order.clientId : '', quotationId: typeof order.quotationId === 'string' ? order.quotationId : '', quotationNumber: typeof order.quotationNumber === 'string' ? order.quotationNumber : '', notes: typeof order.notes === 'string' ? order.notes : '', terms: typeof order.terms === 'string' ? order.terms : loadDocumentDefaults().purchaseOrderTerms, items, subtotalAmount, vatEnabled, vatAmount, otherCharges, totalAmount, status: legacyStatus, documentStatus, deliveryStatus, paymentStatus, addedToExpenses: order.addedToExpenses === true }]
-    })
-  } catch { return [] }
-}
-
 function emptyDraft(): PurchaseOrderDraft {
   return { date: new Date().toISOString().slice(0, 10), poNumber: '', clientId: '', clientName: '', supplierId: '', contactPerson: '', subject: '', quotationId: '', quotationNumber: '', modeOfPayment: 'Bank transfer', paymentTerm: '30 days', deliveryLocation: '', modeOfDelivery: 'Supplier delivery', notes: '', terms: '', items: [], vatEnabled: false, otherCharges: [] }
+}
+
+function toPurchaseOrder(value: ApiPurchaseOrder): PurchaseOrder {
+  return { id: value.id, date: value.orderDate, poNumber: value.poNumber, clientId: value.clientId ?? '', clientName: value.clientName, supplierId: value.supplierId ?? '', supplierName: value.supplierName, contactPerson: value.contactPerson, subject: value.subject, quotationId: value.quotationId ?? '', quotationNumber: value.quotationNumber, modeOfPayment: value.paymentMethod, paymentTerm: value.paymentTerm, deliveryLocation: value.deliveryLocation, modeOfDelivery: value.deliveryMode, notes: value.notes, terms: value.terms, items: value.lines.map((line) => ({ id: line.id, itemId: line.itemId ?? '', variantId: line.variantId ?? '', photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: line.quantity, unitCost: line.unitCost })), subtotalAmount: value.subtotalAmount, vatEnabled: value.vatEnabled, vatAmount: value.vatAmount, otherCharges: value.charges.map((charge) => ({ id: charge.id, label: charge.label, amount: charge.amount })), totalAmount: value.totalAmount, status: value.status, documentStatus: value.documentStatus, deliveryStatus: value.deliveryStatus, paymentStatus: value.paymentStatus, addedToExpenses: false, createdAt: value.createdAt, updatedAt: value.updatedAt, archivedAt: value.archivedAt, version: value.version }
+}
+
+function purchaseOrderRequest(draft: PurchaseOrderDraft, intent: 'draft' | 'send', version?: number): SavePurchaseOrder {
+  return { orderDate: draft.date, clientId: draft.clientId || null, clientName: draft.clientName, supplierId: draft.supplierId || null, supplierName: '', contactPerson: draft.contactPerson, subject: draft.subject, quotationId: draft.quotationId || null, paymentMethod: draft.modeOfPayment, paymentTerm: draft.paymentTerm, deliveryLocation: draft.deliveryLocation, deliveryMode: draft.modeOfDelivery, notes: draft.notes, terms: draft.terms, vatEnabled: draft.vatEnabled, lines: draft.items.map((line) => ({ itemId: line.itemId || null, variantId: line.variantId || null, photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: Number(line.quantity), unitCost: Number(line.unitCost) })), charges: draft.otherCharges.map((charge) => ({ label: charge.label.trim(), amount: Number(charge.amount) })), intent, version }
 }
 
 function purchaseOrderDraftFrom(order: PurchaseOrder, clients: Client[]): PurchaseOrderDraft {
@@ -178,7 +165,7 @@ function legacyStatusFor(documentStatus: PurchaseOrderDocumentStatus, deliverySt
 }
 
 export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps) {
-  const [orders, setOrders] = useState<PurchaseOrder[]>(loadPurchaseOrders)
+  const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [clients, setClients] = useState<Client[]>(loadClients)
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
@@ -232,12 +219,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   }, [openNewFromQuery, orderIdOnLoad])
 
   useEffect(() => {
-    try { window.localStorage.setItem(storageKey, JSON.stringify(orders)); setStorageError('') }
-    catch { setStorageError('Purchase orders could not be saved in browser storage.') }
-  }, [orders])
-
-  useEffect(() => {
     void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
+    void listPurchaseOrders({ pageSize: 100 }).then((result) => { setOrders(result.items.map(toPurchaseOrder)); setStorageError('') }).catch(() => setStorageError('Purchase orders could not be loaded from the API.'))
   }, [])
 
   useEffect(() => {
@@ -453,7 +436,7 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setDraft((current) => ({ ...current, otherCharges: current.otherCharges.map((charge) => charge.id === chargeId ? { ...charge, [field]: value } : charge) }))
   }
 
-  function saveOrder(event: FormEvent<HTMLFormElement>) {
+  async function saveOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter
     const intent = submitter instanceof HTMLButtonElement ? submitter.dataset.intent : undefined
@@ -464,15 +447,26 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
       setFormError(`Complete the supplier, client, contact, delivery, and item details${draft.otherCharges.length ? ', including a name and positive amount for every charge,' : ''} before ${editingOrderId ? 'saving' : 'creating'} the PO.`)
       return
     }
+    const apiPrevious = editingOrderId ? orders.find((order) => order.id === editingOrderId) : undefined
+    try {
+      const saved = apiPrevious ? await updatePurchaseOrder(apiPrevious.id, purchaseOrderRequest(draft, intent === 'send' ? 'send' : 'draft', apiPrevious.version)) : await createPurchaseOrder(purchaseOrderRequest(draft, intent === 'send' ? 'send' : 'draft'))
+      const values = toPurchaseOrder(saved)
+      setOrders((current) => apiPrevious ? current.map((order) => order.id === apiPrevious.id ? values : order) : [values, ...current])
+      closePurchaseOrderFormPage(); setEditingOrderId(null); setToast(intent === 'send' ? 'Purchase order saved and marked sent' : apiPrevious ? 'Purchase order updated successfully' : 'Purchase order saved as draft')
+      return
+    } catch (failure) { setFormError(failure instanceof Error ? failure.message : 'The purchase order could not be saved.'); return }
     const now = new Date().toISOString()
     const previous = editingOrderId ? orders.find((order) => order.id === editingOrderId) : undefined
     const id = previous?.id ?? crypto.randomUUID()
     const documentStatus: PurchaseOrderDocumentStatus = intent === 'send' ? 'Sent' : intent === 'draft' ? 'Draft' : previous?.documentStatus ?? 'Draft'
     const deliveryStatus = previous?.deliveryStatus ?? 'Pending'
     const paymentStatus = previous?.paymentStatus ?? 'Not Due'
-    const values: PurchaseOrder = { id, date: draft.date, poNumber: draft.poNumber.trim(), clientId: client.id, clientName: client.name, supplierId: supplier.id, supplierName: supplier.name, contactPerson: draft.contactPerson.trim(), subject: draft.subject.trim(), quotationId: linkedQuotation?.id ?? '', quotationNumber: linkedQuotation?.quotationNumber ?? '', modeOfPayment: draft.modeOfPayment, paymentTerm: draft.paymentTerm, deliveryLocation: draft.deliveryLocation.trim(), modeOfDelivery: draft.modeOfDelivery, notes: draft.notes.trim(), terms: draft.terms.trim(), items: draft.items.map((line) => ({ ...line, quantity: Number(line.quantity), unitCost: Number(line.unitCost) })), subtotalAmount: draftSubtotal, vatEnabled: draft.vatEnabled, vatAmount: draftVatAmount, otherCharges: draft.otherCharges.map((charge) => ({ ...charge, label: charge.label.trim(), amount: Number(charge.amount) || 0 })), totalAmount: draftTotal, status: legacyStatusFor(documentStatus, deliveryStatus, paymentStatus), documentStatus, deliveryStatus, paymentStatus, addedToExpenses: previous?.addedToExpenses ?? false, createdAt: previous?.createdAt ?? now, updatedAt: now }
+    // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
+    const values: PurchaseOrder = { id, date: draft.date, poNumber: draft.poNumber.trim(), clientId: client.id, clientName: client.name, supplierId: supplier.id, supplierName: supplier.name, contactPerson: draft.contactPerson.trim(), subject: draft.subject.trim(), quotationId: linkedQuotation?.id ?? '', quotationNumber: linkedQuotation?.quotationNumber ?? '', modeOfPayment: draft.modeOfPayment, paymentTerm: draft.paymentTerm, deliveryLocation: draft.deliveryLocation.trim(), modeOfDelivery: draft.modeOfDelivery, notes: draft.notes.trim(), terms: draft.terms.trim(), items: draft.items.map((line) => ({ ...line, quantity: Number(line.quantity), unitCost: Number(line.unitCost) })), subtotalAmount: draftSubtotal, vatEnabled: draft.vatEnabled, vatAmount: draftVatAmount, otherCharges: draft.otherCharges.map((charge) => ({ ...charge, label: charge.label.trim(), amount: Number(charge.amount) || 0 })), totalAmount: draftTotal, status: legacyStatusFor(documentStatus, deliveryStatus, paymentStatus), documentStatus, deliveryStatus, paymentStatus, addedToExpenses: previous?.addedToExpenses ?? false, createdAt: previous?.createdAt ?? now, updatedAt: now, archivedAt: null, version: previous?.version ?? 1 }
     if (previous) {
+      // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
       setOrders((current) => current.map((order) => order.id === previous.id ? values : order))
+      // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
       if (previous.addedToExpenses) syncLinkedExpense(previous, values)
       appendSystemLog({ recordId: id, module: 'Purchase Orders', action: 'Updated', entity: values.poNumber, description: `Purchase order details updated for ${values.supplierName}.`, actor: currentUsername, tone: 'info', amount: values.totalAmount, status: values.status })
     } else {
@@ -484,11 +478,19 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setToast(intent === 'send' ? 'Purchase order saved and marked sent' : previous ? 'Purchase order updated successfully' : 'Purchase order saved as draft')
   }
 
+  async function persistStatus(order: PurchaseOrder, change: { documentStatus?: PurchaseOrderDocumentStatus; deliveryStatus?: PurchaseOrderDeliveryStatus; paymentStatus?: PurchaseOrderPaymentStatus; reason?: string; archiveAfterVoiding?: boolean }) {
+    try { const saved = toPurchaseOrder(await changePurchaseOrderStatus(order.id, { ...change, version: order.version })); setOrders((current) => change.archiveAfterVoiding ? current.filter((entry) => entry.id !== order.id) : current.map((entry) => entry.id === order.id ? saved : entry)); return saved }
+    catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'The purchase order status could not be updated.'); return null }
+  }
+
   function updateStatus(order: PurchaseOrder, status: PurchaseOrderStatus) {
     if (status === 'Cancelled' && order.status !== 'Cancelled') {
       setPendingVoidOrderId(order.id)
       return
     }
+    const change = status === 'Delivered' ? { deliveryStatus: 'Delivered' as const } : status === 'For Payment' ? { paymentStatus: 'To Pay' as const } : status === 'Waiting for Delivery' ? { deliveryStatus: 'Pending' as const } : status === 'Sent' ? { documentStatus: 'Sent' as const } : { documentStatus: 'Draft' as const }
+    void persistStatus(order, change).then((saved) => { if (saved) setToast('Purchase order status updated') })
+    return;
     setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, status, updatedAt: new Date().toISOString() } : entry))
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `PO status changed from ${order.status} to ${status}.`, actor: currentUsername, tone: status === 'Delivered' ? 'success' : status === 'Cancelled' ? 'danger' : 'info', amount: order.totalAmount, status })
     setToast('Purchase order status updated')
@@ -497,6 +499,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   function updateDocumentStatus(order: PurchaseOrder, documentStatus: PurchaseOrderDocumentStatus) {
     if (documentStatus === 'Cancelled') { setPendingVoidOrderId(order.id); return }
     if (order.documentStatus === documentStatus) return
+    void persistStatus(order, { documentStatus }).then((saved) => { if (saved) setToast(`Purchase order marked ${documentStatus.toLowerCase()}`) })
+    return
     const status = legacyStatusFor(documentStatus, order.deliveryStatus, order.paymentStatus)
     setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, documentStatus, status, updatedAt: new Date().toISOString() } : entry))
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `Document status changed from ${order.documentStatus} to ${documentStatus}.`, actor: currentUsername, tone: documentStatus === 'Sent' ? 'success' : 'info', amount: order.totalAmount, status: documentStatus })
@@ -505,6 +509,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
 
   function updateDeliveryStatus(order: PurchaseOrder, deliveryStatus: PurchaseOrderDeliveryStatus) {
     if (order.deliveryStatus === deliveryStatus) return
+    void persistStatus(order, { deliveryStatus }).then((saved) => { if (saved) setToast(`Delivery marked ${deliveryStatus.toLowerCase()}`) })
+    return
     const status = legacyStatusFor(order.documentStatus, deliveryStatus, order.paymentStatus)
     setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, deliveryStatus, status, updatedAt: new Date().toISOString() } : entry))
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `Delivery status changed from ${order.deliveryStatus} to ${deliveryStatus}.`, actor: currentUsername, tone: deliveryStatus === 'Delivered' ? 'success' : 'info', amount: order.totalAmount, status: deliveryStatus })
@@ -513,6 +519,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
 
   function updatePaymentStatus(order: PurchaseOrder, paymentStatus: PurchaseOrderPaymentStatus) {
     if (order.paymentStatus === paymentStatus) return
+    void persistStatus(order, { paymentStatus }).then((saved) => { if (saved) setToast('Payment status updated') })
+    return
     const status = legacyStatusFor(order.documentStatus, order.deliveryStatus, paymentStatus)
     setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, paymentStatus, status, updatedAt: new Date().toISOString() } : entry))
     if ((paymentStatus === 'To Pay' || paymentStatus === 'Overdue') && !order.addedToExpenses) addToExpenses(order, paymentStatus === 'Overdue' ? 'Overdue' : 'To pay')
@@ -521,11 +529,16 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setToast(paymentStatus === 'To Pay' || paymentStatus === 'Overdue' ? 'Payment status updated and expense synchronized' : 'Payment status updated')
   }
 
-  function confirmVoidOrder(reason: string, archiveAfterVoiding: boolean) {
+  async function confirmVoidOrder(reason: string, archiveAfterVoiding: boolean) {
     const order = orders.find((entry) => entry.id === pendingVoidOrderId)
     if (!order) return
+    const saved = await persistStatus(order, { documentStatus: 'Cancelled', reason, archiveAfterVoiding })
+    if (saved) { setPendingVoidOrderId(null); if (archiveAfterVoiding) setSelectedOrderId(null); setToast(archiveAfterVoiding ? 'Purchase order voided and archived' : 'Purchase order voided') }
+    return;
+    // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
     setOrders((current) => current.map((entry) => entry.id === order.id ? (archiveAfterVoiding ? withArchived(withVoided({ ...entry, status: 'Cancelled' as const, documentStatus: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason), currentUsername) : withVoided({ ...entry, status: 'Cancelled' as const, documentStatus: 'Cancelled' as const, updatedAt: new Date().toISOString() }, currentUsername, reason)) : entry))
     notifyLifecycleChanged()
+    // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Voided', entity: order.poNumber, description: `Purchase order voided: ${reason}${archiveAfterVoiding ? ' It was archived after voiding.' : ''}`, actor: currentUsername, tone: 'danger', amount: order.totalAmount, status: 'Cancelled' })
     setPendingVoidOrderId(null)
     if (archiveAfterVoiding) setSelectedOrderId(null)
@@ -604,7 +617,9 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setToast(quotation ? `Linked to ${quotation.quotationNumber}` : 'Project link removed')
   }
 
-  function deleteOrder(order: PurchaseOrder) {
+  async function deleteOrder(order: PurchaseOrder) {
+    try { await archivePurchaseOrder(order.id, order.version); setOrders((current) => current.filter((entry) => entry.id !== order.id)); setSelectedOrderId(null); setIsConfirmingDelete(false); setToast('Purchase order archived'); return }
+    catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'The purchase order could not be archived.'); return }
     setOrders((current) => current.map((entry) => entry.id === order.id ? withArchived(entry, currentUsername) : entry))
     notifyLifecycleChanged()
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Archived', entity: order.poNumber, description: `Purchase order for ${order.supplierName} was archived with expense links retained.`, actor: currentUsername, tone: 'info', amount: order.totalAmount, status: order.status })

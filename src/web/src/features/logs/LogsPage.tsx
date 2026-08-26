@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SummarySurface } from '../../components/ui/SummarySurface'
-import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { TableControls } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
-import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogEntry, type SystemLogModule } from '../../services/activityLog'
+import { listActivity, type ActivityEntry } from '../../services/api/insights'
+
+type SystemLogModule = ActivityEntry['module']
+type SystemLogEntry = ActivityEntry
 
 type ModuleFilter = 'All modules' | SystemLogModule
 type ActionFilter = 'All actions' | SystemLogEntry['action']
@@ -46,45 +49,30 @@ function escapeCsv(value: string | number | undefined) {
 }
 
 export function LogsPage() {
-  const [logs, setLogs] = useState<SystemLogEntry[]>(loadSystemLogs)
+  const [logs, setLogs] = useState<SystemLogEntry[]>([])
+  const [total, setTotal] = useState(0)
+  const [summary, setSummary] = useState({ today: 0, expenseValue: 0, actors: 0 })
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePersistentState('logs.page-size', 30)
+  const [sort, setSort] = usePersistentState('logs.sort', 'newest')
   const [search, setSearch] = usePersistentState('logs.search', '')
   const [moduleFilter, setModuleFilter] = usePersistentState<ModuleFilter>('logs.module', 'All modules')
   const [actionFilter, setActionFilter] = usePersistentState<ActionFilter>('logs.action', 'All actions')
   const [dateFilter, setDateFilter] = usePersistentState('logs.date', '')
 
   useEffect(() => {
-    const refresh = () => setLogs(loadSystemLogs())
-    window.addEventListener(systemLogsUpdatedEvent, refresh)
-    window.addEventListener('storage', refresh)
-    return () => {
-      window.removeEventListener(systemLogsUpdatedEvent, refresh)
-      window.removeEventListener('storage', refresh)
-    }
-  }, [])
+    const timer = window.setTimeout(() => { void listActivity({ search, module: moduleFilter === 'All modules' ? undefined : moduleFilter, action: actionFilter === 'All actions' ? undefined : actionFilter, date: dateFilter || undefined, sort, page, pageSize }).then((result) => { setLogs(result.items); setTotal(result.total); setSummary(result.summary) }) }, 160)
+    return () => window.clearTimeout(timer)
+  }, [actionFilter, dateFilter, moduleFilter, page, pageSize, search, sort])
 
-  const filteredLogs = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    return logs.filter((entry) => {
-      const matchesSearch = !query || [entry.entity, entry.description, entry.actor, entry.module, entry.action, entry.status ?? ''].some((value) => value.toLowerCase().includes(query))
-      const matchesModule = moduleFilter === 'All modules' || entry.module === moduleFilter
-      const matchesAction = actionFilter === 'All actions' || entry.action === actionFilter
-      const matchesDate = !dateFilter || entry.timestamp.slice(0, 10) === dateFilter
-      return matchesSearch && matchesModule && matchesAction && matchesDate
-    })
-  }, [actionFilter, dateFilter, logs, moduleFilter, search])
-
-  const logSortOptions = [
-    { value: 'newest', label: 'Newest first', getValue: (entry: SystemLogEntry) => entry.timestamp, direction: 'desc' as const },
-    { value: 'oldest', label: 'Oldest first', getValue: (entry: SystemLogEntry) => entry.timestamp, direction: 'asc' as const },
-    { value: 'module', label: 'Module A-Z', getValue: (entry: SystemLogEntry) => entry.module, direction: 'asc' as const },
-    { value: 'user', label: 'User A-Z', getValue: (entry: SystemLogEntry) => entry.actor, direction: 'asc' as const },
-  ]
-  const logTable = useTableView({ rows: filteredLogs, storageKey: 'logs.table', sortOptions: logSortOptions, pageSizeOptions: [15, 30, 60] })
+  const filteredLogs = logs
+  const logSortOptions = [{ value: 'newest', label: 'Newest first' }, { value: 'oldest', label: 'Oldest first' }, { value: 'module', label: 'Module A-Z' }, { value: 'user', label: 'User A-Z' }]
+  const logTable = { sortKey: sort, setSortKey: (value: string) => { setSort(value); setPage(1) }, page, pageCount: Math.max(1, Math.ceil(total / pageSize)), pageSize, setPage, setPageSize: (value: number) => { setPageSize(value); setPage(1) }, total, pageRows: logs }
 
   const today = new Date().toISOString().slice(0, 10)
-  const todayCount = logs.filter((entry) => entry.timestamp.slice(0, 10) === today).length
-  const financialVolume = logs.filter((entry) => entry.module === 'Expenses' && entry.action === 'Created').reduce((sum, entry) => sum + (entry.amount ?? 0), 0)
-  const actorCount = new Set(logs.map((entry) => entry.actor)).size
+  const todayCount = summary.today
+  const financialVolume = summary.expenseValue
+  const actorCount = summary.actors
   const activeFilterCount = Number(moduleFilter !== 'All modules') + Number(actionFilter !== 'All actions') + Number(Boolean(dateFilter))
 
   function clearFilters() {
@@ -92,11 +80,12 @@ export function LogsPage() {
     setModuleFilter('All modules')
     setActionFilter('All actions')
     setDateFilter('')
+    setPage(1)
   }
 
   function exportLogs() {
     const header = ['Timestamp', 'Module', 'Action', 'Entity', 'Description', 'Actor', 'Amount', 'Status']
-    const rows = filteredLogs.map((entry) => [entry.timestamp, entry.module, entry.action, entry.entity, entry.description, entry.actor, entry.amount, entry.status])
+    const rows = filteredLogs.map((entry) => [entry.timestamp, entry.module, entry.action, entry.entity, entry.description, entry.actor, entry.amount ?? undefined, entry.status ?? undefined])
     const csv = [header, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
@@ -116,7 +105,7 @@ export function LogsPage() {
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
           {[
-            { label: 'Total events', value: logs.length.toLocaleString(), dot: 'bg-brand-blue', tone: 'text-brand-blue' },
+            { label: 'Total events', value: total.toLocaleString(), dot: 'bg-brand-blue', tone: 'text-brand-blue' },
             { label: 'Today', value: todayCount.toLocaleString(), dot: 'bg-brand-orange', tone: 'text-brand-orange' },
             { label: 'Expense value', value: formatPeso(financialVolume), dot: 'bg-emerald-500', tone: 'text-emerald-700' },
             { label: 'Users', value: actorCount.toLocaleString(), dot: 'bg-violet-500', tone: 'text-violet-700' },
@@ -141,7 +130,7 @@ export function LogsPage() {
               <button className="group inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 lg:flex-none" type="button" onClick={exportLogs} disabled={!filteredLogs.length}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" /></svg>Export</button>
             </div>
           </div>
-          <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4"><div><p className="text-sm font-bold text-brand-blue">Activity ledger</p><p className="mt-0.5 text-[11px] text-slate-400">Newest transactions appear first</p></div><span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">{filteredLogs.length} {filteredLogs.length === 1 ? 'event' : 'events'}</span></div>
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4"><div><p className="text-sm font-bold text-brand-blue">Activity ledger</p><p className="mt-0.5 text-[11px] text-slate-400">Newest transactions appear first</p></div><span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">{total} {total === 1 ? 'event' : 'events'}</span></div>
         </div>
 
         <TableControls tableId="logs-table" storageKey="logs.table" columns={[{ index: 1, label: 'Transaction', required: true }, { index: 2, label: 'Module' }, { index: 3, label: 'Action' }, { index: 4, label: 'User' }, { index: 5, label: 'Date and time' }, { index: 6, label: 'Value' }]} sortKey={logTable.sortKey} sortOptions={logSortOptions} onSortChange={logTable.setSortKey} page={logTable.page} pageCount={logTable.pageCount} pageSize={logTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={logTable.setPage} onPageSizeChange={logTable.setPageSize} total={logTable.total} />
@@ -162,7 +151,7 @@ export function LogsPage() {
                         <td className="px-4 py-4"><p className="text-xs font-bold text-slate-600">{entry.action}</p>{entry.status ? <p className="mt-1 text-[10px] font-medium text-slate-400">{entry.status}</p> : null}</td>
                         <td className="px-4 py-4"><div className="flex items-center gap-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[linear-gradient(145deg,#092968,#00113f)] text-[9px] font-bold text-white">{initials(entry.actor)}</span><span className="truncate text-xs font-semibold text-slate-600" title={entry.actor}>{entry.actor}</span></div></td>
                         <td className="px-4 py-4"><p className="text-xs font-semibold text-slate-600">{timestamp.date}</p><p className="mt-1 text-[10px] font-medium text-slate-400">{timestamp.time}</p></td>
-                        <td className="px-4 py-4 text-right">{entry.amount !== undefined ? <span className="text-xs font-extrabold text-emerald-700">{formatPeso(entry.amount)}</span> : <span className="text-slate-300">—</span>}</td>
+                        <td className="px-4 py-4 text-right">{entry.amount != null ? <span className="text-xs font-extrabold text-emerald-700">{formatPeso(entry.amount)}</span> : <span className="text-slate-300">—</span>}</td>
                       </tr>
                     )
                   })}

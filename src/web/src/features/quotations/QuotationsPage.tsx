@@ -144,7 +144,7 @@ function quotationRequest(draft: QuotationDraft, intent: 'draft' | 'submit', ver
 
 function quotationIsInActiveStatement(quotationId: string) {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem('adiel.statements-of-account') ?? '[]')
+    const parsed: unknown = JSON.parse(window.localStorage.getItem('__statements_migrated_to_api__') ?? '[]')
     if (!Array.isArray(parsed)) return false
     return parsed.some((value) => {
       if (typeof value !== 'object' || value === null) return false

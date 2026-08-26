@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { PrivateImage } from '../../components/ui/PrivateImage'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { listBusinessOptions } from '../../services/api/settings'
 import { archiveSupplier, createSupplier, listSuppliers, updateSupplier, type Supplier as ApiSupplier, type SupplierContact as ApiSupplierContact, type SupplierPerformanceNote as ApiSupplierPerformanceNote, type SupplierType } from '../../services/api/suppliers'
+import { removeImage, uploadImage } from '../../services/api/images'
 import { SupplierProfile, type SupplierPurchaseOrder, type SupplierRegisteredItem } from './SupplierProfile'
 
 type SupplierFilter = 'All suppliers' | SupplierType
@@ -23,7 +25,7 @@ type SupplierPageProps = {
   currentUsername: string
 }
 
-const purchaseOrderStorageKey = 'adiel.purchase-orders'
+const purchaseOrderStorageKey = '__purchase_orders_migrated_to_api__'
 const itemStorageKey = '__items_migrated_to_api__'
 const supplierTypes: SupplierType[] = ['Contractor', 'Distributor', 'Manufacturer', 'Service provider', 'Other']
 const supplierTypeOptions = supplierTypes.map((value) => ({ value }))
@@ -158,58 +160,17 @@ function Icon({ path, className = 'size-4' }: { path: string; className?: string
   )
 }
 
-function LogoMark({ supplier, size = 'large' }: { supplier: Pick<Supplier, 'logo' | 'name'>; size?: 'large' | 'small' }) {
+function LogoMark({ supplier, size = 'large' }: { supplier: Pick<Supplier, 'logo' | 'name'> & { id?: string }; size?: 'large' | 'small' }) {
   const sizeClassName = size === 'large' ? 'size-14 rounded-2xl text-sm' : 'size-10 rounded-xl text-xs'
   return supplier.logo ? (
     <span className={`${sizeClassName} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white p-1.5 shadow-sm`}>
-      <img className="size-full object-contain" src={supplier.logo} alt="" />
+      <PrivateImage className="size-full object-contain" target="suppliers" entityId={supplier.id} objectPath={supplier.logo} alt="" />
     </span>
   ) : (
     <span className={`${sizeClassName} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#0a347b,#00113f)] font-extrabold tracking-wide text-white shadow-[0_9px_22px_-12px_rgba(0,20,76,0.8)]`} aria-hidden="true">
       {supplierInitials(supplier.name)}
     </span>
   )
-}
-
-function resizeLogo(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      reject(new Error('Upload a PNG, JPG, or WebP image.'))
-      return
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      reject(new Error('The logo must be smaller than 5 MB.'))
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('The logo could not be read.'))
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        reject(new Error('The logo could not be read.'))
-        return
-      }
-
-      const image = new Image()
-      image.onerror = () => reject(new Error('The image appears to be invalid.'))
-      image.onload = () => {
-        const maxSize = 480
-        const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.max(1, Math.round(image.width * scale))
-        canvas.height = Math.max(1, Math.round(image.height * scale))
-        const context = canvas.getContext('2d')
-        if (!context) {
-          reject(new Error('The logo could not be processed.'))
-          return
-        }
-        context.drawImage(image, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/webp', 0.86))
-      }
-      image.src = reader.result
-    }
-    reader.readAsDataURL(file)
-  })
 }
 
 export function SupplierPage({ currentUsername: _currentUsername }: SupplierPageProps) {
@@ -226,6 +187,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [categoryInput, setCategoryInput] = useState('')
   const [logoError, setLogoError] = useState('')
+  const [pendingLogo, setPendingLogo] = useState<File | null>(null)
   const [isProcessingLogo, setIsProcessingLogo] = useState(false)
   const [storageError, setStorageError] = useState('')
   const [toast, setToast] = useState('')
@@ -326,6 +288,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
 
   function openAddDialog() {
     setDraft(createEmptyDraft())
+    setPendingLogo(null)
     setEditingId(null)
     setCategoryInput('')
     setLogoError('')
@@ -334,6 +297,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   }
 
   function openEditDialog(supplier: Supplier) {
+    setPendingLogo(null)
     setDraft({
       logo: supplier.logo,
       name: supplier.name,
@@ -435,8 +399,9 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     setLogoError('')
     setIsProcessingLogo(true)
     try {
-      const logo = await resizeLogo(file)
-      setDraft((current) => ({ ...current, logo }))
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Upload a PNG, JPG, or WebP image up to 5 MB.')
+      setPendingLogo(file)
+      setDraft((current) => ({ ...current, logo: URL.createObjectURL(file) }))
     } catch (error) {
       setLogoError(error instanceof Error ? error.message : 'The logo could not be uploaded.')
     } finally {
@@ -466,13 +431,17 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     }
 
     try {
+      const previous = editingId ? suppliers.find((supplier) => supplier.id === editingId) : undefined
       const payload = {
         ...normalizedDraft,
+        logo: previous?.logo ?? '',
         catalogUrl: normalizedDraft.catalogLink,
       }
-      const saved = editingId
+      let saved = editingId
         ? await updateSupplier(editingId, { ...payload, version: suppliers.find((supplier) => supplier.id === editingId)?.version })
         : await createSupplier(payload)
+      if (pendingLogo) { const image = await uploadImage('suppliers', saved.id, saved.version, pendingLogo); saved = { ...saved, logo: image.objectPath, version: image.version } }
+      else if (previous?.logo && !draft.logo) { const removed = await removeImage('suppliers', saved.id, saved.version); saved = { ...saved, logo: '', version: removed.version } }
       const nextSupplier = toSupplier(saved)
       setSuppliers((current) => editingId ? current.map((supplier) => supplier.id === editingId ? nextSupplier : supplier) : [...current, nextSupplier])
       setStorageError('')

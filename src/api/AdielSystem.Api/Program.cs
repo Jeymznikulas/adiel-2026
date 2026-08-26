@@ -6,6 +6,12 @@ using AdielSystem.Application.Settings;
 using AdielSystem.Application.Suppliers;
 using AdielSystem.Application.Items;
 using AdielSystem.Application.Quotations;
+using AdielSystem.Application.PurchaseOrders;
+using AdielSystem.Application.Expenses;
+using AdielSystem.Application.Statements;
+using AdielSystem.Application.Tasks;
+using AdielSystem.Application.Insights;
+using AdielSystem.Application.Storage;
 using AdielSystem.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
@@ -29,6 +35,12 @@ builder.Services.AddScoped<SettingsService>();
 builder.Services.AddScoped<SupplierService>();
 builder.Services.AddScoped<ItemService>();
 builder.Services.AddScoped<QuotationService>();
+builder.Services.AddScoped<PurchaseOrderService>();
+builder.Services.AddScoped<ExpenseService>();
+builder.Services.AddScoped<StatementService>();
+builder.Services.AddScoped<TaskService>();
+builder.Services.AddScoped<InsightsService>();
+builder.Services.AddScoped<BusinessImageService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("WebClient", policy =>
@@ -68,6 +80,12 @@ api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolic
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapSupplierEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapItemEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapQuotationEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapPurchaseOrderEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapExpenseEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapStatementEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapTaskEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapInsightEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapImageEndpoints();
 
 app.Run();
 

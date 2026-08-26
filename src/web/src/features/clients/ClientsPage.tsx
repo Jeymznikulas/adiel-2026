@@ -5,10 +5,12 @@ import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
+import { PrivateImage } from '../../components/ui/PrivateImage'
 import { TableControls } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { archiveClient, createClient, getClient, getClientTimeline, listClientIndustries, listClients, updateClient, type Client, type ClientContact, type ClientDirectorySummary, type ClientIndustry } from '../../services/api/clients'
 import { ApiError } from '../../services/api/client'
+import { removeImage, uploadImage } from '../../services/api/images'
 import { navigateToBusinessSettings } from '../settings/settingsStorage'
 import { emptyClientTimelineSummary, mapClientTimeline, type ClientTimelineEntry, type ClientTimelineSummary } from './clientTimeline'
 
@@ -46,9 +48,9 @@ function createEmptyContact(): ClientContact {
   return { id: crypto.randomUUID(), name: '', email: '', phone: '', isPrimary: false, sortOrder: 0 }
 }
 
-function ClientPhoto({ client, size = 'card' }: { client: Pick<Client, 'photo' | 'name'>; size?: 'card' | 'profile' }) {
+function ClientPhoto({ client, size = 'card' }: { client: Pick<Client, 'photo' | 'name'> & { id?: string }; size?: 'card' | 'profile' }) {
   const sizeClass = size === 'profile' ? 'size-24 rounded-2xl sm:size-28' : 'size-14 rounded-2xl'
-  return client.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><img className="size-full object-cover" src={client.photo} alt={client.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#dfe8f6)] text-lg font-extrabold text-brand-blue shadow-sm`}>{initials(client.name)}</span>
+  return client.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><PrivateImage className="size-full object-cover" target="clients" entityId={client.id} objectPath={client.photo} alt={client.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#dfe8f6)] text-lg font-extrabold text-brand-blue shadow-sm`}>{initials(client.name)}</span>
 }
 
 function timelineStatusTone(status: string) {
@@ -221,6 +223,8 @@ export function ClientsPage() {
   const [isClientDialogOpen, setIsClientDialogOpen] = useState(false)
   const [editingClientId, setEditingClientId] = useState<string | null>(null)
   const [clientDraft, setClientDraft] = useState<ClientDraft>(createEmptyClient)
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
+  const [removeExistingPhoto, setRemoveExistingPhoto] = useState(false)
   const [formError, setFormError] = useState('')
   const [photoError, setPhotoError] = useState('')
   const [storageError, setStorageError] = useState('')
@@ -338,6 +342,7 @@ export function ClientsPage() {
     setClientDraft({ ...createEmptyClient(), industry: activeIndustries[0] ?? 'Other' })
     setFormError('')
     setPhotoError('')
+    setPendingPhoto(null); setRemoveExistingPhoto(false)
     setDeleteClientArmed(false)
     setIsClientDialogOpen(true)
   }
@@ -347,6 +352,7 @@ export function ClientsPage() {
     setClientDraft({ photo: client.photo, name: client.name, contactPerson: client.contactPerson, email: client.email, phone: client.phone, address: client.address, industry: client.industry, clientSince: client.clientSince, status: client.status, contacts: client.contacts.map((contact) => ({ ...contact })) })
     setFormError('')
     setPhotoError('')
+    setPendingPhoto(null); setRemoveExistingPhoto(false)
     setDeleteClientArmed(false)
     setIsClientDialogOpen(true)
   }
@@ -368,7 +374,7 @@ export function ClientsPage() {
     try {
       const request = {
         name: clientDraft.name.trim(),
-        photo: clientDraft.photo || null,
+        photo: previous?.photo || null,
         address: clientDraft.address.trim(),
         industry: clientDraft.industry.trim(),
         clientSince: clientDraft.clientSince,
@@ -376,7 +382,9 @@ export function ClientsPage() {
         contacts: contacts.map(({ id, name, email, phone }) => ({ id, name, email, phone })),
         ...(previous ? { version: previous.version } : {}),
       }
-      const saved = previous ? await updateClient(previous.id, request) : await createClient(request)
+      let saved = previous ? await updateClient(previous.id, request) : await createClient(request)
+      if (pendingPhoto) { const image = await uploadImage('clients', saved.id, saved.version, pendingPhoto); saved = { ...saved, photo: image.objectPath, version: image.version } }
+      else if ((removeExistingPhoto || Boolean(previous?.photo && !clientDraft.photo)) && saved.photo) { const removed = await removeImage('clients', saved.id, saved.version); saved = { ...saved, photo: '', version: removed.version } }
       setProfileClient((current) => current?.id === saved.id ? saved : current)
       setRefreshVersion((current) => current + 1)
       setIsClientDialogOpen(false)
@@ -415,7 +423,7 @@ export function ClientsPage() {
     event.target.value = ''
     if (!file) return
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { setPhotoError('Use a PNG, JPG, or WebP image up to 5 MB.'); return }
-    setPhotoError('Private image upload is being added in the next backend slice. No browser image data was saved.')
+    setPhotoError(''); setPendingPhoto(file); setRemoveExistingPhoto(false); setClientDraft((current) => ({ ...current, photo: URL.createObjectURL(file) }))
   }
 
   function addClientContact() {

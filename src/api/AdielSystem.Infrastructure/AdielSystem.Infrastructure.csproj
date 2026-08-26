@@ -4,4 +4,7 @@
     <PackageReference Include="Npgsql" />
     <ProjectReference Include="../AdielSystem.Application/AdielSystem.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AdielSystem.IntegrationTests" />
+  </ItemGroup>
 </Project>

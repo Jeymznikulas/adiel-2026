@@ -6,8 +6,7 @@ import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import type { StatementOfAccount, StatementStatus } from '../statement-of-account/statementOfAccountTypes'
-import { isActiveRecord } from '../../services/recordLifecycle'
-import { listQuotations } from '../../services/api/quotations'
+import { getSalesTracker, type SalesTracker } from '../../services/api/insights'
 
 const ProfitChart = lazy(() => import('./SalesProfitChart'))
 
@@ -45,8 +44,6 @@ type SalesRow = {
 
 type PeriodMode = 'Day' | 'Week' | 'Month' | 'Year' | 'Custom'
 
-const statementStorageKey = 'adiel.statements-of-account'
-const expenseStorageKey = 'adiel.expenses'
 const billingOptions = ['All billing', 'Unbilled', 'Draft SOA', 'Billed'].map((value) => ({ value }))
 const collectionOptions = ['All collections', 'Unbilled', 'Awaiting issue', 'Unpaid', 'Partially Paid', 'Paid', 'Overdue'].map((value) => ({ value }))
 const periodModes: PeriodMode[] = ['Day', 'Week', 'Month', 'Year', 'Custom']
@@ -140,37 +137,9 @@ function shiftPeriod(mode: PeriodMode, anchor: string, amount: number) {
   return dateKey(date)
 }
 
-function loadLinkedExpenses(): LinkedExpense[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null || !isActiveRecord(value)) return []
-      const expense = value as Partial<LinkedExpense>
-      if (typeof expense.id !== 'number' || typeof expense.quotationId !== 'string' || !expense.quotationId || expense.status === 'Cancelled') return []
-      return [
-        {
-          id: expense.id,
-          quotationId: expense.quotationId,
-          amount: Number(expense.amount) || 0,
-          status: typeof expense.status === 'string' ? expense.status : 'To pay',
-        },
-      ]
-    })
-  } catch {
-    return []
-  }
-}
+function loadLinkedExpenses(): LinkedExpense[] { return [] }
 
-function loadStatements(): StatementOfAccount[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(statementStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is StatementOfAccount => typeof value === 'object' && value !== null && isActiveRecord(value) && typeof (value as Partial<StatementOfAccount>).id === 'string' && Array.isArray((value as Partial<StatementOfAccount>).quotations))
-  } catch {
-    return []
-  }
-}
+function loadStatements(): StatementOfAccount[] { return [] }
 
 function effectiveStatementStatus(statement: StatementOfAccount): StatementStatus {
   if (statement.status === 'Cancelled' || statement.status === 'Draft') return statement.status
@@ -248,6 +217,13 @@ export function SalesTrackerPage() {
   const [quotations, setQuotations] = useState<SalesQuotation[]>([])
   const [statements, setStatements] = useState<StatementOfAccount[]>(loadStatements)
   const [expenses, setExpenses] = useState<LinkedExpense[]>(loadLinkedExpenses)
+  const [salesData, setSalesData] = useState<SalesTracker | null>(null)
+  const [apiPage, setApiPage] = useState(1)
+  const [apiPageSize, setApiPageSize] = useState(30)
+  const [apiSort, setApiSort] = useState('newest')
+  void setQuotations
+  void setStatements
+  void setExpenses
   const [search, setSearch] = usePersistentState('sales.search', '')
   const [billingFilter, setBillingFilter] = usePersistentState('sales.billing', 'All billing')
   const [collectionFilter, setCollectionFilter] = usePersistentState('sales.collection', 'All collections')
@@ -259,29 +235,21 @@ export function SalesTrackerPage() {
   })
   const [customTo, setCustomTo] = useState(() => dateKey(new Date()))
 
-  useEffect(() => {
-    function refresh() {
-      setStatements(loadStatements())
-      setExpenses(loadLinkedExpenses())
-    }
-    void listQuotations({ status: 'Approved', pageSize: 100 }).then((result) => setQuotations(result.items.map((quotation) => ({ id: quotation.id, dateCreated: quotation.quotationDate, quotationNumber: quotation.quotationNumber, clientId: quotation.clientId ?? '', clientName: quotation.clientName, contactPerson: quotation.contactPerson, subject: quotation.subject, projectLocation: quotation.projectLocation, leadTime: quotation.leadTime, subtotalAmount: quotation.subtotalAmount, totalAmount: quotation.totalAmount, estimatedCost: quotation.lines.reduce((total, line) => total + line.quantity * line.unitCost, 0), estimatedProfit: quotation.estimatedProfit, status: quotation.status, items: quotation.lines.map((line) => ({ id: line.id, quantity: line.quantity, unitCost: line.unitCost })) }))))
-    window.addEventListener('storage', refresh)
-    window.addEventListener('adiel:navigate', refresh)
-    return () => {
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('adiel:navigate', refresh)
-    }
-  }, [])
-
-  const rows = useMemo(() => quotations.map((quotation) => makeSalesRow(quotation, statements)), [quotations, statements])
+  const legacyRows = useMemo(() => quotations.map((quotation) => makeSalesRow(quotation, statements)), [quotations, statements])
   const activeRange = useMemo(() => (periodMode === 'Custom' ? { start: customFrom, end: customTo } : periodRange(periodMode, anchorDate)), [anchorDate, customFrom, customTo, periodMode])
   const activePeriodLabel = useMemo(() => periodLabel(periodMode, anchorDate), [anchorDate, periodMode])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void getSalesTracker({ from: activeRange.start, to: activeRange.end, search, billing: billingFilter, collection: collectionFilter, sort: apiSort, page: apiPage, pageSize: apiPageSize }).then(setSalesData) }, 160)
+    return () => window.clearTimeout(timer)
+  }, [activeRange.end, activeRange.start, apiPage, apiPageSize, apiSort, billingFilter, collectionFilter, search])
+  const rows = useMemo(() => salesData ? salesData.items.map((row): SalesRow => ({ quotation: { id: row.id, dateCreated: row.quotationDate, quotationNumber: row.quotationNumber, clientId: '', clientName: row.clientName, contactPerson: '', subject: row.subject, projectLocation: row.projectLocation, leadTime: row.leadTime, subtotalAmount: row.subtotalAmount, totalAmount: row.totalAmount, estimatedCost: row.estimatedCost, estimatedProfit: row.estimatedProfit, status: 'Approved', items: Array.from({ length: row.itemCount }, (_, index) => ({ id: String(index), quantity: 0, unitCost: 0 })) }, statement: row.statement ? ({ id: row.statement.id, soaNumber: row.statement.number, balance: row.statement.balance, totalPayments: row.statement.totalPayments } as StatementOfAccount) : undefined, billingStatus: row.billingStatus, collectionStatus: row.collectionStatus })) : legacyRows, [legacyRows, salesData])
   const periodRows = useMemo(() => rows.filter((row) => row.quotation.dateCreated >= activeRange.start && row.quotation.dateCreated <= activeRange.end), [activeRange.end, activeRange.start, rows])
   const expenseTotalsByQuotation = useMemo(() => {
+    if (salesData) return new Map(salesData.items.map((row) => [row.id, row.actualExpenses]))
     const totals = new Map<string, number>()
     expenses.forEach((expense) => totals.set(expense.quotationId, (totals.get(expense.quotationId) ?? 0) + expense.amount))
     return totals
-  }, [expenses])
+  }, [expenses, salesData])
   const matchingRows = useMemo(() => {
     const query = search.trim().toLowerCase()
     return periodRows
@@ -324,22 +292,23 @@ export function SalesTrackerPage() {
     storageKey: 'sales.table',
     sortOptions: salesSortOptions,
   })
-  const visibleRows = salesTable.pageRows
+  const visibleRows = salesData ? rows : salesTable.pageRows
+  const table = salesData ? { sortKey: apiSort, setSortKey: (value: string) => { setApiSort(value); setApiPage(1) }, page: apiPage, pageCount: Math.max(1, Math.ceil(salesData.total / apiPageSize)), pageSize: apiPageSize, setPage: setApiPage, setPageSize: (value: number) => { setApiPageSize(value); setApiPage(1) }, total: salesData.total } : salesTable
 
   const periodQuotationIds = new Set(periodRows.map((row) => row.quotation.id))
   const linkedStatements = statements.filter((statement) => statement.status !== 'Cancelled' && statement.quotations.some((quotation) => periodQuotationIds.has(quotation.id)))
   const uniqueStatements = Array.from(new Map(linkedStatements.map((statement) => [statement.id, statement])).values())
-  const totalSales = periodRows.reduce((total, row) => total + row.quotation.totalAmount, 0)
-  const estimatedRevenue = periodRows.reduce((total, row) => total + row.quotation.subtotalAmount, 0)
-  const estimatedCost = periodRows.reduce((total, row) => total + row.quotation.estimatedCost, 0)
-  const actualExpenses = periodRows.reduce((total, row) => total + (expenseTotalsByQuotation.get(row.quotation.id) ?? 0), 0)
-  const totalProfit = periodRows.reduce((total, row) => total + row.quotation.estimatedProfit, 0)
-  const actualProfit = estimatedRevenue - actualExpenses
-  const profitVariance = actualProfit - totalProfit
-  const profitMargin = totalSales ? (totalProfit / totalSales) * 100 : 0
-  const billedSales = periodRows.filter((row) => row.billingStatus === 'Billed').reduce((total, row) => total + row.quotation.totalAmount, 0)
-  const collected = uniqueStatements.reduce((total, statement) => total + statement.totalPayments, 0)
-  const receivables = uniqueStatements.reduce((total, statement) => total + statement.balance, 0)
+  const totalSales = salesData?.summary.approvedSales ?? periodRows.reduce((total, row) => total + row.quotation.totalAmount, 0)
+  const estimatedRevenue = salesData?.summary.estimatedRevenue ?? periodRows.reduce((total, row) => total + row.quotation.subtotalAmount, 0)
+  const estimatedCost = salesData?.summary.estimatedCost ?? periodRows.reduce((total, row) => total + row.quotation.estimatedCost, 0)
+  const actualExpenses = salesData?.summary.actualExpenses ?? periodRows.reduce((total, row) => total + (expenseTotalsByQuotation.get(row.quotation.id) ?? 0), 0)
+  const totalProfit = salesData?.summary.estimatedProfit ?? periodRows.reduce((total, row) => total + row.quotation.estimatedProfit, 0)
+  const actualProfit = salesData?.summary.actualProfit ?? estimatedRevenue - actualExpenses
+  const profitVariance = salesData?.summary.profitVariance ?? actualProfit - totalProfit
+  const profitMargin = salesData?.summary.profitMargin ?? (totalSales ? (totalProfit / totalSales) * 100 : 0)
+  const billedSales = salesData?.summary.billedSales ?? periodRows.filter((row) => row.billingStatus === 'Billed').reduce((total, row) => total + row.quotation.totalAmount, 0)
+  const collected = salesData?.summary.collections ?? uniqueStatements.reduce((total, statement) => total + statement.totalPayments, 0)
+  const receivables = salesData?.summary.receivables ?? uniqueStatements.reduce((total, statement) => total + statement.balance, 0)
 
   const chartData = useMemo(() => {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -540,7 +509,7 @@ export function SalesTrackerPage() {
             </div>
           </header>
           <Suspense fallback={<ChartLoadingState className="mt-6 h-72" />}>
-            <ProfitChart data={chartData} />
+            <ProfitChart data={salesData?.chart ?? chartData} />
           </Suspense>
         </section>
         <aside className="rounded-[1.5rem] bg-[linear-gradient(145deg,#00113f,#073078)] p-5 text-white shadow-[0_20px_48px_-30px_rgba(0,20,76,0.75)] sm:p-6">
@@ -649,15 +618,15 @@ export function SalesTrackerPage() {
           { index: 9, label: 'SOA' },
           { index: 10, label: 'Action', required: true },
         ]}
-        sortKey={salesTable.sortKey}
+        sortKey={table.sortKey}
         sortOptions={salesSortOptions}
-        onSortChange={salesTable.setSortKey}
-        page={salesTable.page}
-        pageCount={salesTable.pageCount}
-        pageSize={salesTable.pageSize}
-        onPageChange={salesTable.setPage}
-        onPageSizeChange={salesTable.setPageSize}
-        total={salesTable.total}
+        onSortChange={table.setSortKey}
+        page={table.page}
+        pageCount={table.pageCount}
+        pageSize={table.pageSize}
+        onPageChange={table.setPage}
+        onPageSizeChange={table.setPageSize}
+        total={table.total}
       />
       <div id="sales-register">
         <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_40px_-32px_rgba(0,20,76,0.35)]">

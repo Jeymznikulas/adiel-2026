@@ -2,7 +2,7 @@
 
 This file is the persistent implementation tracker for the ADIEL backend. Update it after every phase, but mark a phase complete only after its exit criteria and verification checks pass.
 
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-26
 
 ## Completion rules
 
@@ -26,7 +26,7 @@ Last reviewed: 2026-08-25
 - [x] Core Client list, get, create, update, archive and restore APIs exist.
 - [x] Client contacts, transactions, concurrency checks and mutation audit writes exist.
 - [x] The Clients page reads and writes Client records through the backend API.
-- [x] Twenty-two automated backend tests pass, including authenticated Client, Settings, Supplier, Item and Quotation database flows.
+- [x] Fifty-one automated backend tests pass, including authenticated Client, Settings, Supplier, Item, Quotation, Purchase Order, Expense, Statement, payment, Task, cross-module query and image flows.
 - [ ] The full backend is production-ready.
 
 ## Phase summary
@@ -40,13 +40,13 @@ Last reviewed: 2026-08-25
 | 4 | Suppliers | Complete |
 | 5 | Items and variants | Complete |
 | 6 | Quotations | Complete |
-| 7 | Purchase Orders | Not started |
-| 8 | Expenses | Not started |
-| 9 | Statements of Account | Not started |
-| 10 | Payments and Collections | Not started |
-| 11 | Tasks and subtasks | Not started |
-| 12 | Dashboard and cross-module pages | Not started |
-| 13 | Images and Supabase Storage | Deferred |
+| 7 | Purchase Orders | Complete |
+| 8 | Expenses | Complete |
+| 9 | Statements of Account | Complete |
+| 10 | Payments and Collections | Complete |
+| 11 | Tasks and subtasks | Complete |
+| 12 | Dashboard and cross-module pages | Complete |
+| 13 | Images and Supabase Storage | Complete |
 | 14 | Production hardening | Not started |
 
 ## Phase 0 — Stable baseline
@@ -183,126 +183,126 @@ Exit criteria: Quotations are transactionally persisted, numbered and calculated
 
 ## Phase 7 — Purchase Orders
 
-- [ ] Implement Purchase Order CRUD.
-- [ ] Implement Supplier, Client, Quotation and Item relationships.
-- [ ] Implement lines and charges.
-- [ ] Reserve PO numbers atomically.
-- [ ] Calculate totals on the backend.
-- [ ] Preserve historical descriptions and prices.
-- [ ] Implement document, delivery and payment statuses.
-- [ ] Implement valid status transitions.
-- [ ] Implement archive, restore and void behavior.
-- [ ] Implement optimistic concurrency and audit records.
-- [ ] Connect the Purchase Orders page to the API.
-- [ ] Remove Purchase Order business `localStorage`.
-- [ ] Add transaction and authenticated integration tests.
-- [ ] Mark Phase 7 complete in the summary table.
+- [x] Implement Purchase Order CRUD.
+- [x] Implement Supplier, Client, Quotation and Item relationships.
+- [x] Implement lines and charges.
+- [x] Reserve PO numbers atomically.
+- [x] Calculate totals on the backend.
+- [x] Preserve historical descriptions and prices.
+- [x] Implement document, delivery and payment statuses.
+- [x] Implement valid status transitions.
+- [x] Implement archive, restore and void behavior.
+- [x] Implement optimistic concurrency and audit records.
+- [x] Connect the Purchase Orders page to the API.
+- [x] Remove Purchase Order business `localStorage`.
+- [x] Add transaction and authenticated integration tests.
+- [x] Mark Phase 7 complete in the summary table.
 
 Exit criteria: Purchase Orders and their lifecycle work entirely through transactional, owner-protected APIs.
 
 ## Phase 8 — Expenses
 
-- [ ] Implement Expense CRUD.
-- [ ] Implement Expense categories and payment methods.
-- [ ] Implement optional Quotation and Purchase Order relationships.
-- [ ] Implement safe Expense generation from a Purchase Order.
-- [ ] Prevent duplicate PO-linked Expenses.
-- [ ] Implement valid Expense status transitions.
-- [ ] Implement archive and restore.
-- [ ] Implement optimistic concurrency and audit records.
-- [ ] Connect the Expenses page to the API.
-- [ ] Remove Expense business `localStorage`.
-- [ ] Add idempotency, transaction and integration tests.
-- [ ] Mark Phase 8 complete in the summary table.
+- [x] Implement Expense CRUD.
+- [x] Implement Expense categories and payment methods.
+- [x] Implement optional Quotation and Purchase Order relationships.
+- [x] Implement safe Expense generation from a Purchase Order.
+- [x] Prevent duplicate PO-linked Expenses.
+- [x] Implement valid Expense status transitions.
+- [x] Implement archive and restore.
+- [x] Implement optimistic concurrency and audit records.
+- [x] Connect the Expenses page to the API.
+- [x] Remove Expense business `localStorage`.
+- [x] Add idempotency, transaction and integration tests.
+- [x] Mark Phase 8 complete in the summary table.
 
 Exit criteria: Expenses and PO-linked Expense generation are transactional, idempotent and backend-controlled.
 
 ## Phase 9 — Statements of Account
 
-- [ ] Implement Statement CRUD.
-- [ ] Implement Client relationships.
-- [ ] Link eligible Quotations.
-- [ ] Implement Statement items and charges.
-- [ ] Reserve Statement numbers atomically.
-- [ ] Calculate totals and balances on the backend.
-- [ ] Implement payment schedules.
-- [ ] Implement late-charge rules and calculations.
-- [ ] Implement valid status transitions.
-- [ ] Implement archive, restore and void behavior.
-- [ ] Implement optimistic concurrency and audit records.
-- [ ] Connect the Statement of Account page to the API.
-- [ ] Remove Statement business `localStorage`.
-- [ ] Add transaction and calculation tests.
-- [ ] Mark Phase 9 complete in the summary table.
+- [x] Implement Statement CRUD.
+- [x] Implement Client relationships.
+- [x] Link eligible Quotations.
+- [x] Implement Statement items and charges.
+- [x] Reserve Statement numbers atomically.
+- [x] Calculate totals and balances on the backend.
+- [x] Implement payment schedules.
+- [x] Implement late-charge rules and calculations.
+- [x] Implement valid status transitions.
+- [x] Implement archive, restore and void behavior.
+- [x] Implement optimistic concurrency and audit records.
+- [x] Connect the Statement of Account page to the API.
+- [x] Remove Statement business `localStorage`.
+- [x] Add transaction and calculation tests.
+- [x] Mark Phase 9 complete in the summary table.
 
 Exit criteria: Statements, linked Quotations, schedules and late charges are persisted and calculated by the backend.
 
 ## Phase 10 — Payments and Collections
 
-- [ ] Record partial and full Statement payments.
-- [ ] Calculate Collection status and outstanding balances.
-- [ ] Prevent overpayment.
-- [ ] Protect payment submission with idempotency.
-- [ ] Keep payment records immutable.
-- [ ] Implement reversal or void correction records.
-- [ ] Never edit or delete a recorded payment.
-- [ ] Write financial audit records.
-- [ ] Connect Collections and Statement payment UI.
-- [ ] Remove related business `localStorage`.
-- [ ] Add calculation, concurrency, idempotency and integration tests.
-- [ ] Mark Phase 10 complete in the summary table.
+- [x] Record partial and full Statement payments.
+- [x] Calculate Collection status and outstanding balances.
+- [x] Prevent overpayment.
+- [x] Protect payment submission with idempotency.
+- [x] Keep payment records immutable.
+- [x] Implement reversal or void correction records.
+- [x] Never edit or delete a recorded payment.
+- [x] Write financial audit records.
+- [x] Connect Collections and Statement payment UI.
+- [x] Remove related business `localStorage`.
+- [x] Add calculation, concurrency, idempotency and integration tests.
+- [x] Mark Phase 10 complete in the summary table.
 
 Exit criteria: financial payment operations are immutable, transactional, idempotent and fully backend-calculated.
 
 ## Phase 11 — Tasks and subtasks
 
-- [ ] Implement Task CRUD.
-- [ ] Implement subtasks.
-- [ ] Implement priorities and due dates.
-- [ ] Implement valid status and completion transitions.
-- [ ] Implement archive and restore.
-- [ ] Implement optimistic concurrency and audit records.
-- [ ] Connect the Tasks page to the API.
-- [ ] Remove Task business `localStorage`.
-- [ ] Add domain and authenticated integration tests.
-- [ ] Mark Phase 11 complete in the summary table.
+- [x] Implement Task CRUD.
+- [x] Implement subtasks.
+- [x] Implement priorities and due dates.
+- [x] Implement valid status and completion transitions.
+- [x] Implement archive and restore.
+- [x] Implement optimistic concurrency and audit records.
+- [x] Connect the Tasks page to the API.
+- [x] Remove Task business `localStorage`.
+- [x] Add domain and authenticated integration tests.
+- [x] Mark Phase 11 complete in the summary table.
 
 Exit criteria: Tasks and subtasks work entirely through the owner-protected backend.
 
 ## Phase 12 — Dashboard and cross-module pages
 
-- [ ] Implement Dashboard summary queries.
-- [ ] Implement Sales Tracker queries.
-- [ ] Implement Global Search API.
-- [ ] Implement unified Archive API.
-- [ ] Implement Activity and audit-log API.
-- [ ] Add filtering, pagination and date ranges.
-- [ ] Keep aggregations and financial calculations on the backend.
-- [ ] Connect all derived frontend pages.
-- [ ] Remove remaining derived business `localStorage`.
-- [ ] Add query and authenticated integration tests.
-- [ ] Mark Phase 12 complete in the summary table.
+- [x] Implement Dashboard summary queries.
+- [x] Implement Sales Tracker queries.
+- [x] Implement Global Search API.
+- [x] Implement unified Archive API.
+- [x] Implement Activity and audit-log API.
+- [x] Add filtering, pagination and date ranges.
+- [x] Keep aggregations and financial calculations on the backend.
+- [x] Connect all derived frontend pages.
+- [x] Remove remaining derived business `localStorage`.
+- [x] Add query and authenticated integration tests.
+- [x] Mark Phase 12 complete in the summary table.
 
 Exit criteria: cross-module pages query Supabase through efficient backend endpoints and no longer reconstruct business state from the browser.
 
 ## Phase 13 — Images and Supabase Storage
 
-- [ ] Create or confirm a private `business-images` bucket.
-- [ ] Configure the backend Storage secret outside source control.
-- [ ] Implement a reusable Storage service.
-- [ ] Implement owner-protected multipart upload endpoints.
-- [ ] Enforce a 5 MB maximum.
-- [ ] Allow only PNG, JPEG and WebP.
-- [ ] Validate actual file signatures.
-- [ ] Generate safe object names on the backend.
-- [ ] Store object paths in `photo_url`, never Base64 or signed URLs.
-- [ ] Generate short-lived signed viewing URLs.
-- [ ] Implement safe replacement and old-file cleanup.
-- [ ] Handle failed uploads and orphan cleanup.
-- [ ] Connect Client, Supplier, Item and variant image controls.
-- [ ] Add Storage service and endpoint tests.
-- [ ] Document separate Storage-object backups.
-- [ ] Mark Phase 13 complete in the summary table.
+- [x] Create or confirm a private `business-images` bucket.
+- [x] Configure the backend Storage secret outside source control.
+- [x] Implement a reusable Storage service.
+- [x] Implement owner-protected multipart upload endpoints.
+- [x] Enforce a 5 MB maximum.
+- [x] Allow only PNG, JPEG and WebP.
+- [x] Validate actual file signatures.
+- [x] Generate safe object names on the backend.
+- [x] Store object paths in `photo_url`, never Base64 or signed URLs.
+- [x] Generate short-lived signed viewing URLs.
+- [x] Implement safe replacement and old-file cleanup.
+- [x] Handle failed uploads and orphan cleanup.
+- [x] Connect Client, Supplier, Item and variant image controls.
+- [x] Add Storage service and endpoint tests.
+- [x] Document separate Storage-object backups.
+- [x] Mark Phase 13 complete in the summary table.
 
 Exit criteria: business images are private, validated, replaceable and accessible only through short-lived authorized URLs.
 
@@ -376,6 +376,36 @@ Exit criteria: the deployed target configuration passes security, workflow, back
 | 2026-08-25 | Phase 6 | Complete .NET Release test suite | Passed | 13 unit tests and 9 integration tests passed. |
 | 2026-08-25 | Phase 6 | Frontend production build | Passed | TypeScript and Vite production build completed successfully. |
 | 2026-08-25 | Phase 6 | Quotation browser-storage scan | Passed | No `adiel.quotations` or `quotationStorageKey` references remain under `src/web/src`. |
+| 2026-08-25 | Phase 7 | Authenticated Purchase Order workflow integration test | Passed | Owner-authenticated server-calculated create, lifecycle change, void, archive and restore passed against Supabase with rollback. |
+| 2026-08-25 | Phase 7 | Complete .NET Release test suite | Passed | 13 unit tests and 10 integration tests passed. |
+| 2026-08-25 | Phase 7 | Frontend production build | Passed | TypeScript and Vite production build completed successfully. |
+| 2026-08-25 | Phase 7 | Purchase Order browser-storage scan | Passed | No `adiel.purchase-orders` references remain under `src/web/src`. |
+| 2026-08-25 | Phase 8 | Authenticated Expense and PO-generation integration tests | Passed | Owner-authenticated Expense CRUD, status lifecycle, stale-write rejection, void, archive/restore, PO generation and repeat-request idempotency passed against Supabase with rollback. |
+| 2026-08-25 | Phase 8 | Complete .NET Release test suite | Passed | 13 unit tests and 11 authenticated integration tests passed against Supabase. |
+| 2026-08-25 | Phase 8 | Frontend production build | Passed | TypeScript and Vite production build completed successfully. |
+| 2026-08-25 | Phase 8 | Expense browser-storage scan and final diff check | Passed | No `adiel.expenses` references remain under `src/web/src`; `git diff --check` passed. |
+| 2026-08-25 | Phase 9 | Authenticated Statement workflow integration | Passed | Owner-authenticated eligibility checks, snapshots, backend totals, schedules, concurrency, issued/overdue/void lifecycle, late-charge apply/waive, archive/restore and audit records passed against Supabase with rollback. |
+| 2026-08-25 | Phase 9 | Authentication and owner isolation | Passed | Anonymous Statement access returned 401 and an authenticated non-owner returned 403. |
+| 2026-08-25 | Phase 9 | Complete .NET Release test suite | Passed | 13 unit tests and 14 authenticated/infrastructure integration tests passed. |
+| 2026-08-25 | Phase 9 | Frontend production build | Passed | TypeScript and Vite production build completed successfully. |
+| 2026-08-25 | Phase 9 | Statement browser-storage scan and final diff check | Passed | No `adiel.statements-of-account` references remain under `src/web/src`; `git diff --check` passed. |
+| 2026-08-25 | Phase 10 | Authenticated payment and collection workflow integration | Passed | Partial/full payment, backend allocation and balances, idempotency replay, stale concurrent submission rejection, overpayment rejection, immutable reversal and financial audit records passed against Supabase with rollback. |
+| 2026-08-25 | Phase 10 | Payment authentication and owner isolation | Passed | Anonymous payment access returned 401 and an authenticated non-owner returned 403. |
+| 2026-08-25 | Phase 10 | Complete .NET Release test suite | Passed | 13 unit tests and 15 authenticated/infrastructure integration tests passed. |
+| 2026-08-25 | Phase 10 | Frontend production build | Passed | TypeScript and Vite production build completed successfully. |
+| 2026-08-25 | Phase 10 | Payment and collection storage scan and final diff check | Passed | No related business storage references remain under the Statement or Collections feature folders; `git diff --check` passed. |
+| 2026-08-26 | Phase 11 | Task domain and authenticated workflow integration | Passed | CRUD, subtask add/update/completion/removal, status and completion rules, priorities, due dates, parent checks, concurrency, archive/restore and audit records passed against Supabase with rollback. |
+| 2026-08-26 | Phase 11 | Task authentication and owner isolation | Passed | Anonymous Task access returned 401 and an authenticated non-owner returned 403. |
+| 2026-08-26 | Phase 11 | Complete .NET Release build and test suite | Passed | Release build completed with zero warnings/errors; 20 unit tests and 17 integration tests passed. |
+| 2026-08-26 | Phase 11 | Frontend verification | Passed | TypeScript typecheck and Vite production build completed successfully; only the existing large-chunk advisory remains. |
+| 2026-08-26 | Phase 11 | Task browser-storage scan and final diff check | Passed | No `adiel.tasks` or Task feature business `localStorage` references remain under `src/web/src`; `git diff --check` passed. |
+| 2026-08-26 | Phase 12 | Dashboard, Sales, Search, Archive and Activity integration | Passed | Owner-authenticated dashboard, sales date range, search, archive and activity filters/pagination executed against Supabase; invalid filters and non-owner access were rejected. |
+| 2026-08-26 | Phase 12 | Release/backend and frontend verification | Passed | API Release build and focused/full test runs completed; frontend typecheck and production build completed; derived pages have no direct business `localStorage` reads. |
+| 2026-08-26 | Phase 13 | Private bucket policy | Passed | The existing `business-images` bucket was confirmed and corrected to private with a 5 MB limit and PNG/JPEG/WebP allow-list. |
+| 2026-08-26 | Phase 13 | Storage service and authenticated endpoints | Passed | Signature validation, safe paths, owner authorization, Client/Supplier/Item/variant upload and viewing, replace/remove, concurrency, transactional reference/audit writes and failure cleanup passed 6 focused unit and 6 focused integration tests. |
+| 2026-08-26 | Phase 13 | Release/backend and frontend verification | Passed | Release build completed with zero warnings/errors; all 26 unit and 25 integration tests passed; frontend typecheck and production build passed; image Base64 and secret scans plus `git diff --check` passed. |
+| 2026-08-26 | Phase 13 | Live Storage round trip | Passed | A real private-object upload, backend reference update, signed download and cleanup completed against Supabase; signed paths are normalized under `/storage/v1`, and legacy external URLs are excluded from object cleanup. |
+| 2026-08-26 | Phase 13 | Secret rotation and final verification | Passed | The exposed legacy credential was replaced by a different externally stored modern Supabase secret; private-bucket verification and a real upload/signed-download/cleanup round trip passed with the replacement. Release build, 26 unit tests, 25 integration tests, frontend typecheck/build, secret/Base64/browser-storage scans and final diff checks passed. |
 
 ## Phase completion log
 
@@ -383,9 +413,16 @@ Add an entry only after every checklist item and exit criterion for that phase a
 
 | Date completed | Phase | Commit/checkpoint | Notes |
 |---|---|---|---|
+| 2026-08-26 | Phase 13 - Images and Supabase Storage | Working tree checkpoint | The private `business-images` bucket, externally stored rotated backend secret, validated multipart uploads, safe owner paths, transactional references/audits, signed viewing, replacement cleanup, four entity integrations, tests and backup documentation satisfy the Phase 13 exit criterion. |
+| 2026-08-26 | Phase 12 - Dashboard and cross-module pages | Working tree checkpoint | Owner-protected, parameterized dashboard, sales, search, unified archive and audit activity queries now provide backend pagination and financial aggregates; derived frontend pages consume those APIs. |
+| 2026-08-26 | Phase 11 — Tasks and subtasks | Working tree checkpoint | Tasks, subtasks, priorities, due dates, completion rules, archive/restore, concurrency and audit records are owner-protected and Supabase-backed; Tasks and Archive now use the API without Task business `localStorage`. |
+| 2026-08-25 | Phase 10 — Payments and Collections | Working tree checkpoint | Immutable Statement payments and reversals, idempotency, backend allocation, overpayment protection, financial auditing and API-backed Collections are owner-protected and Supabase-backed. |
+| 2026-08-25 | Phase 9 — Statements of Account | Working tree checkpoint | Statements, Client and eligible-Quotation relationships, immutable quotation snapshots, schedules, atomic numbering, backend totals, late-charge review, lifecycle, concurrency, audit and archive/restore are owner-protected and Supabase-backed; payments remain deferred to Phase 10. |
+| 2026-08-25 | Phase 8 — Expenses | Working tree checkpoint | Expenses, approved-Quotation links, transactional PO-generated expenses, idempotency, lifecycle status changes, archive/restore, concurrency and audit records are owner-protected and Supabase-backed. |
 | 2026-08-24 | Phase 1 — Finish Clients | Working tree checkpoint | Clients, contacts, industries, archive/restore and history are backend-backed and verified. |
 | 2026-08-25 | Phase 2 — Settings and business options | Working tree checkpoint | Shared settings and five configurable option types persist in Supabase, reload through owner-protected APIs and are verified without business `localStorage`. |
 | 2026-08-25 | Phase 3 — Document numbering | Working tree checkpoint | Rules, previews and atomic reservations are owner-protected and database-backed; the Settings UI persists directly to Supabase without numbering `localStorage`. |
 | 2026-08-25 | Phase 4 — Suppliers | Working tree checkpoint | Suppliers, contacts, categories, notes and archive/restore are owner-protected and backend-backed; the Supplier, Archive, Item and Purchase Order supplier selectors no longer read Supplier business data from `localStorage`. |
 | 2026-08-25 | Phase 5 — Items and variants | Working tree checkpoint | Items, variants, specifications, price adjustments and archive/restore are owner-protected and Supabase-backed; Item browser storage has been removed. |
 | 2026-08-25 | Phase 6 — Quotations | Working tree checkpoint | Quotations, lines, charges, backend totals, atomic numbering, lifecycle transitions, concurrency, audit history and archive/restore are owner-protected and Supabase-backed; all frontend quotation consumers now read backend data. |
+| 2026-08-25 | Phase 7 — Purchase Orders | Working tree checkpoint | Purchase orders, linked Supplier/Client/Quotation/Item snapshots, backend totals, atomic numbering, lifecycle status transitions, concurrency, audit history and archive/restore are owner-protected and Supabase-backed. |
