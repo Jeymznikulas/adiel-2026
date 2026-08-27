@@ -12,10 +12,11 @@ type SystemLogEntry = ActivityEntry
 type ModuleFilter = 'All modules' | SystemLogModule
 type ActionFilter = 'All actions' | SystemLogEntry['action']
 
-const moduleOptions: { value: ModuleFilter }[] = ['All modules', 'Tasks', 'Items', 'Expenses', 'Suppliers', 'Clients', 'Quotations', 'Purchase Orders', 'Statements of Account'].map((value) => ({ value: value as ModuleFilter }))
+const moduleOptions: { value: ModuleFilter }[] = ['All modules', 'Settings', 'Tasks', 'Items', 'Expenses', 'Suppliers', 'Clients', 'Quotations', 'Purchase Orders', 'Statements of Account'].map((value) => ({ value: value as ModuleFilter }))
 const actionOptions: { value: ActionFilter }[] = ['All actions', 'Created', 'Updated', 'Deleted', 'Status changed', 'Payment recorded', 'Subtask added', 'Subtask updated', 'Subtask removed', 'Added to Expenses', 'Removed from Expenses'].map((value) => ({ value: value as ActionFilter }))
 
 const moduleStyles: Record<SystemLogModule, { icon: string; iconTone: string; badge: string }> = {
+  Settings: { icon: 'M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7ZM19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2 3.46-.08-.02a1.7 1.7 0 0 0-1.79.25l-.42.24a1.7 1.7 0 0 0-.85 1.7V22h-4v-.09a1.7 1.7 0 0 0-.85-1.47l-.42-.24a1.7 1.7 0 0 0-1.88.08l-.07.05-2-3.46.08-.06A1.7 1.7 0 0 0 6.26 15v-.49a1.7 1.7 0 0 0-1.08-1.58L5.1 12.9v-4l.08-.03A1.7 1.7 0 0 0 6.26 7.3v-.49a1.7 1.7 0 0 0-.74-1.81l-.08-.06 2-3.46.07.05a1.7 1.7 0 0 0 1.88.08l.42-.24A1.7 1.7 0 0 0 10.66 0H14.66v.09a1.7 1.7 0 0 0 .85 1.47l.42.24a1.7 1.7 0 0 0 1.79-.25l.08-.02 2 3.46-.06.06a1.7 1.7 0 0 0-.34 1.88v.49a1.7 1.7 0 0 0 1.08 1.58l.08.03v4l-.08.03a1.7 1.7 0 0 0-1.08 1.58V15Z', iconTone: 'bg-slate-100 text-slate-600', badge: 'border-slate-200 bg-slate-50 text-slate-700' },
   Tasks: { icon: 'M9 11 12 14 22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11', iconTone: 'bg-sky-50 text-sky-600', badge: 'border-sky-100 bg-sky-50 text-sky-700' },
   Items: { icon: 'm21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5', iconTone: 'bg-orange-50 text-brand-orange', badge: 'border-orange-100 bg-orange-50 text-orange-700' },
   Expenses: { icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6', iconTone: 'bg-emerald-50 text-emerald-600', badge: 'border-emerald-100 bg-emerald-50 text-emerald-700' },
@@ -25,6 +26,8 @@ const moduleStyles: Record<SystemLogModule, { icon: string; iconTone: string; ba
   'Purchase Orders': { icon: 'M3 3h2l2.4 12.3a2 2 0 0 0 2 1.7h7.7a2 2 0 0 0 2-1.6L21 7H6M10 21h.01M18 21h.01', iconTone: 'bg-amber-50 text-amber-600', badge: 'border-amber-100 bg-amber-50 text-amber-700' },
   'Statements of Account': { icon: 'M4 2h16v20l-3-2-3 2-2-2-3 2-2-2-3 2V2M8 8h8M8 12h8M8 16h5', iconTone: 'bg-cyan-50 text-cyan-700', badge: 'border-cyan-100 bg-cyan-50 text-cyan-700' },
 }
+
+const fallbackModuleStyle = { icon: 'M4 4h16v16H4zM8 9h8M8 13h8M8 17h5', iconTone: 'bg-slate-100 text-slate-500', badge: 'border-slate-200 bg-slate-50 text-slate-600' }
 
 const toneDot = { success: 'bg-emerald-500', info: 'bg-sky-500', warning: 'bg-amber-500', danger: 'bg-red-500' }
 
@@ -142,7 +145,7 @@ export function LogsPage() {
                 <thead><tr className="border-b border-slate-100 bg-slate-50/70 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400"><th className="w-[29%] px-5 py-3.5">Transaction</th><th className="w-[14%] px-4 py-3.5">Module</th><th className="w-[15%] px-4 py-3.5">Action</th><th className="w-[16%] px-4 py-3.5">User</th><th className="w-[14%] px-4 py-3.5">Date &amp; time</th><th className="w-[12%] px-4 py-3.5 text-right">Value</th></tr></thead>
                 <tbody>
                   {logTable.pageRows.map((entry) => {
-                    const style = moduleStyles[entry.module]
+                    const style = moduleStyles[entry.module] ?? fallbackModuleStyle
                     const timestamp = formatTimestamp(entry.timestamp)
                     return (
                       <tr className="group border-b border-slate-100 transition-colors hover:bg-[#fbfcfe]" key={entry.id}>

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { loadSystemLogs, systemLogsUpdatedEvent, type SystemLogModule } from '../../services/activityLog'
+import { listActivity, type ActivityEntry } from '../../services/api/insights'
 import { Button, IconButton, type ButtonVariant } from './Button'
 
 export type WorkflowHeaderAction = {
@@ -28,7 +28,7 @@ type WorkflowHeaderProps = {
   secondaryActions?: WorkflowHeaderAction[]
   menuActions?: WorkflowHeaderAction[]
   badges?: WorkflowHeaderBadge[]
-  module: SystemLogModule
+  module: Exclude<ActivityEntry['module'], 'Settings'>
   recordId: string
   children?: ReactNode
 }
@@ -69,14 +69,19 @@ function formatTimestamp(value: string) {
 export function WorkflowHeader({ eyebrow, recordNumber, partyName, amount, createdLabel, status, steps, currentStep, primaryAction, secondaryActions = [], menuActions = [], badges = [], module, recordId, children }: WorkflowHeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
-  const [, setHistoryVersion] = useState(0)
+  const [history, setHistory] = useState<ActivityEntry[]>([])
+  const [historyError, setHistoryError] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const refresh = () => setHistoryVersion((value) => value + 1)
-    window.addEventListener(systemLogsUpdatedEvent, refresh)
-    return () => window.removeEventListener(systemLogsUpdatedEvent, refresh)
-  }, [])
+    if (!isHistoryOpen) return
+    let cancelled = false
+    setHistoryError('')
+    void listActivity({ module, recordId, pageSize: 100 })
+      .then((result) => { if (!cancelled) setHistory(result.items) })
+      .catch((error: unknown) => { if (!cancelled) setHistoryError(error instanceof Error ? error.message : 'Record activity could not be loaded.') })
+    return () => { cancelled = true }
+  }, [isHistoryOpen, module, recordId])
 
   useEffect(() => {
     if (!isMenuOpen && !isHistoryOpen) return
@@ -96,7 +101,6 @@ export function WorkflowHeader({ eyebrow, recordNumber, partyName, amount, creat
     }
   }, [isHistoryOpen, isMenuOpen])
 
-  const history = isHistoryOpen ? loadSystemLogs().filter((entry) => entry.module === module && entry.recordId === recordId) : []
   const stepCount = Math.max(steps.length, 1)
   const safeCurrentStep = Math.min(Math.max(currentStep, 0), stepCount - 1)
   const progressPercentage = stepCount === 1 ? 100 : (safeCurrentStep / (stepCount - 1)) * 100
@@ -141,6 +145,6 @@ export function WorkflowHeader({ eyebrow, recordNumber, partyName, amount, creat
     </div>
     {children ? <div className="relative mt-5 border-t border-slate-100 pt-4">{children}</div> : null}
 
-    {isHistoryOpen ? <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workflow-history-title"><button className="absolute inset-0" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history" /><section className="relative w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]"><header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Record activity</p><h3 className="mt-1 text-lg font-extrabold text-brand-blue" id="workflow-history-title">{recordNumber} history</h3></div><IconButton size="small" variant="ghost" label="Close history" onClick={() => setIsHistoryOpen(false)}><Icon path="M18 6 6 18M6 6l12 12" /></IconButton></header><div className="max-h-[65svh] overflow-y-auto p-5">{history.length ? <ol className="space-y-3">{history.map((entry) => <li className="rounded-xl border border-slate-200 bg-slate-50/55 p-3.5" key={entry.id}><div className="flex items-start justify-between gap-3"><p className="text-xs font-extrabold text-brand-blue">{entry.action}</p><time className="shrink-0 text-[9px] font-semibold text-slate-400">{formatTimestamp(entry.timestamp)}</time></div><p className="mt-1.5 text-[11px] leading-5 text-slate-600">{entry.description}</p><p className="mt-2 text-[9px] font-semibold text-slate-400">By {entry.actor}{entry.status ? ` · ${entry.status}` : ''}</p></li>)}</ol> : <div className="grid min-h-40 place-items-center text-center"><div><p className="text-sm font-extrabold text-brand-blue">No activity yet</p><p className="mt-1 text-xs text-slate-400">Changes to this record will appear here.</p></div></div>}</div></section></div> : null}
+    {isHistoryOpen ? <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workflow-history-title"><button className="absolute inset-0" type="button" onClick={() => setIsHistoryOpen(false)} aria-label="Close history" /><section className="relative w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.38)]"><header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Record activity</p><h3 className="mt-1 text-lg font-extrabold text-brand-blue" id="workflow-history-title">{recordNumber} history</h3></div><IconButton size="small" variant="ghost" label="Close history" onClick={() => setIsHistoryOpen(false)}><Icon path="M18 6 6 18M6 6l12 12" /></IconButton></header><div className="max-h-[65svh] overflow-y-auto p-5">{historyError ? <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">{historyError}</p> : history.length ? <ol className="space-y-3">{history.map((entry) => <li className="rounded-xl border border-slate-200 bg-slate-50/55 p-3.5" key={entry.id}><div className="flex items-start justify-between gap-3"><p className="text-xs font-extrabold text-brand-blue">{entry.action}</p><time className="shrink-0 text-[9px] font-semibold text-slate-400">{formatTimestamp(entry.timestamp)}</time></div><p className="mt-1.5 text-[11px] leading-5 text-slate-600">{entry.description}</p><p className="mt-2 text-[9px] font-semibold text-slate-400">By {entry.actor}{entry.status ? ` · ${entry.status}` : ''}</p></li>)}</ol> : <div className="grid min-h-40 place-items-center text-center"><div><p className="text-sm font-extrabold text-brand-blue">No activity yet</p><p className="mt-1 text-xs text-slate-400">Changes to this record will appear here.</p></div></div>}</div></section></div> : null}
   </section>
 }

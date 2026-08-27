@@ -12,6 +12,7 @@ using AdielSystem.Application.Statements;
 using AdielSystem.Application.Tasks;
 using AdielSystem.Application.Insights;
 using AdielSystem.Application.Storage;
+using AdielSystem.Application.Calendar;
 using AdielSystem.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
@@ -41,6 +42,7 @@ builder.Services.AddScoped<StatementService>();
 builder.Services.AddScoped<TaskService>();
 builder.Services.AddScoped<InsightsService>();
 builder.Services.AddScoped<BusinessImageService>();
+builder.Services.AddScoped<GoogleCalendarService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("WebClient", policy =>
@@ -75,6 +77,7 @@ app.MapHealthChecks("/health/ready");
 
 var api = app.MapGroup("/api/v1");
 api.MapSystemEndpoints();
+api.MapGoogleCalendarCallbackEndpoint();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapClientEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapSettingsEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapSupplierEndpoints();
@@ -86,6 +89,7 @@ api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolic
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapTaskEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapInsightEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapImageEndpoints();
+api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapGoogleCalendarEndpoints();
 
 app.Run();
 

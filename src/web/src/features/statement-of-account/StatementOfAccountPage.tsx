@@ -175,7 +175,7 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
   const initialQuery = new URLSearchParams(window.location.search)
   const openNewFromQuery = initialQuery.get('new') === '1'
   const openNewOnLoad = openNewFromQuery || window.location.pathname === '/statement-of-account/new'
-  const quotationIdOnLoad = initialQuery.get('quotationId')
+  const [sourceQuotationId] = useState(() => initialQuery.get('quotationId'))
   const editStatementIdOnLoad = /^\/statement-of-account\/([^/]+)\/edit$/.exec(window.location.pathname)?.[1]
   const editStatementOnLoad = editStatementIdOnLoad ? statements.find((statement) => statement.id === decodeURIComponent(editStatementIdOnLoad)) : undefined
   const [search, setSearch] = usePersistentState('statements.search', '')
@@ -186,14 +186,16 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
   const [draft, setDraft] = useState<StatementDraft>(() => {
     if (editStatementOnLoad) return statementDraftFrom(editStatementOnLoad)
     const values = emptyDraft(statements, clients)
-    if (!openNewOnLoad || !quotationIdOnLoad) return values
-    const quotation = quotations.find((entry) => entry.id === quotationIdOnLoad && entry.status === 'Approved')
+    if (!openNewOnLoad || !sourceQuotationId) return values
+    const quotation = quotations.find((entry) => entry.id === sourceQuotationId && entry.status === 'Approved')
     if (!quotation) return values
     const client = clients.find((entry) => entry.id === quotation.clientId)
     return { ...values, clientId: quotation.clientId, contactPerson: client?.contactPerson ?? '', quotationIds: [quotation.id] }
   })
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
+  const [isStatusChanging, setIsStatusChanging] = useState(false)
+  const statusMutationRef = useRef(false)
   const [toast, setToast] = useState('')
   const [pendingVoidStatementId, setPendingVoidStatementId] = useState<string | null>(null)
   const [paymentStatementId, setPaymentStatementId] = useState<string | null>(() => {
@@ -263,6 +265,13 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
     if (!statement) return
     setEditingId(statement.id); setDraft(statementDraftFrom(statement)); setIsFormOpen(true)
   }, [editStatementIdOnLoad, editingId, statements])
+
+  useEffect(() => {
+    if (!openNewOnLoad || editingId || !sourceQuotationId) return
+    const quotation = quotations.find((entry) => entry.id === sourceQuotationId && entry.status === 'Approved')
+    if (!quotation) return
+    setDraft((current) => current.quotationIds.length ? current : { ...current, clientId: quotation.clientId, contactPerson: quotation.contactPerson, quotationIds: [quotation.id] })
+  }, [editingId, openNewOnLoad, quotations, sourceQuotationId])
 
   useEffect(() => {
     if (!toast) return
@@ -402,12 +411,16 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
   }
 
   async function updateStatementStatus(statement: StatementOfAccount, status: StatementStatus) {
+    if (statusMutationRef.current) return
     if (status === 'Cancelled' && statement.status !== 'Cancelled') {
       setPendingVoidStatementId(statement.id)
       return
     }
+    statusMutationRef.current = true
+    setIsStatusChanging(true)
     try { const saved = await changeStatementStatus(statement.id, { status, version: statement.version }); setStatements((current) => current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setToast(`Statement marked ${status.toLowerCase()}.`) }
     catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement status could not be changed.') }
+    finally { statusMutationRef.current = false; setIsStatusChanging(false) }
   }
 
   function openPayment(statement: StatementOfAccount) {
@@ -430,8 +443,12 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
   async function confirmVoidStatement(reason: string, archiveAfterVoiding: boolean) {
     const statement = statements.find((entry) => entry.id === pendingVoidStatementId)
     if (!statement) return
+    if (statusMutationRef.current) return
+    statusMutationRef.current = true
+    setIsStatusChanging(true)
     try { const saved = await changeStatementStatus(statement.id, { status: 'Cancelled', reason, version: statement.version, archiveAfterVoiding }); setStatements((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== statement.id) : current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setPendingVoidStatementId(null); setToast(archiveAfterVoiding ? 'Statement voided and archived' : 'Statement voided'); if (archiveAfterVoiding) navigate('/statement-of-account') }
     catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement could not be voided.') }
+    finally { statusMutationRef.current = false; setIsStatusChanging(false) }
   }
 
   async function archiveStatement(statement: StatementOfAccount) {
@@ -482,7 +499,7 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
   }
 
   if (profileStatement && !isFormOpen) {
-    return <><div className="space-y-5"><StatementOfAccountProfile statement={profileStatement} effectiveStatus={effectiveStatus(profileStatement)} onBack={() => navigate('/statement-of-account')} onEdit={() => openEdit(profileStatement)} onRecordPayment={() => openPayment(profileStatement)} onArchive={() => archiveStatement(profileStatement)} onStatusChange={(status) => updateStatementStatus(profileStatement, status)} /><PaymentScheduleOverview statement={profileStatement} onReviewLateCharge={(scheduleEntryId) => openLateCharge(profileStatement, scheduleEntryId)} /></div>{renderPaymentDialog()}{renderLateChargeDialog()}{pendingVoidStatementId ? <VoidRecordDialog recordLabel="statement of account" onClose={() => setPendingVoidStatementId(null)} onConfirm={confirmVoidStatement} /> : null}<SuccessToast message={toast} /></>
+    return <>{storageError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{storageError}</div> : null}<div className="space-y-5"><StatementOfAccountProfile statement={profileStatement} effectiveStatus={effectiveStatus(profileStatement)} onBack={() => navigate('/statement-of-account')} onEdit={() => openEdit(profileStatement)} onRecordPayment={() => openPayment(profileStatement)} onArchive={() => archiveStatement(profileStatement)} onStatusChange={(status) => updateStatementStatus(profileStatement, status)} /><PaymentScheduleOverview statement={profileStatement} onReviewLateCharge={(scheduleEntryId) => openLateCharge(profileStatement, scheduleEntryId)} /></div>{renderPaymentDialog()}{renderLateChargeDialog()}{pendingVoidStatementId ? <VoidRecordDialog recordLabel="statement of account" onClose={() => setPendingVoidStatementId(null)} onConfirm={confirmVoidStatement} /> : null}<SuccessToast message={toast} /></>
   }
 
   function renderPaymentDialog() {

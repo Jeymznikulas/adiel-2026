@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { DocumentExportDialog } from '../../components/ui/DocumentExportDialog'
+import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { createPurchaseOrderPdfBlob } from '../../services/pdf/documentPdf'
 import { loadCompanyProfile, type CompanyProfile } from '../settings/settingsStorage'
 
@@ -66,7 +67,7 @@ export function PurchaseOrderDocumentDialog({ order, supplier, onSaveOrderConten
     <form className="relative my-6 w-full max-w-3xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.36)]" onSubmit={previewDocument}>
       <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Professional document</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="po-document-title">Export purchase order</h2><p className="mt-1 text-xs text-slate-400">{order.poNumber} - Download a ready-to-send PDF</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={onClose} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button></header>
       <div className="max-h-[calc(100svh-12rem)] space-y-5 overflow-y-auto px-6 py-5">
-        {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{error}</div> : null}
+        <FormErrorSummary message={error} title="Document could not be saved" />
         <section className={`rounded-2xl border p-4 ${isProfileComplete ? 'border-emerald-100 bg-emerald-50/45' : 'border-amber-200 bg-amber-50/55'}`}>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 items-center gap-3"><span className={`grid size-11 shrink-0 place-items-center rounded-xl ${isProfileComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}><Icon className="size-5" path="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" /></span><div className="min-w-0"><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Shared company profile</p><h3 className="mt-1 truncate text-sm font-extrabold text-brand-blue">{profile.companyName}</h3><p className="mt-1 truncate text-[10px] text-slate-500">{profile.email || 'Email not configured'} · {profile.tin ? `TIN ${profile.tin}` : 'TIN not configured'}</p></div></div><button className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-xl border border-brand-blue/10 bg-white px-3 text-[10px] font-bold text-brand-blue shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-50" type="button" onClick={openSettings}><Icon className="size-3.5" path="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />Open Settings</button></div>
           <p className="mt-3 border-t border-current/10 pt-3 text-[10px] leading-4 text-slate-500">Company details are managed once in Settings and shared by quotation, PO, and SOA PDFs.</p>

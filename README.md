@@ -97,6 +97,8 @@ After the migrations have completed, create the application owner in Supabase Da
 
 The migrated database trigger creates the related application profile. See [Authentication setup](docs/authentication.md) for the complete username-authentication behavior.
 
+Google Calendar task invitations are configured separately from login identity. See [Google Calendar setup](docs/google-calendar.md).
+
 ## 3. Configure backend secrets
 
 For local development, use .NET User Secrets. Copy the exact Session pooler connection values shown by **Supabase Dashboard > Connect**, including the host, username, and database password:

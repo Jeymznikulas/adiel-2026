@@ -5,6 +5,7 @@ import { DocumentFormScaffold, type DocumentFormAction } from '../../components/
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
+import { SquareImageCropper } from '../../components/ui/SquareImageCropper'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { listBusinessOptions } from '../../services/api/settings'
@@ -189,7 +190,8 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   const [categoryInput, setCategoryInput] = useState('')
   const [logoError, setLogoError] = useState('')
   const [pendingLogo, setPendingLogo] = useState<File | null>(null)
-  const [isProcessingLogo, setIsProcessingLogo] = useState(false)
+  const [logoToCrop, setLogoToCrop] = useState<File | null>(null)
+  const isProcessingLogo = logoToCrop !== null
   const [storageError, setStorageError] = useState('')
   const [toast, setToast] = useState('')
   const logoInputRef = useRef<HTMLInputElement>(null)
@@ -274,6 +276,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   function openAddDialog() {
     setDraft(createEmptyDraft())
     setPendingLogo(null)
+    setLogoToCrop(null)
     setEditingId(null)
     setCategoryInput('')
     setLogoError('')
@@ -283,6 +286,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
 
   function openEditDialog(supplier: Supplier) {
     setPendingLogo(null)
+    setLogoToCrop(null)
     setDraft({
       logo: supplier.logo,
       name: supplier.name,
@@ -330,6 +334,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     setIsDialogOpen(false)
     setIsConfirmingDelete(false)
     setLogoError('')
+    setLogoToCrop(null)
   }
 
   function updateContact(id: string, field: 'name' | 'email' | 'phone', value: string) {
@@ -377,21 +382,19 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     addCategory()
   }
 
-  async function handleLogoChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleLogoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
     setLogoError('')
-    setIsProcessingLogo(true)
-    try {
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Upload a PNG, JPG, or WebP image up to 5 MB.')
-      setPendingLogo(file)
-      setDraft((current) => ({ ...current, logo: URL.createObjectURL(file) }))
-    } catch (error) {
-      setLogoError(error instanceof Error ? error.message : 'The logo could not be uploaded.')
-    } finally {
-      setIsProcessingLogo(false)
-    }
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { setLogoError('Upload a PNG, JPG, or WebP image up to 5 MB.'); return }
+    setLogoToCrop(file)
+  }
+
+  function applyCroppedLogo(file: File) {
+    setLogoToCrop(null)
+    setPendingLogo(file)
+    setDraft((current) => ({ ...current, logo: URL.createObjectURL(file) }))
   }
 
   async function saveSupplier(event: FormEvent<HTMLFormElement>) {
@@ -640,7 +643,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
       {isDialogOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-3 backdrop-blur-sm animate-[supplier-backdrop-enter_180ms_ease-out] sm:p-5" role="dialog" aria-modal="true" aria-labelledby="supplier-form-heading">
           <button className="absolute inset-0" type="button" onClick={closeDialog} aria-label="Close supplier form" />
-          <form className="relative my-auto flex max-h-[calc(100svh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[1.6rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)] sm:max-h-[calc(100svh-2.5rem)]" onSubmit={saveSupplier}>
+          <form className="relative my-auto flex max-h-[calc(100svh-1.5rem)] min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-[1.6rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)] sm:max-h-[calc(100svh-2.5rem)]" onSubmit={saveSupplier}>
             <div className="relative flex shrink-0 items-start justify-between gap-4 overflow-hidden border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
               <div className="pointer-events-none absolute right-0 top-0 h-full w-64 bg-[radial-gradient(circle_at_100%_0%,rgba(0,20,76,0.06),transparent_65%)]" aria-hidden="true" />
               <div className="relative">
@@ -651,7 +654,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
               <button className="relative grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeDialog} aria-label="Close dialog"><Icon path="M18 6 6 18M6 6l12 12" /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
               <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)]">
                 <aside>
                   <p className={labelClassName}>Supplier logo <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></p>
@@ -660,6 +663,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
                     {isProcessingLogo ? <span className="absolute inset-0 grid place-items-center bg-white/85 backdrop-blur-sm"><span className="size-6 animate-spin rounded-full border-2 border-brand-blue/15 border-t-brand-blue" /></span> : null}
                   </button>
                   <input className="hidden" ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleLogoChange(event)} />
+                  <button className="mt-4 h-9 w-full max-w-56 rounded-xl border border-slate-200 bg-white text-[10px] font-bold text-brand-blue transition hover:border-brand-blue/20" type="button" onClick={() => logoInputRef.current?.click()} disabled={isProcessingLogo}>{isProcessingLogo ? 'Preparing...' : draft.logo ? 'Replace logo' : 'Upload logo'}</button>
                   {draft.logo ? <button className="mt-2 w-full max-w-56 rounded-lg py-2 text-[10px] font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => setDraft((current) => ({ ...current, logo: '' }))}>Remove logo</button> : null}
                   {logoError ? <p className="mt-2 max-w-56 text-[10px] font-semibold leading-4 text-red-600" role="alert">{logoError}</p> : null}
                 </aside>
@@ -754,6 +758,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
 
       {isDialogOpen ? <DocumentFormScaffold dialogTitleId="supplier-form-heading" breakdown={[{ label: 'Contacts', value: String(draft.contacts.length) }, { label: 'Categories', value: String(draft.categories.length) }]} totalLabel={isEditing ? 'Editing' : 'Creating'} totalValue={draft.name.trim() || 'New supplier'} helperText={isConfirmingDelete ? 'Archiving removes this supplier from the active directory.' : 'Supplier details, contacts, categories, and notes are saved together.'} backLabel={selectedSupplierId ? 'Back to supplier' : 'Back to suppliers'} onCancel={closeDialog} actions={supplierFormActions} /> : null}
 
+      {logoToCrop ? <SquareImageCropper file={logoToCrop} label="Supplier logo" onCancel={() => setLogoToCrop(null)} onConfirm={applyCroppedLogo} /> : null}
       <SuccessToast message={toast} />
     </div>
   )

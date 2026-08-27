@@ -40,7 +40,14 @@ public sealed class AuthenticatedQuotationFlowTests
 
         var approve = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/status", new { status = "Approved", reason = (string?)null, version = quotation.Version }, token);
         approve.EnsureSuccessStatusCode(); var approved = await approve.Content.ReadFromJsonAsync<QuotationDto>(token);
-        var voidResponse = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/status", new { status = "Voided", reason = "Test correction", version = approved!.Version }, token);
+        var revoke = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/status", new { status = "Draft", reason = (string?)null, version = approved!.Version }, token);
+        revoke.EnsureSuccessStatusCode(); var draft = await revoke.Content.ReadFromJsonAsync<QuotationDto>(token);
+        Assert.Equal("Draft", draft!.Status);
+        var reapprove = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/status", new { status = "For Approval", reason = (string?)null, version = draft.Version }, token);
+        reapprove.EnsureSuccessStatusCode(); var pending = await reapprove.Content.ReadFromJsonAsync<QuotationDto>(token);
+        var reapproveFinal = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/status", new { status = "Approved", reason = (string?)null, version = pending!.Version }, token);
+        reapproveFinal.EnsureSuccessStatusCode(); var approvedAgain = await reapproveFinal.Content.ReadFromJsonAsync<QuotationDto>(token);
+        var voidResponse = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/status", new { status = "Voided", reason = "Test correction", version = approvedAgain!.Version }, token);
         voidResponse.EnsureSuccessStatusCode(); var voided = await voidResponse.Content.ReadFromJsonAsync<QuotationDto>(token);
         var archive = await client.PostAsJsonAsync($"/api/v1/quotations/{quotation.Id}/archive", new { version = voided!.Version }, token);
         archive.EnsureSuccessStatusCode(); var archived = await archive.Content.ReadFromJsonAsync<QuotationDto>(token); Assert.NotNull(archived!.ArchivedAt);

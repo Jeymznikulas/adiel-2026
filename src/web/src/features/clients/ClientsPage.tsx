@@ -7,6 +7,7 @@ import { DocumentFormScaffold, type DocumentFormAction } from '../../components/
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
+import { SquareImageCropper } from '../../components/ui/SquareImageCropper'
 import { TableControls } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { archiveClient, createClient, getClient, getClientTimeline, listClientIndustries, listClients, updateClient, type Client, type ClientContact, type ClientDirectorySummary, type ClientIndustry } from '../../services/api/clients'
@@ -51,7 +52,8 @@ function createEmptyContact(): ClientContact {
 
 function ClientPhoto({ client, size = 'card' }: { client: Pick<Client, 'photo' | 'name'> & { id?: string }; size?: 'card' | 'profile' }) {
   const sizeClass = size === 'profile' ? 'size-24 rounded-2xl sm:size-28' : 'size-14 rounded-2xl'
-  return client.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><PrivateImage className="size-full object-cover" target="clients" entityId={client.id} objectPath={client.photo} alt={client.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#dfe8f6)] text-lg font-extrabold text-brand-blue shadow-sm`}>{initials(client.name)}</span>
+  const entityId = client.id ?? client.photo.split('/')[2]
+  return client.photo ? <span className={`${sizeClass} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white shadow-sm`}><PrivateImage className="size-full object-cover" target="clients" entityId={entityId} objectPath={client.photo} alt={client.name} /></span> : <span className={`${sizeClass} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#eef3fb,#dfe8f6)] text-lg font-extrabold text-brand-blue shadow-sm`}>{initials(client.name)}</span>
 }
 
 function timelineStatusTone(status: string) {
@@ -225,6 +227,7 @@ export function ClientsPage() {
   const [editingClientId, setEditingClientId] = useState<string | null>(null)
   const [clientDraft, setClientDraft] = useState<ClientDraft>(createEmptyClient)
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
+  const [photoToCrop, setPhotoToCrop] = useState<File | null>(null)
   const [removeExistingPhoto, setRemoveExistingPhoto] = useState(false)
   const [formError, setFormError] = useState('')
   const [photoError, setPhotoError] = useState('')
@@ -336,7 +339,7 @@ export function ClientsPage() {
     setClientDraft({ ...createEmptyClient(), industry: activeIndustries[0] ?? 'Other' })
     setFormError('')
     setPhotoError('')
-    setPendingPhoto(null); setRemoveExistingPhoto(false)
+    setPendingPhoto(null); setPhotoToCrop(null); setRemoveExistingPhoto(false)
     setDeleteClientArmed(false)
     setIsClientDialogOpen(true)
   }
@@ -346,7 +349,7 @@ export function ClientsPage() {
     setClientDraft({ photo: client.photo, name: client.name, contactPerson: client.contactPerson, email: client.email, phone: client.phone, address: client.address, industry: client.industry, clientSince: client.clientSince, status: client.status, contacts: client.contacts.map((contact) => ({ ...contact })) })
     setFormError('')
     setPhotoError('')
-    setPendingPhoto(null); setRemoveExistingPhoto(false)
+    setPendingPhoto(null); setPhotoToCrop(null); setRemoveExistingPhoto(false)
     setDeleteClientArmed(false)
     setIsClientDialogOpen(true)
   }
@@ -356,6 +359,7 @@ export function ClientsPage() {
     setDeleteClientArmed(false)
     setFormError('')
     setPhotoError('')
+    setPhotoToCrop(null)
   }
 
   function saveClient(event: FormEvent<HTMLFormElement>) {
@@ -424,7 +428,14 @@ export function ClientsPage() {
     event.target.value = ''
     if (!file) return
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { setPhotoError('Use a PNG, JPG, or WebP image up to 5 MB.'); return }
-    setPhotoError(''); setPendingPhoto(file); setRemoveExistingPhoto(false); setClientDraft((current) => ({ ...current, photo: URL.createObjectURL(file) }))
+    setPhotoError(''); setPhotoToCrop(file)
+  }
+
+  function applyCroppedPhoto(file: File) {
+    setPhotoToCrop(null)
+    setPendingPhoto(file)
+    setRemoveExistingPhoto(false)
+    setClientDraft((current) => ({ ...current, photo: URL.createObjectURL(file) }))
   }
 
   function addClientContact() {
@@ -478,6 +489,7 @@ export function ClientsPage() {
 
   function renderDialogs() {
     return <>
+      {photoToCrop ? <SquareImageCropper file={photoToCrop} label="Client picture" onCancel={() => setPhotoToCrop(null)} onConfirm={applyCroppedPhoto} /> : null}
       {isClientDialogOpen ? <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm animate-[supplier-backdrop-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="client-form-title"><button className="absolute inset-0" type="button" onClick={closeClientForm} aria-label="Close client form" /><form className="relative my-6 w-full max-w-4xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)]" onSubmit={saveClient}><div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5"><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">Relationship record</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="client-form-title">{editingClientId ? 'Edit client' : 'Add a client'}</h2><p className="mt-1 text-sm text-slate-500">Contact and relationship information</p></div><button className="grid size-9 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeClientForm}><Icon path="M18 6 6 18M6 6l12 12" /></button></div><div className="max-h-[calc(100svh-12rem)] overflow-y-auto px-6 py-5">{formError ? <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600">{formError}</p> : null}<div className="grid gap-5 lg:grid-cols-[13rem_1fr]"><aside><p className={labelClassName}>Client picture</p><div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-center"><div className="flex justify-center"><ClientPhoto client={{ photo: clientDraft.photo, name: clientDraft.name || 'Client' }} size="profile" /></div><input className="sr-only" ref={photoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handlePhotoChange} /><button className="mt-4 h-9 w-full rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-brand-blue transition hover:border-brand-blue/20" type="button" onClick={() => photoInputRef.current?.click()}>{clientDraft.photo ? 'Replace picture' : 'Upload picture'}</button>{clientDraft.photo ? <button className="mt-2 text-[10px] font-bold text-red-500" type="button" onClick={() => setClientDraft((current) => ({ ...current, photo: '' }))}>Remove picture</button> : null}{photoError ? <p className="mt-2 text-[10px] text-red-600">{photoError}</p> : <p className="mt-3 text-[10px] leading-4 text-slate-400">PNG, JPG, or WebP<br />up to 5 MB</p>}</div></aside><div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><label className={labelClassName} htmlFor="client-name">Client / company name</label><input className={fieldClassName} id="client-name" value={clientDraft.name} onChange={(event) => setClientDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Client or organization" autoFocus required /></div><div><label className={labelClassName}>Status</label><AnimatedDropdown value={clientDraft.status} options={statusOptions} onChange={(status) => setClientDraft((current) => ({ ...current, status }))} ariaLabel="Client status" /></div><div><label className={labelClassName}>Industry</label><AnimatedDropdown value={clientDraft.industry} options={industries.map((value) => ({ value }))} onChange={(industry) => setClientDraft((current) => ({ ...current, industry }))} ariaLabel="Client industry" /></div><div><label className={labelClassName}>Client since</label><AnimatedDatePicker value={clientDraft.clientSince} onChange={(clientSince) => setClientDraft((current) => ({ ...current, clientSince }))} ariaLabel="Client since date" required /></div><div className="sm:col-span-2"><label className={labelClassName} htmlFor="client-address">Address</label><textarea className="min-h-20 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-medium leading-5 text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="client-address" value={clientDraft.address} onChange={(event) => setClientDraft((current) => ({ ...current, address: event.target.value }))} placeholder="Complete client address" required /></div><section className="border-t border-slate-100 pt-4 sm:col-span-2"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-extrabold text-brand-blue">Contact persons</h3><p className="mt-1 text-[10px] text-slate-400">Add the people your team coordinates with for this client.</p></div><button className="group inline-flex h-9 items-center gap-1.5 rounded-xl border border-brand-blue/10 bg-blue-50 px-3 text-[11px] font-bold text-brand-blue transition hover:-translate-y-0.5 hover:bg-blue-100" type="button" onClick={addClientContact}><Icon className="size-3.5 transition-transform group-hover:rotate-90" path="M12 5v14M5 12h14" />Add contact</button></div><div className="mt-3 space-y-2.5">{clientDraft.contacts.map((contact, index) => <div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/55 p-3 animate-[supplier-card-enter_220ms_ease-out] sm:grid-cols-[1fr_1.15fr_0.8fr_auto]" key={contact.id}><div><label className={labelClassName} htmlFor={`client-contact-name-${contact.id}`}>Name</label><input className={fieldClassName} id={`client-contact-name-${contact.id}`} value={contact.name} onChange={(event) => updateClientContact(contact.id, 'name', event.target.value)} placeholder={`Contact ${index + 1}`} required /></div><div><label className={labelClassName} htmlFor={`client-contact-email-${contact.id}`}>Email</label><input className={fieldClassName} id={`client-contact-email-${contact.id}`} type="email" value={contact.email} onChange={(event) => updateClientContact(contact.id, 'email', event.target.value)} placeholder="name@company.com" required /></div><div><label className={labelClassName} htmlFor={`client-contact-phone-${contact.id}`}>Number</label><input className={fieldClassName} id={`client-contact-phone-${contact.id}`} value={contact.phone} onChange={(event) => updateClientContact(contact.id, 'phone', event.target.value)} placeholder="Contact number" required /></div><button className="grid size-11 place-items-center self-end rounded-xl text-slate-300 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30" type="button" onClick={() => removeClientContact(contact.id)} disabled={clientDraft.contacts.length === 1} aria-label={`Remove ${contact.name || `contact ${index + 1}`}`}><Icon path="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6" /></button></div>)}</div></section></div></div></div><div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">{editingClientId ? deleteClientArmed ? <div className="flex items-center gap-2"><span className="text-[11px] font-bold text-red-600">Archive this client?</span><button className="h-9 rounded-xl px-3 text-xs font-bold text-slate-500" type="button" onClick={() => setDeleteClientArmed(false)}>Cancel</button><button className="h-9 rounded-xl bg-red-600 px-3 text-xs font-bold text-white" type="button" onClick={deleteClient}>Archive</button></div> : <button className="h-10 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50" type="button" onClick={() => setDeleteClientArmed(true)}>Archive client</button> : <span />}<div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={closeClientForm}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">{editingClientId ? 'Save changes' : 'Create client'}</button></div></div></form></div> : null}
       {isClientDialogOpen ? <DocumentFormScaffold dialogTitleId="client-form-title" breakdown={[{ label: 'Contacts', value: String(clientDraft.contacts.length) }, { label: 'Status', value: clientDraft.status }]} totalLabel={editingClientId ? 'Editing' : 'Creating'} totalValue={clientDraft.name.trim() || 'New client'} helperText={deleteClientArmed ? 'Archiving removes this client from the active directory.' : 'Client details and contacts are saved together.'} backLabel={editingClientId ? 'Back to client' : 'Back to clients'} onCancel={closeClientForm} actions={clientFormActions} /> : null}
 

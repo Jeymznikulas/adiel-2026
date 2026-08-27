@@ -40,7 +40,7 @@ export type DocumentNumberingRule = {
 export type DocumentNumberPreview = { documentType: DocumentNumberingType; documentDate: string; number: string }
 
 export type BusinessOptionType = 'expense_category' | 'payment_method' | 'client_industry' | 'supplier_category' | 'item_category' | 'task_assignee'
-export type BusinessOption = { id: string; type: BusinessOptionType; name: string; isActive: boolean; sortOrder: number; usageCount: number; updatedAt: string; version: number }
+export type BusinessOption = { id: string; type: BusinessOptionType; name: string; isActive: boolean; sortOrder: number; usageCount: number; updatedAt: string; version: number; email: string | null }
 
 export const getCompanySettings = () => apiRequest<CompanySettings>('/settings/company')
 export const updateCompanySettings = (settings: Omit<CompanySettings, 'updatedAt'>) => apiRequest<CompanySettings>('/settings/company', { method: 'PUT', body: JSON.stringify(settings) })
@@ -51,8 +51,8 @@ export const updateDocumentNumberingRules = (rules: Array<Omit<DocumentNumbering
 export const previewDocumentNumber = (documentType: DocumentNumberingType, documentDate: string) => apiRequest<DocumentNumberPreview>('/settings/numbering/' + documentType + '/preview?documentDate=' + encodeURIComponent(documentDate))
 export const reserveDocumentNumber = (documentType: DocumentNumberingType, documentDate: string) => apiRequest<DocumentNumberPreview>('/settings/numbering/' + documentType + '/reserve', { method: 'POST', body: JSON.stringify({ documentDate }) })
 export const listBusinessOptions = (type: BusinessOptionType) => apiRequest<BusinessOption[]>(`/settings/options?type=${encodeURIComponent(type)}`)
-export const createBusinessOption = (type: BusinessOptionType, name: string) => apiRequest<BusinessOption>('/settings/options', { method: 'POST', body: JSON.stringify({ type, name }) })
-export const renameBusinessOption = (id: string, name: string, version: number) => apiRequest<BusinessOption>(`/settings/options/${id}`, { method: 'PUT', body: JSON.stringify({ name, version }) })
+export const createBusinessOption = (type: BusinessOptionType, name: string, email?: string) => apiRequest<BusinessOption>('/settings/options', { method: 'POST', body: JSON.stringify({ type, name, email }) })
+export const renameBusinessOption = (id: string, name: string, version: number, email?: string) => apiRequest<BusinessOption>(`/settings/options/${id}`, { method: 'PUT', body: JSON.stringify({ name, version, email }) })
 export const setBusinessOptionActive = (id: string, isActive: boolean, version: number) => apiRequest<BusinessOption>(`/settings/options/${id}/active`, { method: 'POST', body: JSON.stringify({ isActive, version }) })
 export const reorderBusinessOptions = (type: BusinessOptionType, options: BusinessOption[]) => apiRequest<BusinessOption[]>('/settings/options/order', { method: 'PUT', body: JSON.stringify({ type, items: options.map(({ id, version }) => ({ id, version })) }) })
 export const deleteBusinessOption = (id: string, version: number) => apiRequest<void>(`/settings/options/${id}?version=${version}`, { method: 'DELETE' })

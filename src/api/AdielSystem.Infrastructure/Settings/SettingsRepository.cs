@@ -158,7 +158,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
         return await ReadOptionsAsync(command, cancellationToken);
     }
 
-    public async Task<BusinessOption> CreateOptionAsync(string type, string name, CurrentUser actor, CancellationToken cancellationToken)
+    public async Task<BusinessOption> CreateOptionAsync(string type, string name, string? email, CurrentUser actor, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = Transaction.Current is null ? await connection.BeginTransactionAsync(cancellationToken) : null;
@@ -169,12 +169,13 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
             {
                 insert.Transaction = transaction;
                 insert.CommandText = """
-                    insert into public.business_options (option_type, name, is_active, sort_order)
-                    values (@type, @name, true, coalesce((select max(sort_order) + 1 from public.business_options where option_type=@type), 1))
+                    insert into public.business_options (option_type, name, contact_email, is_active, sort_order)
+                    values (@type, @name, @email, true, coalesce((select max(sort_order) + 1 from public.business_options where option_type=@type), 1))
                     returning id
                     """;
                 insert.Parameters.AddWithValue("type", type);
                 insert.Parameters.AddWithValue("name", name);
+                insert.Parameters.AddWithValue("email", (object?)email ?? DBNull.Value);
                 id = (Guid)(await insert.ExecuteScalarAsync(cancellationToken) ?? throw new InvalidOperationException("The option was not created."));
             }
             await InsertAuditAsync(connection, transaction, id, "Created", name, $"{DisplayType(type)} was added.", actor, cancellationToken);
@@ -188,7 +189,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
         }
     }
 
-    public async Task<BusinessOption> RenameOptionAsync(Guid id, string name, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken)
+    public async Task<BusinessOption> RenameOptionAsync(Guid id, string name, string? email, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = Transaction.Current is null ? await connection.BeginTransactionAsync(cancellationToken) : null;
@@ -198,13 +199,15 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
             await using (var update = connection.CreateCommand())
             {
                 update.Transaction = transaction;
-                update.CommandText = "update public.business_options set name=@name where id=@id and version=@version returning id";
+                update.CommandText = "update public.business_options set name=@name,contact_email=case when option_type='task_assignee' then @email else contact_email end where id=@id and version=@version returning id";
                 update.Parameters.AddWithValue("name", name);
+                update.Parameters.AddWithValue("email", (object?)email ?? DBNull.Value);
                 update.Parameters.AddWithValue("id", id);
                 update.Parameters.AddWithValue("version", expectedVersion);
                 if (await update.ExecuteScalarAsync(cancellationToken) is null) throw Stale();
             }
             await RenameUsagesAsync(connection, transaction, previous.Type, previous.Name, name, actor.Id, cancellationToken);
+            if (previous.Type == "task_assignee") await EnqueueAssigneeTasksAsync(connection, transaction, name, previous.Name, cancellationToken);
             await InsertAuditAsync(connection, transaction, id, "Updated", name, $"{DisplayType(previous.Type)} was renamed from {previous.Name} to {name}.", actor, cancellationToken);
             var saved = await GetOptionAsync(connection, transaction, id, cancellationToken);
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
@@ -304,7 +307,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
 
     private static string OptionSelectSql(string type) => $"""
         select option.id, option.option_type, option.name, option.is_active, option.sort_order,
-               {UsageExpression(type)} as usage_count, option.updated_at, option.version
+               {UsageExpression(type)} as usage_count, option.updated_at, option.version, option.contact_email
         from public.business_options option
         """;
 
@@ -354,6 +357,25 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task EnqueueAssigneeTasksAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, string name, string previousName, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            insert into public.calendar_sync_jobs (task_id, requested_task_version)
+            select task.id, task.version
+            from public.tasks task
+            where task.deleted_at is null
+              and exists (
+                select 1 from unnest(string_to_array(task.assigned_to_name, ',')) assignee
+                where lower(btrim(assignee)) in (lower(@name), lower(@previous_name))
+              )
+            """;
+        command.Parameters.AddWithValue("name", name);
+        command.Parameters.AddWithValue("previous_name", previousName);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task<CompanySettings> GetCompanyAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = CompanySelectSql; return await ReadCompanyAsync(command, cancellationToken); }
     private static async Task<DocumentDefaults> GetDocumentDefaultsAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = DocumentSelectSql; return await ReadDocumentDefaultsAsync(command, cancellationToken); }
     private static async Task<IReadOnlyList<DocumentNumberingRule>> GetDocumentNumberingRulesAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = DocumentNumberingSelectSql; return await ReadDocumentNumberingRulesAsync(command, cancellationToken); }
@@ -368,7 +390,7 @@ internal sealed class SettingsRepository(NpgsqlDataSource dataSource) : ISetting
     private static async Task<CompanySettings> ReadCompanyAsync(NpgsqlCommand command, CancellationToken cancellationToken) { await using var reader = await command.ExecuteReaderAsync(cancellationToken); if (!await reader.ReadAsync(cancellationToken)) throw new InvalidOperationException("Company settings are missing."); return new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetFieldValue<DateTimeOffset>(8), reader.GetInt64(9)); }
     private static async Task<DocumentDefaults> ReadDocumentDefaultsAsync(NpgsqlCommand command, CancellationToken cancellationToken) { await using var reader = await command.ExecuteReaderAsync(cancellationToken); if (!await reader.ReadAsync(cancellationToken)) throw new InvalidOperationException("Document defaults are missing."); return new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetBoolean(4), reader.GetInt32(5), reader.GetString(6), reader.GetDecimal(7), reader.GetFieldValue<DateTimeOffset>(8), reader.GetInt64(9)); }
     private static async Task<IReadOnlyList<DocumentNumberingRule>> ReadDocumentNumberingRulesAsync(NpgsqlCommand command, CancellationToken cancellationToken) { var results = new List<DocumentNumberingRule>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) results.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetFieldValue<DateTimeOffset>(6), reader.GetInt64(7))); return results; }
-    private static async Task<IReadOnlyList<BusinessOption>> ReadOptionsAsync(NpgsqlCommand command, CancellationToken cancellationToken) { var results = new List<BusinessOption>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) results.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetInt32(4), reader.GetInt64(5), reader.GetFieldValue<DateTimeOffset>(6), reader.GetInt64(7))); return results; }
+    private static async Task<IReadOnlyList<BusinessOption>> ReadOptionsAsync(NpgsqlCommand command, CancellationToken cancellationToken) { var results = new List<BusinessOption>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) results.Add(new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetInt32(4), reader.GetInt64(5), reader.GetFieldValue<DateTimeOffset>(6), reader.GetInt64(7), reader.IsDBNull(8) ? null : reader.GetString(8))); return results; }
     private static ConcurrencyConflictException Stale() => new("These settings changed after you opened them. Reload and try again.");
     private static string DisplayType(string type) => type.Replace('_', ' ');
 }

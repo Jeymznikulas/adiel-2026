@@ -7,10 +7,12 @@ public sealed class InsightsService(IInsightsRepository repository)
     private static readonly string[] SalesSortValues = ["newest", "oldest", "amount", "client"];
     private static readonly string[] ActivitySortValues = ["newest", "oldest", "module", "user"];
 
-    public Task<DashboardDto> GetDashboardAsync(int trendMonths, CancellationToken token)
+    public Task<DashboardDto> GetDashboardAsync(int trendMonths, DateOnly? from, DateOnly? to, CancellationToken token)
     {
         if (trendMonths is not (6 or 12)) throw new RequestValidationException("Trend months must be 6 or 12.");
-        return repository.GetDashboardAsync(trendMonths, DateOnly.FromDateTime(DateTime.UtcNow), token);
+        if (from is not null && to is not null && from > to) throw new RequestValidationException("The dashboard start date must not be after the end date.");
+        if (from is null != to is null) throw new RequestValidationException("Choose both dashboard start and end dates.");
+        return repository.GetDashboardAsync(trendMonths, DateOnly.FromDateTime(DateTime.UtcNow), from, to, token);
     }
 
     public Task<SalesTrackerPageDto> GetSalesAsync(DateOnly from, DateOnly to, string? search, string? billing, string? collection, string? sort, int page, int pageSize, CancellationToken token)
@@ -39,14 +41,14 @@ public sealed class InsightsService(IInsightsRepository repository)
         return repository.ListArchiveAsync(search?.Trim() ?? string.Empty, normalizedModule, page, pageSize, token);
     }
 
-    public Task<ActivityPageDto> ListActivityAsync(string? search, string? module, string? action, DateOnly? date, string? sort, int page, int pageSize, CancellationToken token)
+    public Task<ActivityPageDto> ListActivityAsync(string? search, string? module, string? action, DateOnly? date, Guid? recordId, string? sort, int page, int pageSize, CancellationToken token)
     {
         ValidatePage(page, pageSize);
         var normalizedModule = string.IsNullOrWhiteSpace(module) || module == "All modules" ? null : module.Trim();
         if (normalizedModule is not null && !ArchiveModules.Contains(normalizedModule, StringComparer.Ordinal)) throw new RequestValidationException("Activity module is invalid.");
         var normalizedAction = string.IsNullOrWhiteSpace(action) || action == "All actions" ? null : action.Trim();
         if (normalizedAction is not null && !ActivityActions.Contains(normalizedAction, StringComparer.Ordinal)) throw new RequestValidationException("Activity action is invalid.");
-        return repository.ListActivityAsync(new(search?.Trim() ?? string.Empty, normalizedModule, normalizedAction, date, NormalizeSort(sort, ActivitySortValues, "Activity"), page, pageSize), token);
+        return repository.ListActivityAsync(new(search?.Trim() ?? string.Empty, normalizedModule, normalizedAction, date, recordId, NormalizeSort(sort, ActivitySortValues, "Activity"), page, pageSize), token);
     }
 
     private static readonly string[] ArchiveModules = ["Tasks", "Items", "Expenses", "Suppliers", "Clients", "Quotations", "Purchase Orders", "Statements of Account"];

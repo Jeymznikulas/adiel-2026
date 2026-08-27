@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { DocumentContentFormSectionPortal } from '../../components/ui/DocumentContentFields'
 import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
@@ -204,6 +204,8 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const [statusFilter, setStatusFilter] = usePersistentState('quotations.status', 'All statuses')
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
+  const [isStatusChanging, setIsStatusChanging] = useState(false)
+  const statusMutationRef = useRef(false)
   const [toast, setToast] = useState('')
   const [approvalReviewId, setApprovalReviewId] = useState<string | null>(() => reviewQuotationIdOnLoad ? decodeURIComponent(reviewQuotationIdOnLoad) : null)
   const [pendingRejectQuotationId, setPendingRejectQuotationId] = useState<string | null>(null)
@@ -338,19 +340,6 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     openQuotationFormPage(`/quotations/${encodeURIComponent(quotation.id)}/edit`)
   }
 
-  function duplicateQuotation(quotation: Quotation) {
-    const dateCreated = new Date().toISOString().slice(0, 10)
-    setDraft({ dateCreated, quotationNumber: 'Assigned when saved', clientId: quotation.clientId, clientName: quotation.clientName, contactId: quotation.contactId, contactPerson: quotation.contactPerson, subject: quotation.subject, projectLocation: quotation.projectLocation, leadTime: quotation.leadTime, notes: quotation.notes, terms: quotation.terms, items: quotation.items.map((line) => ({ ...line, id: crypto.randomUUID(), quantity: String(line.quantity), unitPrice: String(line.unitPrice) })), vatEnabled: quotation.vatEnabled, otherCharges: quotation.otherCharges.map((charge) => ({ ...charge, id: crypto.randomUUID(), amount: String(charge.amount) })), status: 'Draft' })
-    setEditingId(null)
-    setFormError('')
-    setItemSearch('')
-    setIsClientPickerOpen(false)
-    setIsItemPickerOpen(false)
-    setIsPricingDialogOpen(false)
-    setIsFormOpen(true)
-    openQuotationFormPage('/quotations/new')
-  }
-
   function backToQuotationRegister() {
     window.history.pushState(null, '', '/quotations')
     window.dispatchEvent(new Event('adiel:navigate'))
@@ -414,6 +403,9 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   }
 
   async function applyStatus(quotation: Quotation, status: QuotationStatus, reason?: string, archiveAfterVoiding = false) {
+    if (statusMutationRef.current) return null
+    statusMutationRef.current = true
+    setIsStatusChanging(true)
     try {
       const saved = toQuotation(await changeQuotationStatus(quotation.id, status, quotation.version, reason, archiveAfterVoiding))
       setQuotations((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== quotation.id) : current.map((entry) => entry.id === quotation.id ? saved : entry))
@@ -422,6 +414,9 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     } catch (error) {
       setStorageError(error instanceof Error ? error.message : 'The quotation status could not be changed.')
       return null
+    } finally {
+      statusMutationRef.current = false
+      setIsStatusChanging(false)
     }
   }
 
@@ -507,7 +502,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     { label: 'Rejected', value: activeQuotations.filter((quotation) => quotation.status === 'Rejected').length, color: 'text-red-600', dot: 'bg-red-500' },
   ]
 
-  if (routeQuotation && !isFormOpen) return <><QuotationProfile quotation={routeQuotation} onBack={backToQuotationRegister} onEdit={() => openEditQuotation(routeQuotation)} onDuplicate={() => duplicateQuotation(routeQuotation)} onArchive={() => archiveQuotation(routeQuotation)} onStatusChange={(status) => updateStatus(routeQuotation, status)} onCreateStatement={() => { window.history.pushState(null, '', `/statement-of-account?new=1\u0026quotationId=${encodeURIComponent(routeQuotation.id)}`); window.dispatchEvent(new Event('adiel:navigate')) }} />{approvalDialog}{pendingRejectQuotationId ? <RejectionReasonDialog quotationNumber={quotations.find((entry) => entry.id === pendingRejectQuotationId)?.quotationNumber ?? 'quotation'} onClose={() => setPendingRejectQuotationId(null)} onConfirm={rejectQuotation} /> : null}{pendingVoidQuotationId ? <VoidRecordDialog recordLabel="quotation" onClose={() => setPendingVoidQuotationId(null)} onConfirm={confirmVoidQuotation} /> : null}<SuccessToast message={toast} /></>
+  if (routeQuotation && !isFormOpen) return <>{storageError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{storageError}</div> : null}<QuotationProfile quotation={routeQuotation} onBack={backToQuotationRegister} onEdit={() => openEditQuotation(routeQuotation)} onArchive={() => archiveQuotation(routeQuotation)} onStatusChange={(status) => updateStatus(routeQuotation, status)} onCreateStatement={() => { window.history.pushState(null, '', `/statement-of-account?new=1\u0026quotationId=${encodeURIComponent(routeQuotation.id)}`); window.dispatchEvent(new Event('adiel:navigate')) }} />{approvalDialog}{pendingRejectQuotationId ? <RejectionReasonDialog quotationNumber={quotations.find((entry) => entry.id === pendingRejectQuotationId)?.quotationNumber ?? 'quotation'} onClose={() => setPendingRejectQuotationId(null)} onConfirm={rejectQuotation} /> : null}{pendingVoidQuotationId ? <VoidRecordDialog recordLabel="quotation" onClose={() => setPendingVoidQuotationId(null)} onConfirm={confirmVoidQuotation} /> : null}<SuccessToast message={toast} /></>
 
   if (routeQuotationId && !routeQuotation && !isFormOpen) return <div className="grid min-h-[28rem] place-items-center text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-slate-100 text-slate-300"><Icon className="size-6" path="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6" /></span><h2 className="mt-4 text-xl font-extrabold text-brand-blue">Quotation not found</h2><p className="mt-2 text-xs text-slate-400">This quotation may no longer be available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={backToQuotationRegister}>Back to quotations</button></div></div>
 

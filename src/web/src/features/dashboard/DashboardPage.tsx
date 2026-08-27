@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { type SystemLogEntry } from '../../services/activityLog'
 import { getDashboard, type Dashboard } from '../../services/api/insights'
@@ -335,13 +336,15 @@ export function DashboardPage({ username }: { username: string }) {
   const [data, setData] = useState<DashboardData>(emptyData)
   const [dashboardData, setDashboardData] = useState<Dashboard | null>(null)
   const [trendMonths, setTrendMonths] = useState<6 | 12>(6)
+  const [trendFrom, setTrendFrom] = useState(() => dateKey(new Date(new Date().getFullYear(), new Date().getMonth() - 5, 1)))
+  const [trendTo, setTrendTo] = useState(() => dateKey(new Date()))
   const [showAllActions, setShowAllActions] = useState(false)
   void setData
   void loadDashboardData
 
   useEffect(() => {
-    void getDashboard(trendMonths).then(setDashboardData)
-  }, [trendMonths])
+    void getDashboard(trendMonths, trendFrom, trendTo).then(setDashboardData)
+  }, [trendFrom, trendMonths, trendTo])
 
   const legacyDashboard = useMemo(() => {
     const ranges = currentRanges()
@@ -509,6 +512,8 @@ export function DashboardPage({ username }: { username: string }) {
         <article className="min-w-0 rounded-2xl border border-red-100 bg-red-50/55 px-3 py-3.5 sm:min-w-32 sm:px-4"><div className="flex items-center justify-between gap-1"><p className="truncate text-[10px] font-bold uppercase tracking-[0.07em] text-red-500">Urgent tasks</p><DashboardInfo title="Urgent tasks" source="Tasks" included="Incomplete high-priority, overdue, or due-within-three-days tasks." calculation="Count of all tasks currently requiring attention." /></div><p className="mt-2 text-lg font-extrabold text-red-600">{dashboard.urgentTaskCount}</p></article>
       </div>
     </SummarySurface>
+
+    <section className="flex flex-col gap-3 rounded-[1.25rem] border border-slate-200/80 bg-white px-4 py-3.5 shadow-[0_10px_28px_-25px_rgba(0,20,76,0.3)] sm:flex-row sm:items-end sm:justify-between" aria-label="Dashboard date range"><div><p className="text-xs font-extrabold text-brand-blue">Business trend date range</p><p className="mt-0.5 text-[10px] text-slate-400">Filter the dashboard trend with the same From and To dates used in Sales.</p></div><div className="grid gap-2 sm:grid-cols-2"><div><p className="mb-1 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">From</p><AnimatedDatePicker value={trendFrom} onChange={(from) => { setTrendFrom(from); if (from > trendTo) setTrendTo(from) }} max={trendTo} ariaLabel="Dashboard trend start date" size="filter" /></div><div><p className="mb-1 text-[9px] font-bold uppercase tracking-[0.08em] text-slate-400">To</p><AnimatedDatePicker value={trendTo} onChange={(to) => { setTrendTo(to); if (to < trendFrom) setTrendFrom(to) }} min={trendFrom} ariaLabel="Dashboard trend end date" size="filter" /></div></div></section>
 
     <section className="flex flex-col gap-3 rounded-[1.25rem] border border-slate-200/80 bg-white px-4 py-3.5 shadow-[0_10px_28px_-25px_rgba(0,20,76,0.3)] sm:flex-row sm:items-center" aria-label="Quick actions"><div className="shrink-0"><p className="text-xs font-extrabold text-brand-blue">Quick actions</p><p className="mt-0.5 text-[10px] text-slate-400">Start common work</p></div><div className="flex flex-1 flex-wrap gap-2 sm:justify-end">{[
       { label: 'New quotation', path: '/quotations?new=1', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6' },

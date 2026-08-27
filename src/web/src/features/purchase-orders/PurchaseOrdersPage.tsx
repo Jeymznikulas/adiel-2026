@@ -177,7 +177,7 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   const openNewOnLoad = openNewFromQuery || window.location.pathname === '/purchase-orders/new'
   const editOrderIdOnLoad = /^\/purchase-orders\/([^/]+)\/edit$/.exec(window.location.pathname)?.[1]
   const editOrderOnLoad = editOrderIdOnLoad ? orders.find((order) => order.id === decodeURIComponent(editOrderIdOnLoad)) : undefined
-  const orderIdOnLoad = initialQuery.get('order')
+  const [initialOrderId] = useState(() => initialQuery.get('order'))
   const initialSupplier = suppliers.find((entry) => entry.status === 'Active') ?? suppliers[0]
   const initialClient = clients.find((entry) => entry.status === 'Active') ?? clients[0]
   const [draft, setDraft] = useState<PurchaseOrderDraft>(() => {
@@ -201,7 +201,7 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
   const [isItemPickerOpen, setIsItemPickerOpen] = useState(false)
   const [itemSearch, setItemSearch] = useState('')
   const [editingOrderId, setEditingOrderId] = useState<string | null>(editOrderOnLoad?.id ?? null)
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(() => orderIdOnLoad && orders.some((order) => order.id === orderIdOnLoad) ? orderIdOnLoad : null)
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [isDocumentDialogOpen, setIsDocumentDialogOpen] = useState(false)
   const [isClientPickerOpen, setIsClientPickerOpen] = useState(openNewOnLoad && !initialClient)
   const [isProjectLinkOpen, setIsProjectLinkOpen] = useState(false)
@@ -215,13 +215,18 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     if (openNewFromQuery) {
       window.history.replaceState(null, '', '/purchase-orders/new')
       window.dispatchEvent(new Event('adiel:navigate'))
-    } else if (orderIdOnLoad) window.history.replaceState(null, '', window.location.pathname)
-  }, [openNewFromQuery, orderIdOnLoad])
+    } else if (initialOrderId) window.history.replaceState(null, '', window.location.pathname)
+  }, [initialOrderId, openNewFromQuery])
 
   useEffect(() => {
     void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
     void listPurchaseOrders({ pageSize: 100 }).then((result) => { setOrders(result.items.map(toPurchaseOrder)); setStorageError('') }).catch(() => setStorageError('Purchase orders could not be loaded from the API.'))
   }, [])
+
+  useEffect(() => {
+    if (!initialOrderId || selectedOrderId || !orders.some((order) => order.id === initialOrderId)) return
+    setSelectedOrderId(initialOrderId)
+  }, [initialOrderId, orders, selectedOrderId])
 
   useEffect(() => {
     void listSuppliers().then((result) => setSuppliers(result.items.map(toPurchaseOrderSupplier))).catch(() => setStorageError('Suppliers could not be loaded from the API.'))

@@ -35,6 +35,21 @@ public sealed class SettingsServiceTests
     }
 
     [Fact]
+    public async Task Task_assignee_requires_and_normalizes_calendar_email()
+    {
+        var repository = new FakeSettingsRepository();
+        var service = new SettingsService(repository, new FakeCurrentUser());
+
+        await Assert.ThrowsAsync<RequestValidationException>(() => service.CreateOptionAsync(new("task_assignee", "Alex", null), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<RequestValidationException>(() => service.CreateOptionAsync(new("task_assignee", "Alex", "not-an-email"), TestContext.Current.CancellationToken));
+
+        var saved = await service.CreateOptionAsync(new("task_assignee", " Alex Morgan ", " Alex@Example.COM "), TestContext.Current.CancellationToken);
+        Assert.Equal("Alex Morgan", saved.Name);
+        Assert.Equal("alex@example.com", saved.Email);
+        Assert.Equal("alex@example.com", repository.LastOptionEmail);
+    }
+
+    [Fact]
     public async Task Numbering_rules_are_normalized_and_require_unique_prefixes()
     {
         var repository = new FakeSettingsRepository();
@@ -87,6 +102,7 @@ public sealed class SettingsServiceTests
     private sealed class FakeSettingsRepository : ISettingsRepository
     {
         public CurrentUser? LastActor { get; private set; }
+        public string? LastOptionEmail { get; private set; }
         public Task<CompanySettings> GetCompanyAsync(CancellationToken cancellationToken) => Task.FromResult(new CompanySettings("ADIEL", "Manila", "123", "", "", "", "owner@example.com", "123", DateTimeOffset.UtcNow, 1));
         public Task<CompanySettings> UpdateCompanyAsync(CompanySettings settings, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken) { LastActor = actor; return Task.FromResult(settings with { UpdatedAt = DateTimeOffset.UtcNow, Version = expectedVersion + 1 }); }
         public Task<DocumentDefaults> GetDocumentDefaultsAsync(CancellationToken cancellationToken) => Task.FromResult(new DocumentDefaults("", "", "", "", false, 3, "Percentage", 0, DateTimeOffset.UtcNow, 1));
@@ -100,8 +116,8 @@ public sealed class SettingsServiceTests
         public Task<string> PreviewDocumentNumberAsync(string documentType, DateOnly documentDate, CancellationToken cancellationToken) => Task.FromResult("QT-2026-001");
         public Task<string> ReserveDocumentNumberAsync(string documentType, DateOnly documentDate, CurrentUser actor, CancellationToken cancellationToken) { LastActor = actor; return Task.FromResult("QT-2026-001"); }
         public Task<IReadOnlyList<BusinessOption>> ListOptionsAsync(string type, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<BusinessOption>>([]);
-        public Task<BusinessOption> CreateOptionAsync(string type, string name, CurrentUser actor, CancellationToken cancellationToken) => throw new NotImplementedException();
-        public Task<BusinessOption> RenameOptionAsync(Guid id, string name, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<BusinessOption> CreateOptionAsync(string type, string name, string? email, CurrentUser actor, CancellationToken cancellationToken) { LastActor = actor; LastOptionEmail = email; return Task.FromResult(new BusinessOption(Guid.NewGuid(), type, name, true, 1, 0, DateTimeOffset.UtcNow, 1, email)); }
+        public Task<BusinessOption> RenameOptionAsync(Guid id, string name, string? email, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<BusinessOption> SetOptionActiveAsync(Guid id, bool isActive, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<IReadOnlyList<BusinessOption>> ReorderOptionsAsync(string type, IReadOnlyList<ReorderBusinessOption> items, CurrentUser actor, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task DeleteOptionAsync(Guid id, long expectedVersion, CurrentUser actor, CancellationToken cancellationToken) => throw new NotImplementedException();

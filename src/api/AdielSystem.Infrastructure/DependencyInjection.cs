@@ -21,6 +21,8 @@ using AdielSystem.Application.Insights;
 using AdielSystem.Infrastructure.Insights;
 using AdielSystem.Application.Storage;
 using AdielSystem.Infrastructure.Storage;
+using AdielSystem.Application.Calendar;
+using AdielSystem.Infrastructure.Calendar;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -39,6 +41,14 @@ public static class DependencyInjection
             .Validate(options => options.Url.IsAbsoluteUri, "Supabase:Url must be an absolute URL.")
             .ValidateOnStart();
         services.AddOptions<SupabaseStorageOptions>().Bind(configuration.GetSection(SupabaseStorageOptions.SectionName));
+        services.AddOptions<GoogleCalendarOptions>()
+            .Bind(configuration.GetSection(GoogleCalendarOptions.SectionName))
+            .Validate(options => !options.Enabled ||
+                (!string.IsNullOrWhiteSpace(options.ClientId) && !string.IsNullOrWhiteSpace(options.ClientSecret) &&
+                 options.RedirectUri is { IsAbsoluteUri: true } && options.FrontendRedirectUri is { IsAbsoluteUri: true } &&
+                 options.FrontendBaseUri is { IsAbsoluteUri: true }),
+                "Enabled Google Calendar integration requires ClientId, ClientSecret, RedirectUri, FrontendRedirectUri, and FrontendBaseUri.")
+            .ValidateOnStart();
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
@@ -56,6 +66,11 @@ public static class DependencyInjection
         services.AddScoped<IInsightsRepository, InsightsRepository>();
         services.AddScoped<IImageReferenceRepository, ImageReferenceRepository>();
         services.AddHttpClient<IBusinessImageStorage, SupabaseBusinessImageStorage>();
+        services.AddDataProtection();
+        services.AddHttpClient<GoogleCalendarHttpClient>();
+        services.AddScoped<IGoogleCalendarIntegration, GoogleCalendarIntegration>();
+        services.AddScoped<CalendarSyncProcessor>();
+        services.AddHostedService<CalendarSyncWorker>();
         services.AddSingleton<ImageCleanupQueue>();
         services.AddSingleton<IImageCleanupQueue>(provider => provider.GetRequiredService<ImageCleanupQueue>());
         services.AddHostedService(provider => provider.GetRequiredService<ImageCleanupQueue>());

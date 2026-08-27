@@ -1,6 +1,7 @@
 import { AuthenticatedPlaceholder } from '../features/auth/AuthenticatedPlaceholder'
 import { LoginPage } from '../features/auth/LoginPage'
 import { useSession } from '../features/auth/useSession'
+import { ErrorFocusAnnouncer } from '../components/ui/ErrorFocusAnnouncer'
 
 export function App() {
   const { session, isLoading } = useSession()
@@ -13,6 +14,6 @@ export function App() {
     )
   }
 
-  return session ? <AuthenticatedPlaceholder session={session} /> : <LoginPage />
+  return <><ErrorFocusAnnouncer />{session ? <AuthenticatedPlaceholder session={session} /> : <LoginPage />}</>
 }
 

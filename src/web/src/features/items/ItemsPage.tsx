@@ -6,6 +6,7 @@ import { DocumentFormScaffold, type DocumentFormAction } from '../../components/
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
+import { SquareImageCropper } from '../../components/ui/SquareImageCropper'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { appendSystemLog } from '../../services/activityLog'
@@ -110,6 +111,8 @@ type ItemDraft = Omit<Item, 'id' | 'createdAt' | 'updatedAt' | 'archivedAt' | 'v
   rawCost: string
   sellingPrice: string
 }
+
+type ImageCropTarget = { file: File; kind: 'item' | 'variant'; variantId?: string }
 
 type ItemsPageProps = {
   currentUsername: string
@@ -339,6 +342,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<ItemDraft>(() => createEmptyDraft())
   const [pendingItemPhoto, setPendingItemPhoto] = useState<File | null>(null)
+  const [imageToCrop, setImageToCrop] = useState<ImageCropTarget | null>(null)
   const [isVariantDialogOpen, setIsVariantDialogOpen] = useState(false)
   const [variantParentItemId, setVariantParentItemId] = useState<string | null>(null)
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null)
@@ -356,8 +360,8 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const [photoError, setPhotoError] = useState('')
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
-  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false)
-  const [processingVariantPhotoId, setProcessingVariantPhotoId] = useState<string | null>(null)
+  const isProcessingPhoto = imageToCrop?.kind === 'item'
+  const processingVariantPhotoId = imageToCrop?.kind === 'variant' ? imageToCrop.variantId ?? null : null
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [toast, setToast] = useState('')
   const [priceAdjustmentTarget, setPriceAdjustmentTarget] = useState<PriceAdjustmentTarget | null>(null)
@@ -457,6 +461,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setDraft(createEmptyDraft(suppliers.find((supplier) => supplier.status === 'Active')?.id ?? suppliers[0]?.id ?? '', categories[0] ?? ''))
     setEditingId(null)
     setPendingItemPhoto(null)
+    setImageToCrop(null)
     setPhotoError('')
     setFormError('')
     setIsConfirmingDelete(false)
@@ -467,6 +472,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setDraft({ ...item, unitWeight: item.unitWeight ? String(item.unitWeight) : '', rawCost: String(item.rawCost), sellingPrice: String(item.sellingPrice) })
     setEditingId(item.id)
     setPendingItemPhoto(null)
+    setImageToCrop(null)
     setPhotoError('')
     setFormError('')
     setIsConfirmingDelete(false)
@@ -493,6 +499,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setIsConfirmingDelete(false)
     setFormError('')
     setPhotoError('')
+    setImageToCrop(null)
   }
 
   function closeVariantForm() {
@@ -501,12 +508,14 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setEditingVariantId(null)
     setVariantFormError('')
     setPhotoError('')
+    setImageToCrop(null)
   }
 
   function addVariant(item: Item) {
     setVariantParentItemId(item.id)
     setEditingVariantId(null)
     setPendingVariantPhoto(null)
+    setImageToCrop(null)
     setVariantDraft(createEmptyVariant(item.rawCost, item.sellingPrice, `${item.productCode}-V${String(item.variants.length + 1).padStart(2, '0')}`, item.unitOfMeasure, item.unitWeight, item.status))
     setVariantFormError('')
     setPhotoError('')
@@ -562,6 +571,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setVariantParentItemId(item.id)
     setEditingVariantId(variant.id)
     setPendingVariantPhoto(null)
+    setImageToCrop(null)
     setVariantDraft({ ...variant, specifications: variant.specifications.map((specification) => ({ ...specification })), priceHistory: [...variant.priceHistory] })
     setVariantFormError('')
     setPhotoError('')
@@ -611,21 +621,13 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     catch (failure) { setVariantFormError(failure instanceof Error ? failure.message : 'The variant could not be removed.') }
   }
 
-  async function handleVariantPhotoChange(id: string, event: ChangeEvent<HTMLInputElement>) {
+  function handleVariantPhotoChange(id: string, event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
     setPhotoError('')
-    setProcessingVariantPhotoId(id)
-    try {
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Upload a PNG, JPG, or WebP image up to 5 MB.')
-      setPendingVariantPhoto(file)
-      setVariantDraft((current) => current.id === id ? { ...current, photo: URL.createObjectURL(file) } : current)
-    } catch (error) {
-      setPhotoError(error instanceof Error ? error.message : 'The variant photo could not be uploaded.')
-    } finally {
-      setProcessingVariantPhotoId(null)
-    }
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { setPhotoError('Upload a PNG, JPG, or WebP image up to 5 MB.'); return }
+    setImageToCrop({ file, kind: 'variant', variantId: id })
   }
 
   function openCategoryManager() {
@@ -713,21 +715,25 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
     setToast('Category removed')
   }
 
-  async function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
+  function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
     setPhotoError('')
-    setIsProcessingPhoto(true)
-    try {
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Upload a PNG, JPG, or WebP image up to 5 MB.')
-      setPendingItemPhoto(file)
-      setDraft((current) => ({ ...current, photo: URL.createObjectURL(file) }))
-    } catch (error) {
-      setPhotoError(error instanceof Error ? error.message : 'The photo could not be uploaded.')
-    } finally {
-      setIsProcessingPhoto(false)
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { setPhotoError('Upload a PNG, JPG, or WebP image up to 5 MB.'); return }
+    setImageToCrop({ file, kind: 'item' })
+  }
+
+  function applyCroppedImage(file: File) {
+    const target = imageToCrop
+    setImageToCrop(null)
+    if (target?.kind === 'variant' && target.variantId) {
+      setPendingVariantPhoto(file)
+      setVariantDraft((current) => current.id === target.variantId ? { ...current, photo: URL.createObjectURL(file) } : current)
+      return
     }
+    setPendingItemPhoto(file)
+    setDraft((current) => ({ ...current, photo: URL.createObjectURL(file) }))
   }
 
   async function saveItem(event: FormEvent<HTMLFormElement>) {
@@ -964,6 +970,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
           </section>
         </div>
       ) : null}
+      {imageToCrop ? <SquareImageCropper file={imageToCrop.file} label={imageToCrop.kind === 'variant' ? 'Variant photo' : 'Item photo'} onCancel={() => setImageToCrop(null)} onConfirm={applyCroppedImage} /> : null}
       <SuccessToast message={toast} />
     </div>
   )

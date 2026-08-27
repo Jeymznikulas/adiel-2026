@@ -29,6 +29,6 @@ public sealed record SearchPageDto(IReadOnlyList<SearchResultDto> Items);
 public sealed record ArchiveRowDto(string Module, Guid Id, string Title, string Detail, DateTimeOffset ArchivedAt, long Version);
 public sealed record ArchivePageDto(IReadOnlyList<ArchiveRowDto> Items, long Total, int Page, int PageSize);
 
-public sealed record ActivityQuery(string Search, string? Module, string? Action, DateOnly? Date, string Sort, int Page, int PageSize);
+public sealed record ActivityQuery(string Search, string? Module, string? Action, DateOnly? Date, Guid? RecordId, string Sort, int Page, int PageSize);
 public sealed record ActivitySummaryDto(long Total, long Today, decimal ExpenseValue, long Actors);
 public sealed record ActivityPageDto(IReadOnlyList<ActivityEntryDto> Items, long Total, int Page, int PageSize, ActivitySummaryDto Summary);

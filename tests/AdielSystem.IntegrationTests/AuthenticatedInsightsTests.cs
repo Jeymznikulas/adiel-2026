@@ -45,6 +45,10 @@ public sealed class AuthenticatedInsightsTests
         Assert.NotNull(activity);
         Assert.NotEmpty(activity!.Items);
         Assert.True(activity.Total >= activity.Items.Count);
+        var recordActivity = await client.GetFromJsonAsync<ActivityPageDto>($"/api/v1/activity?module=Tasks&recordId={task.Id}&page=1&pageSize=10", token);
+        Assert.NotNull(recordActivity);
+        Assert.NotEmpty(recordActivity!.Items);
+        Assert.All(recordActivity.Items, row => Assert.Equal(task.Id, row.RecordId));
         var beyond = await client.GetFromJsonAsync<ActivityPageDto>($"/api/v1/activity?module=Tasks&search={Uri.EscapeDataString(title)}&page=999&pageSize=1", token);
         Assert.Empty(beyond!.Items);
     }

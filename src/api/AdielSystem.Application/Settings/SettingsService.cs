@@ -66,13 +66,18 @@ public sealed class SettingsService(ISettingsRepository repository, ICurrentUser
     public async Task<IReadOnlyList<BusinessOptionDto>> ListOptionsAsync(string type, CancellationToken cancellationToken) =>
         (await repository.ListOptionsAsync(ValidType(type), cancellationToken)).Select(ToDto).ToArray();
 
-    public async Task<BusinessOptionDto> CreateOptionAsync(CreateBusinessOptionRequest request, CancellationToken cancellationToken) =>
-        ToDto(await repository.CreateOptionAsync(ValidType(request.Type), OptionName(request.Name), currentUserAccessor.GetRequiredUser(), cancellationToken));
+    public async Task<BusinessOptionDto> CreateOptionAsync(CreateBusinessOptionRequest request, CancellationToken cancellationToken)
+    {
+        var type = ValidType(request.Type);
+        return ToDto(await repository.CreateOptionAsync(type, OptionName(request.Name), OptionEmail(type, request.Email), currentUserAccessor.GetRequiredUser(), cancellationToken));
+    }
 
     public async Task<BusinessOptionDto> RenameOptionAsync(Guid id, RenameBusinessOptionRequest request, CancellationToken cancellationToken)
     {
         RequireVersion(request.Version);
-        return ToDto(await repository.RenameOptionAsync(id, OptionName(request.Name), request.Version, currentUserAccessor.GetRequiredUser(), cancellationToken));
+        var existing = await repository.ListOptionsAsync("task_assignee", cancellationToken);
+        var type = existing.Any(option => option.Id == id) ? "task_assignee" : string.Empty;
+        return ToDto(await repository.RenameOptionAsync(id, OptionName(request.Name), type == "task_assignee" ? OptionEmail(type, request.Email) : null, request.Version, currentUserAccessor.GetRequiredUser(), cancellationToken));
     }
 
     public async Task<BusinessOptionDto> SetOptionActiveAsync(Guid id, SetBusinessOptionActiveRequest request, CancellationToken cancellationToken)
@@ -122,6 +127,16 @@ public sealed class SettingsService(ISettingsRepository repository, ICurrentUser
         return date;
     }
     private static string OptionName(string? value) => Required(value, "Option name", 60);
+    private static string? OptionEmail(string type, string? value)
+    {
+        if (type != "task_assignee") return null;
+        var normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (normalized.Length is 0) throw new RequestValidationException("An assignee email address is required.");
+        if (normalized.Length > 254) throw new RequestValidationException("The assignee email address cannot exceed 254 characters.");
+        try { _ = new MailAddress(normalized); }
+        catch (FormatException) { throw new RequestValidationException("Enter a valid assignee email address."); }
+        return normalized;
+    }
     private static string Required(string? value, string label, int maximum) { var result = value?.Trim() ?? string.Empty; if (result.Length is 0 || result.Length > maximum) throw new RequestValidationException($"{label} must be between 1 and {maximum} characters."); return result; }
     private static string Optional(string? value, int maximum) { var result = value?.Trim() ?? string.Empty; if (result.Length > maximum) throw new RequestValidationException($"This value cannot exceed {maximum} characters."); return result; }
     private static string Limited(string? value, int maximum) { var result = value?.Trim() ?? string.Empty; if (result.Length > maximum) throw new RequestValidationException($"This document default cannot exceed {maximum} characters."); return result; }
@@ -130,5 +145,5 @@ public sealed class SettingsService(ISettingsRepository repository, ICurrentUser
     private static CompanySettingsDto ToDto(CompanySettings value) => new(value.CompanyName, value.Address, value.MainOfficeNumber, value.ClientRelationsNumber, value.AccountsNumber, value.NewAccountsNumber, value.Email, value.Tin, value.UpdatedAt, value.Version);
     private static DocumentDefaultsDto ToDto(DocumentDefaults value) => new(value.QuotationTerms, value.PurchaseOrderTerms, value.StatementPaymentInstructions, value.PdfFooter, value.LateChargeEnabled, value.LateChargeGraceDays, value.LateChargeType, value.LateChargeValue, value.UpdatedAt, value.Version);
     private static DocumentNumberingRuleDto ToDto(DocumentNumberingRule value) => new(value.DocumentType, value.Prefix, value.StartingNumber, value.Digits, value.IncludeYear, value.ResetYearly, value.UpdatedAt, value.Version);
-    private static BusinessOptionDto ToDto(BusinessOption value) => new(value.Id, value.Type, value.Name, value.IsActive, value.SortOrder, value.UsageCount, value.UpdatedAt, value.Version);
+    private static BusinessOptionDto ToDto(BusinessOption value) => new(value.Id, value.Type, value.Name, value.IsActive, value.SortOrder, value.UsageCount, value.UpdatedAt, value.Version, value.Email);
 }

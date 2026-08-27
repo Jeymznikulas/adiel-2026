@@ -62,6 +62,7 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
             await command.ExecuteNonQueryAsync(token);
         }
         await InsertAuditAsync(connection, transaction, task.Id, "Created", task.Title, $"Task created and assigned to {task.AssignedToName}.", actor, task.Status, "success", token);
+        await EnqueueCalendarSyncAsync(connection, transaction, task.Id, 1, token);
         return await ReadRequiredAsync(connection, transaction, task.Id, false, token);
     }, token);
 
@@ -74,7 +75,9 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
         command.Parameters.AddWithValue("version", expectedVersion);
         if (await command.ExecuteScalarAsync(token) is null) throw Stale();
         await InsertAuditAsync(connection, transaction, task.Id, "Updated", task.Title, "Task details, priority, assignee, or due date were updated.", actor, task.Status, "info", token);
-        return await ReadRequiredAsync(connection, transaction, task.Id, false, token);
+        var saved = await ReadRequiredAsync(connection, transaction, task.Id, false, token);
+        await EnqueueCalendarSyncAsync(connection, transaction, task.Id, saved.Version, token);
+        return saved;
     }, token);
 
     public Task<WorkTask> ChangeStatusAsync(Guid id, WorkTaskStatus target, long expectedVersion, CurrentUser actor, CancellationToken token) => ExecuteAsync(async (connection, transaction) =>
@@ -95,7 +98,9 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
             if (await command.ExecuteScalarAsync(token) is null) throw Stale();
         }
         await InsertAuditAsync(connection, transaction, id, "Status changed", task.Title, $"Task status changed from {WorkTask.Display(previous)} to {WorkTask.Display(target)}.", actor, target, target == WorkTaskStatus.Completed ? "success" : "info", token);
-        return await ReadRequiredAsync(connection, transaction, id, false, token);
+        var saved = await ReadRequiredAsync(connection, transaction, id, false, token);
+        await EnqueueCalendarSyncAsync(connection, transaction, id, saved.Version, token);
+        return saved;
     }, token);
 
     public Task<WorkTask> SetArchivedAsync(Guid id, long expectedVersion, bool archived, CurrentUser actor, CancellationToken token) => ExecuteAsync(async (connection, transaction) =>
@@ -115,7 +120,9 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
             if (await command.ExecuteScalarAsync(token) is null) throw Stale();
         }
         await InsertAuditAsync(connection, transaction, id, archived ? "Archived" : "Restored", task.Title, archived ? "Task and its subtasks were archived." : "Task and its subtasks were restored.", actor, task.Status, "info", token);
-        return await ReadRequiredAsync(connection, transaction, id, false, token);
+        var saved = await ReadRequiredAsync(connection, transaction, id, false, token);
+        await EnqueueCalendarSyncAsync(connection, transaction, id, saved.Version, token);
+        return saved;
     }, token);
 
     public Task<WorkTask> AddSubtaskAsync(Guid taskId, string title, long taskVersion, CurrentUser actor, CancellationToken token) => ExecuteAsync(async (connection, transaction) =>
@@ -292,6 +299,16 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
         command.Parameters.AddWithValue("actor_name", actor.Username);
         command.Parameters.AddWithValue("tone", tone);
         command.Parameters.AddWithValue("status", WorkTask.Display(status));
+        await command.ExecuteNonQueryAsync(token);
+    }
+
+    private static async Task EnqueueCalendarSyncAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid taskId, long taskVersion, CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "insert into public.calendar_sync_jobs (task_id, requested_task_version) values (@task_id, @task_version)";
+        command.Parameters.AddWithValue("task_id", taskId);
+        command.Parameters.AddWithValue("task_version", taskVersion);
         await command.ExecuteNonQueryAsync(token);
     }
 

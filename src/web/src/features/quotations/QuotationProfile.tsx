@@ -9,7 +9,6 @@ type QuotationProfileProps = {
   quotation: Quotation;
   onBack: () => void;
   onEdit: () => void;
-  onDuplicate: () => void;
   onArchive: () => void;
   onStatusChange: (status: QuotationStatus) => void;
   onCreateStatement: () => void;
@@ -82,7 +81,6 @@ export function QuotationProfile({
   quotation,
   onBack,
   onEdit,
-  onDuplicate,
   onArchive,
   onStatusChange,
   onCreateStatement,
@@ -125,11 +123,10 @@ export function QuotationProfile({
         module="Quotations"
         recordId={quotation.id}
         primaryAction={quotation.status === "Draft" ? { label: "Submit for Approval", onClick: () => onStatusChange("For Approval") } : quotation.status === "For Approval" ? { label: "Review & Approve", onClick: () => onStatusChange("Approved") } : quotation.status === "Approved" ? { label: "Create SOA", onClick: onCreateStatement } : quotation.status === "Rejected" ? { label: "Edit quotation", onClick: onEdit } : undefined}
-        secondaryActions={quotation.status === "For Approval" ? [{ label: "Reject", tone: "danger", onClick: () => onStatusChange("Rejected") }] : []}
+        secondaryActions={quotation.status === "For Approval" ? [{ label: "Reject", tone: "danger", onClick: () => onStatusChange("Rejected") }] : quotation.status === "Approved" ? [{ label: "Revoke approval", tone: "neutral", onClick: () => onStatusChange("Draft") }] : []}
         menuActions={[
           { label: "Edit", onClick: onEdit, disabled: quotation.status === "Approved" || quotation.status === "Voided" },
           { label: "Preview & Export", onClick: () => setIsExportOpen(true) },
-          { label: "Duplicate", onClick: onDuplicate },
           { label: "Archive", onClick: onArchive },
           ...(quotation.status !== "Voided" ? [{ label: "Void", tone: "danger" as const, onClick: () => onStatusChange("Voided") }] : []),
         ]}
