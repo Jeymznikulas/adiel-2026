@@ -9,5 +9,6 @@ public interface IPurchaseOrderRepository
     Task<PurchaseOrderDto> CreateAsync(SavePurchaseOrderRequest request, string number, CurrentUser actor, CancellationToken token);
     Task<PurchaseOrderDto> UpdateAsync(Guid id, SavePurchaseOrderRequest request, CurrentUser actor, CancellationToken token);
     Task<PurchaseOrderDto> ChangeStatusAsync(Guid id, ChangePurchaseOrderStatusRequest request, CurrentUser actor, CancellationToken token);
+    Task<PurchaseOrderDto> RecordPaymentAsync(Guid id, RecordPurchaseOrderPaymentRequest request, CurrentUser actor, CancellationToken token);
     Task<PurchaseOrderDto> SetArchivedAsync(Guid id, ChangePurchaseOrderArchiveRequest request, bool archived, CurrentUser actor, CancellationToken token);
 }

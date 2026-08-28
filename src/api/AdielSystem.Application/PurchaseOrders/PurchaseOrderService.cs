@@ -11,6 +11,14 @@ public sealed class PurchaseOrderService(IPurchaseOrderRepository repository, Se
     public async Task<PurchaseOrderDto> CreateAsync(SavePurchaseOrderRequest request, CancellationToken token) { Validate(request); var number = (await settings.ReserveDocumentNumberAsync("purchase_order", new(request.OrderDate), token)).Number; return await repository.CreateAsync(request, number, currentUser.GetRequiredUser(), token); }
     public Task<PurchaseOrderDto> UpdateAsync(Guid id, SavePurchaseOrderRequest request, CancellationToken token) { if (request.Version is null or <= 0) throw new RequestValidationException("The current purchase order version is required."); Validate(request); return repository.UpdateAsync(id, request, currentUser.GetRequiredUser(), token); }
     public Task<PurchaseOrderDto> ChangeStatusAsync(Guid id, ChangePurchaseOrderStatusRequest request, CancellationToken token) => request.Version <= 0 ? throw new RequestValidationException("The current purchase order version is required.") : repository.ChangeStatusAsync(id, request, currentUser.GetRequiredUser(), token);
+    public Task<PurchaseOrderDto> RecordPaymentAsync(Guid id, RecordPurchaseOrderPaymentRequest request, CancellationToken token)
+    {
+        if (request.Version <= 0) throw new RequestValidationException("The current purchase order version is required.");
+        if (request.PaymentDate == default || request.PaymentDate > DateOnly.FromDateTime(DateTime.UtcNow.Date)) throw new RequestValidationException("Choose a valid payment date that is not in the future.");
+        if (request.Amount <= 0 || decimal.Round(request.Amount, 2) != request.Amount || string.IsNullOrWhiteSpace(request.Method) || request.Method.Trim().Length > 100) throw new RequestValidationException("Enter a positive payment amount with at most two decimal places and a payment method.");
+        if ((request.ReferenceNumber?.Trim().Length ?? 0) > 100 || (request.Notes?.Trim().Length ?? 0) > 500) throw new RequestValidationException("Payment reference or notes are too long.");
+        return repository.RecordPaymentAsync(id, request, currentUser.GetRequiredUser(), token);
+    }
     public Task<PurchaseOrderDto> ArchiveAsync(Guid id, ChangePurchaseOrderArchiveRequest request, CancellationToken token) => repository.SetArchivedAsync(id, request, true, currentUser.GetRequiredUser(), token);
     public Task<PurchaseOrderDto> RestoreAsync(Guid id, ChangePurchaseOrderArchiveRequest request, CancellationToken token) => repository.SetArchivedAsync(id, request, false, currentUser.GetRequiredUser(), token);
     private static void Validate(SavePurchaseOrderRequest r)

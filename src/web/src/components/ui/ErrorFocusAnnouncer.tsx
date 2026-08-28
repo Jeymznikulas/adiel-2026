@@ -1,14 +1,17 @@
 import { useEffect } from 'react'
 
-const errorSelector = '.rounded-xl.border-red-200.bg-red-50'
+const errorSelector = ':is(p, div).bg-red-50:not(:has(button))'
 
 function announce(error: HTMLElement) {
   if (error.dataset.errorAnnouncementManaged === 'true') return
 
   error.dataset.errorAnnouncementManaged = 'true'
+  error.classList.add('app-error-summary')
   error.setAttribute('role', 'alert')
   error.setAttribute('aria-live', 'assertive')
   error.tabIndex = -1
+
+  if (!error.closest('form, [role="dialog"], [role="alertdialog"]')) return
 
   window.requestAnimationFrame(() => {
     error.scrollIntoView({ behavior: 'smooth', block: 'nearest' })

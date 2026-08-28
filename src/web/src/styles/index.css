@@ -64,6 +64,34 @@
 }
 
 @layer components {
+  /* One visual and accessibility treatment for blocking errors. Legacy panels
+     are tagged at runtime while feature forms use FormErrorSummary directly. */
+  .app-error-summary {
+    position: relative;
+    display: block;
+    padding-left: 3rem !important;
+    border-color: rgb(254 202 202) !important;
+    background: rgb(254 242 242) !important;
+    color: rgb(153 27 27) !important;
+    box-shadow: 0 8px 20px -18px rgba(185, 28, 28, 0.52);
+  }
+
+  .app-error-summary::before {
+    content: "!";
+    position: absolute;
+    left: 0.9rem;
+    top: 0.8rem;
+    display: grid;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 999px;
+    place-items: center;
+    background: rgb(254 226 226);
+    color: rgb(185 28 28);
+    font-size: 0.75rem;
+    font-weight: 800;
+  }
+
   /* Keep supporting text readable throughout the app, even in dense tables and cards. */
   .text-\[8px\] {
     font-size: 0.6875rem !important;

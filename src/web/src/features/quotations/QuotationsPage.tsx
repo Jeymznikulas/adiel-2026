@@ -204,7 +204,6 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const [statusFilter, setStatusFilter] = usePersistentState('quotations.status', 'All statuses')
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
-  const [isStatusChanging, setIsStatusChanging] = useState(false)
   const statusMutationRef = useRef(false)
   const [toast, setToast] = useState('')
   const [approvalReviewId, setApprovalReviewId] = useState<string | null>(() => reviewQuotationIdOnLoad ? decodeURIComponent(reviewQuotationIdOnLoad) : null)
@@ -405,7 +404,6 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   async function applyStatus(quotation: Quotation, status: QuotationStatus, reason?: string, archiveAfterVoiding = false) {
     if (statusMutationRef.current) return null
     statusMutationRef.current = true
-    setIsStatusChanging(true)
     try {
       const saved = toQuotation(await changeQuotationStatus(quotation.id, status, quotation.version, reason, archiveAfterVoiding))
       setQuotations((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== quotation.id) : current.map((entry) => entry.id === quotation.id ? saved : entry))
@@ -416,7 +414,6 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
       return null
     } finally {
       statusMutationRef.current = false
-      setIsStatusChanging(false)
     }
   }
 

@@ -194,7 +194,6 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
   })
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
-  const [isStatusChanging, setIsStatusChanging] = useState(false)
   const statusMutationRef = useRef(false)
   const [toast, setToast] = useState('')
   const [pendingVoidStatementId, setPendingVoidStatementId] = useState<string | null>(null)
@@ -417,10 +416,9 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
       return
     }
     statusMutationRef.current = true
-    setIsStatusChanging(true)
     try { const saved = await changeStatementStatus(statement.id, { status, version: statement.version }); setStatements((current) => current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setToast(`Statement marked ${status.toLowerCase()}.`) }
     catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement status could not be changed.') }
-    finally { statusMutationRef.current = false; setIsStatusChanging(false) }
+    finally { statusMutationRef.current = false }
   }
 
   function openPayment(statement: StatementOfAccount) {
@@ -445,10 +443,9 @@ export function StatementOfAccountPage({ currentUsername: _currentUsername }: St
     if (!statement) return
     if (statusMutationRef.current) return
     statusMutationRef.current = true
-    setIsStatusChanging(true)
     try { const saved = await changeStatementStatus(statement.id, { status: 'Cancelled', reason, version: statement.version, archiveAfterVoiding }); setStatements((current) => archiveAfterVoiding ? current.filter((entry) => entry.id !== statement.id) : current.map((entry) => entry.id === statement.id ? toStatement(saved) : entry)); setPendingVoidStatementId(null); setToast(archiveAfterVoiding ? 'Statement voided and archived' : 'Statement voided'); if (archiveAfterVoiding) navigate('/statement-of-account') }
     catch (failure) { setStorageError(failure instanceof Error ? failure.message : 'Statement could not be voided.') }
-    finally { statusMutationRef.current = false; setIsStatusChanging(false) }
+    finally { statusMutationRef.current = false }
   }
 
   async function archiveStatement(statement: StatementOfAccount) {

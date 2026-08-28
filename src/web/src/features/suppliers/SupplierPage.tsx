@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { DocumentFormScaffold, type DocumentFormAction } from '../../components/ui/DocumentFormScaffold'
+import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
@@ -189,6 +190,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [categoryInput, setCategoryInput] = useState('')
   const [logoError, setLogoError] = useState('')
+  const [formError, setFormError] = useState('')
   const [pendingLogo, setPendingLogo] = useState<File | null>(null)
   const [logoToCrop, setLogoToCrop] = useState<File | null>(null)
   const isProcessingLogo = logoToCrop !== null
@@ -275,6 +277,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
 
   function openAddDialog() {
     setDraft(createEmptyDraft())
+    setFormError('')
     setPendingLogo(null)
     setLogoToCrop(null)
     setEditingId(null)
@@ -286,6 +289,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
 
   function openEditDialog(supplier: Supplier) {
     setPendingLogo(null)
+    setFormError('')
     setLogoToCrop(null)
     setDraft({
       logo: supplier.logo,
@@ -332,6 +336,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
 
   function closeDialog() {
     setIsDialogOpen(false)
+    setFormError('')
     setIsConfirmingDelete(false)
     setLogoError('')
     setLogoToCrop(null)
@@ -433,10 +438,11 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
       const nextSupplier = toSupplier(saved)
       setSuppliers((current) => editingId ? current.map((supplier) => supplier.id === editingId ? nextSupplier : supplier) : [...current, nextSupplier])
       setStorageError('')
+      setFormError('')
       setToast(editingId ? 'Supplier details updated' : 'Supplier added to the directory')
       closeDialog()
     } catch (failure) {
-      setStorageError(failure instanceof Error ? failure.message : 'Supplier details could not be saved.')
+      setFormError(failure instanceof Error ? failure.message : 'Supplier details could not be saved.')
     }
   }
 
@@ -655,6 +661,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+              <FormErrorSummary message={formError} className="mb-5" />
               <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)]">
                 <aside>
                   <p className={labelClassName}>Supplier logo <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></p>
