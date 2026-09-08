@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.docker.example
 appsettings.*.json
 !appsettings.json
 !appsettings.*.example.json
@@ -16,6 +17,10 @@ coverage/
 bin/
 obj/
 TestResults/
+test-results/
+playwright-report/
+backups/
+restore-drills/
 *.user
 *.suo
 

@@ -71,5 +71,10 @@ internal sealed class SupabaseBusinessImageStorage(HttpClient client, IOptions<S
 
     private string BucketPath(string path) => Uri.EscapeDataString(Options.Bucket) + "/" + string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
     private static void ValidatePath(string path) { if (string.IsNullOrWhiteSpace(path) || path.StartsWith('/') || path.Contains("..", StringComparison.Ordinal) || path.Contains('\\')) throw new InvalidOperationException("Unsafe Storage object path."); }
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken token) { if (response.IsSuccessStatusCode) return; var body = await response.Content.ReadAsStringAsync(token); throw new InvalidOperationException($"Supabase Storage request failed with status {(int)response.StatusCode}: {body[..Math.Min(body.Length, 300)]}"); }
+    private static Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Supabase Storage request failed with HTTP {(int)response.StatusCode}.");
+        return Task.CompletedTask;
+    }
 }

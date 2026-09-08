@@ -1,0 +1,18 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0.302
+
+WORKDIR /workspace
+
+COPY ["Directory.Build.props", "Directory.Packages.props", "global.json", "./"]
+COPY ["src/api/AdielSystem.Api/AdielSystem.Api.csproj", "src/api/AdielSystem.Api/"]
+COPY ["src/api/AdielSystem.Application/AdielSystem.Application.csproj", "src/api/AdielSystem.Application/"]
+COPY ["src/api/AdielSystem.Domain/AdielSystem.Domain.csproj", "src/api/AdielSystem.Domain/"]
+COPY ["src/api/AdielSystem.Infrastructure/AdielSystem.Infrastructure.csproj", "src/api/AdielSystem.Infrastructure/"]
+RUN dotnet restore "src/api/AdielSystem.Api/AdielSystem.Api.csproj"
+
+COPY . .
+
+ENV ASPNETCORE_URLS=http://0.0.0.0:5080
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+EXPOSE 5080
+
+CMD ["dotnet", "watch", "--project", "src/api/AdielSystem.Api", "run", "--no-launch-profile"]

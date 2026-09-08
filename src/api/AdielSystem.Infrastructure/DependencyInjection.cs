@@ -40,14 +40,18 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(SupabaseOptions.SectionName))
             .Validate(options => options.Url.IsAbsoluteUri, "Supabase:Url must be an absolute URL.")
             .ValidateOnStart();
-        services.AddOptions<SupabaseStorageOptions>().Bind(configuration.GetSection(SupabaseStorageOptions.SectionName));
+        services.AddOptions<SupabaseStorageOptions>()
+            .Bind(configuration.GetSection(SupabaseStorageOptions.SectionName))
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Bucket), "Supabase:Storage:Bucket is required.")
+            .ValidateOnStart();
         services.AddOptions<GoogleCalendarOptions>()
             .Bind(configuration.GetSection(GoogleCalendarOptions.SectionName))
             .Validate(options => !options.Enabled ||
                 (!string.IsNullOrWhiteSpace(options.ClientId) && !string.IsNullOrWhiteSpace(options.ClientSecret) &&
                  options.RedirectUri is { IsAbsoluteUri: true } && options.FrontendRedirectUri is { IsAbsoluteUri: true } &&
-                 options.FrontendBaseUri is { IsAbsoluteUri: true }),
-                "Enabled Google Calendar integration requires ClientId, ClientSecret, RedirectUri, FrontendRedirectUri, and FrontendBaseUri.")
+                 options.FrontendBaseUri is { IsAbsoluteUri: true } && !string.IsNullOrWhiteSpace(options.TimeZone) &&
+                 options.EventDurationMinutes is > 0 and <= 1440),
+                "Enabled Google Calendar integration requires ClientId, ClientSecret, RedirectUri, FrontendRedirectUri, FrontendBaseUri, TimeZone, and an EventDurationMinutes value from 1 to 1440.")
             .ValidateOnStart();
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
@@ -65,7 +69,8 @@ public static class DependencyInjection
         services.AddScoped<ITaskRepository, TaskRepository>();
         services.AddScoped<IInsightsRepository, InsightsRepository>();
         services.AddScoped<IImageReferenceRepository, ImageReferenceRepository>();
-        services.AddHttpClient<IBusinessImageStorage, SupabaseBusinessImageStorage>();
+        services.AddHttpClient<IBusinessImageStorage, SupabaseBusinessImageStorage>(client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient("StorageHealth", client => client.Timeout = TimeSpan.FromSeconds(10));
         services.AddDataProtection();
         services.AddHttpClient<GoogleCalendarHttpClient>();
         services.AddScoped<IGoogleCalendarIntegration, GoogleCalendarIntegration>();
@@ -75,7 +80,9 @@ public static class DependencyInjection
         services.AddSingleton<IImageCleanupQueue>(provider => provider.GetRequiredService<ImageCleanupQueue>());
         services.AddHostedService(provider => provider.GetRequiredService<ImageCleanupQueue>());
         services.AddHostedService<StorageBucketInitializer>();
-        services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
+        services.AddHealthChecks()
+            .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"])
+            .AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
 
         return services;
     }

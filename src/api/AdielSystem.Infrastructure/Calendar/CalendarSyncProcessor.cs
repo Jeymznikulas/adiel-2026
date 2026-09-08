@@ -60,6 +60,20 @@ internal sealed class CalendarSyncProcessor(
 
         var eventId = task.GoogleEventId ?? CalendarEventId(task.Id);
         var dueDate = task.DueDate ?? throw new InvalidOperationException("A calendar event requires a task due date.");
+        GoogleCalendarEventTime start;
+        GoogleCalendarEventTime end;
+        if (task.DueTime is null)
+        {
+            start = new(dueDate.ToString("yyyy-MM-dd"), null, null);
+            end = new(dueDate.AddDays(1).ToString("yyyy-MM-dd"), null, null);
+        }
+        else
+        {
+            var startsAt = dueDate.ToDateTime(task.DueTime.Value);
+            var endsAt = startsAt.AddMinutes(settings.EventDurationMinutes);
+            start = new(null, startsAt.ToString("yyyy-MM-dd'T'HH:mm:ss"), settings.TimeZone);
+            end = new(null, endsAt.ToString("yyyy-MM-dd'T'HH:mm:ss"), settings.TimeZone);
+        }
         var taskUrl = settings.FrontendBaseUri is null ? null : new Uri(settings.FrontendBaseUri, $"tasks?task={task.Id}").AbsoluteUri;
         var description = $"{task.Description}\n\nPriority: {task.Priority}\nStatus: {task.Status}\nAssigned to: {task.AssignedToName}".Trim();
         if (taskUrl is not null) description += $"\n\nOpen task: {taskUrl}";
@@ -67,8 +81,8 @@ internal sealed class CalendarSyncProcessor(
             eventId,
             task.Status == "Completed" ? $"✓ [Adiel] {task.Title}" : $"[Adiel] {task.Title}",
             description,
-            new(dueDate.ToString("yyyy-MM-dd")),
-            new(dueDate.AddDays(1).ToString("yyyy-MM-dd")),
+            start,
+            end,
             task.AttendeeEmails.Select(email => new GoogleCalendarAttendee(email)).ToArray(),
             "transparent",
             false,
@@ -112,7 +126,7 @@ internal sealed class CalendarSyncProcessor(
     {
         await using var command = dataSource.CreateCommand("""
             select task.id,task.title,task.description,task.status,task.priority,task.assigned_to_name,
-                   task.due_date,task.archived_at,task.version,
+                   task.due_date,task.due_time,task.archived_at,task.version,
                    coalesce(array(
                      select distinct lower(option.contact_email)
                      from public.business_options option
@@ -133,8 +147,9 @@ internal sealed class CalendarSyncProcessor(
         if (!await reader.ReadAsync(cancellationToken)) return null;
         return new(
             reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5),
-            reader.IsDBNull(6) ? null : reader.GetFieldValue<DateOnly>(6), reader.IsDBNull(7) ? null : reader.GetFieldValue<DateTimeOffset>(7), reader.GetInt64(8),
-            reader.GetFieldValue<string[]>(9), reader.IsDBNull(10) ? null : reader.GetString(10), reader.IsDBNull(11) ? null : reader.GetString(11));
+            reader.IsDBNull(6) ? null : reader.GetFieldValue<DateOnly>(6), reader.IsDBNull(7) ? null : reader.GetFieldValue<TimeOnly>(7),
+            reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8), reader.GetInt64(9),
+            reader.GetFieldValue<string[]>(10), reader.IsDBNull(11) ? null : reader.GetString(11), reader.IsDBNull(12) ? null : reader.GetString(12));
     }
 
     private async Task SaveMappingAsync(CalendarTaskSnapshot task, string calendarId, string eventId, CancellationToken cancellationToken)
@@ -202,7 +217,7 @@ internal sealed class CalendarSyncProcessor(
 
     private sealed record CalendarSyncJob(long Id, Guid TaskId, int Attempts);
     private sealed record CalendarConnection(string EncryptedRefreshToken, string CalendarId);
-    private sealed record CalendarTaskSnapshot(Guid Id, string Title, string Description, string Status, string Priority, string AssignedToName, DateOnly? DueDate, DateTimeOffset? ArchivedAt, long Version, string[] AttendeeEmails, string? GoogleEventId, string? GoogleCalendarId);
+    private sealed record CalendarTaskSnapshot(Guid Id, string Title, string Description, string Status, string Priority, string AssignedToName, DateOnly? DueDate, TimeOnly? DueTime, DateTimeOffset? ArchivedAt, long Version, string[] AttendeeEmails, string? GoogleEventId, string? GoogleCalendarId);
 }
 
 internal sealed class CalendarSyncWorker(IServiceScopeFactory scopeFactory, IOptions<GoogleCalendarOptions> options, ILogger<CalendarSyncWorker> logger) : BackgroundService
@@ -232,8 +247,8 @@ internal sealed record GoogleCalendarEvent(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("summary")] string Summary,
     [property: JsonPropertyName("description")] string Description,
-    [property: JsonPropertyName("start")] GoogleCalendarDate Start,
-    [property: JsonPropertyName("end")] GoogleCalendarDate End,
+    [property: JsonPropertyName("start")] GoogleCalendarEventTime Start,
+    [property: JsonPropertyName("end")] GoogleCalendarEventTime End,
     [property: JsonPropertyName("attendees")] IReadOnlyList<GoogleCalendarAttendee> Attendees,
     [property: JsonPropertyName("transparency")] string Transparency,
     [property: JsonPropertyName("guestsCanModify")] bool GuestsCanModify,
@@ -241,7 +256,10 @@ internal sealed record GoogleCalendarEvent(
     [property: JsonPropertyName("extendedProperties")] GoogleCalendarExtendedProperties ExtendedProperties,
     [property: JsonPropertyName("reminders")] GoogleCalendarReminders Reminders);
 
-internal sealed record GoogleCalendarDate([property: JsonPropertyName("date")] string Date);
+internal sealed record GoogleCalendarEventTime(
+    [property: JsonPropertyName("date"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Date,
+    [property: JsonPropertyName("dateTime"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DateTime,
+    [property: JsonPropertyName("timeZone"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TimeZone);
 internal sealed record GoogleCalendarAttendee([property: JsonPropertyName("email")] string Email);
 internal sealed record GoogleCalendarExtendedProperties([property: JsonPropertyName("private")] IReadOnlyDictionary<string, string> Private);
 internal sealed record GoogleCalendarReminders([property: JsonPropertyName("useDefault")] bool UseDefault);

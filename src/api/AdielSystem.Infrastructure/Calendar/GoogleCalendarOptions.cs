@@ -10,5 +10,7 @@ public sealed class GoogleCalendarOptions
     public Uri? FrontendRedirectUri { get; init; }
     public Uri? FrontendBaseUri { get; init; }
     public string CalendarId { get; init; } = "primary";
+    public string TimeZone { get; init; } = "Asia/Singapore";
+    public int EventDurationMinutes { get; init; } = 60;
 }
 

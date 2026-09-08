@@ -15,6 +15,7 @@ public sealed class WorkTask : Entity
     public Guid? AssignedById { get; private set; }
     public string AssignedByName { get; private set; } = string.Empty;
     public DateOnly? DueDate { get; private set; }
+    public TimeOnly? DueTime { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -22,7 +23,7 @@ public sealed class WorkTask : Entity
     public long Version { get; private set; }
     public IReadOnlyList<Subtask> Subtasks { get; private set; } = [];
 
-    public static WorkTask Create(Guid id, string title, string description, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, Guid assignedById, string assignedByName, DateOnly? dueDate, DateTimeOffset occurredAt)
+    public static WorkTask Create(Guid id, string title, string description, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, Guid assignedById, string assignedByName, DateOnly? dueDate, TimeOnly? dueTime, DateTimeOffset occurredAt)
     {
         if (dueDate is not null && dueDate < DateOnly.FromDateTime(occurredAt.UtcDateTime))
             throw new ArgumentException("A new task due date cannot be in the past.", nameof(dueDate));
@@ -37,11 +38,11 @@ public sealed class WorkTask : Entity
             UpdatedAt = occurredAt,
             Version = 1,
         };
-        task.UpdateDetails(title, description, priority, assignedToId, assignedToName, dueDate);
+        task.UpdateDetails(title, description, priority, assignedToId, assignedToName, dueDate, dueTime);
         return task;
     }
 
-    public static WorkTask Rehydrate(Guid id, string title, string description, WorkTaskStatus status, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, Guid? assignedById, string assignedByName, DateOnly? dueDate, DateTimeOffset? completedAt, DateTimeOffset createdAt, DateTimeOffset updatedAt, DateTimeOffset? archivedAt, long version, IEnumerable<Subtask> subtasks)
+    public static WorkTask Rehydrate(Guid id, string title, string description, WorkTaskStatus status, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, Guid? assignedById, string assignedByName, DateOnly? dueDate, TimeOnly? dueTime, DateTimeOffset? completedAt, DateTimeOffset createdAt, DateTimeOffset updatedAt, DateTimeOffset? archivedAt, long version, IEnumerable<Subtask> subtasks)
     {
         if (id == Guid.Empty || version <= 0) throw new ArgumentException("Persisted task identity and version are required.");
         var task = new WorkTask
@@ -57,15 +58,15 @@ public sealed class WorkTask : Entity
             Version = version,
             Subtasks = subtasks.OrderBy(subtask => subtask.Position).ToArray(),
         };
-        task.SetDetails(title, description, priority, assignedToId, assignedToName, dueDate);
+        task.SetDetails(title, description, priority, assignedToId, assignedToName, dueDate, dueTime);
         if ((status == WorkTaskStatus.Completed) != (completedAt is not null)) throw new ArgumentException("Task completion state is inconsistent.");
         return task;
     }
 
-    public void UpdateDetails(string title, string description, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, DateOnly? dueDate)
+    public void UpdateDetails(string title, string description, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, DateOnly? dueDate, TimeOnly? dueTime)
     {
         EnsureEditable();
-        SetDetails(title, description, priority, assignedToId, assignedToName, dueDate);
+        SetDetails(title, description, priority, assignedToId, assignedToName, dueDate, dueTime);
     }
 
     public void ChangeStatus(WorkTaskStatus target, DateTimeOffset occurredAt)
@@ -109,14 +110,16 @@ public sealed class WorkTask : Entity
         if (ArchivedAt is not null) throw new InvalidOperationException("Restore the task before changing it.");
     }
 
-    private void SetDetails(string title, string description, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, DateOnly? dueDate)
+    private void SetDetails(string title, string description, WorkTaskPriority priority, Guid? assignedToId, string assignedToName, DateOnly? dueDate, TimeOnly? dueTime)
     {
+        if (dueTime is not null && dueDate is null) throw new ArgumentException("A task due time requires a due date.", nameof(dueTime));
         Title = Required(title, nameof(title), 200);
         Description = Optional(description, nameof(description), 4000);
         Priority = priority;
         AssignedToId = assignedToId;
         AssignedToName = Required(assignedToName, nameof(assignedToName), 200);
         DueDate = dueDate;
+        DueTime = dueTime;
     }
 
     private static string Required(string? value, string parameterName, int maximumLength)

@@ -57,7 +57,7 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "insert into public.tasks (id,title,description,status,priority,assigned_to,assigned_to_name,assigned_by,assigned_by_name,due_date,completed_at) values (@id,@title,@description,@status,@priority,@assigned_to,@assigned_to_name,@assigned_by,@assigned_by_name,@due_date,@completed_at)";
+            command.CommandText = "insert into public.tasks (id,title,description,status,priority,assigned_to,assigned_to_name,assigned_by,assigned_by_name,due_date,due_time,completed_at) values (@id,@title,@description,@status,@priority,@assigned_to,@assigned_to_name,@assigned_by,@assigned_by_name,@due_date,@due_time,@completed_at)";
             AddTaskParameters(command, task);
             await command.ExecuteNonQueryAsync(token);
         }
@@ -70,7 +70,7 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "update public.tasks set title=@title,description=@description,priority=@priority,assigned_to=@assigned_to,assigned_to_name=@assigned_to_name,due_date=@due_date where id=@id and archived_at is null and deleted_at is null and version=@version returning id";
+        command.CommandText = "update public.tasks set title=@title,description=@description,priority=@priority,assigned_to=@assigned_to,assigned_to_name=@assigned_to_name,due_date=@due_date,due_time=@due_time where id=@id and archived_at is null and deleted_at is null and version=@version returning id";
         AddTaskParameters(command, task);
         command.Parameters.AddWithValue("version", expectedVersion);
         if (await command.ExecuteScalarAsync(token) is null) throw Stale();
@@ -229,16 +229,16 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "select id,title,description,status,priority,assigned_to,assigned_to_name,assigned_by,assigned_by_name,due_date,completed_at,created_at,updated_at,archived_at,version from public.tasks where id=@id and deleted_at is null" + (forUpdate ? " for update" : string.Empty);
+        command.CommandText = "select id,title,description,status,priority,assigned_to,assigned_to_name,assigned_by,assigned_by_name,due_date,due_time,completed_at,created_at,updated_at,archived_at,version from public.tasks where id=@id and deleted_at is null" + (forUpdate ? " for update" : string.Empty);
         command.Parameters.AddWithValue("id", id);
         TaskRecord record;
         await using (var reader = await command.ExecuteReaderAsync(token))
         {
             if (!await reader.ReadAsync(token)) return null;
-            record = new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetGuid(7), reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetFieldValue<DateOnly>(9), reader.IsDBNull(10) ? null : reader.GetFieldValue<DateTimeOffset>(10), reader.GetFieldValue<DateTimeOffset>(11), reader.GetFieldValue<DateTimeOffset>(12), reader.IsDBNull(13) ? null : reader.GetFieldValue<DateTimeOffset>(13), reader.GetInt64(14));
+            record = new(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetGuid(7), reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetFieldValue<DateOnly>(9), reader.IsDBNull(10) ? null : reader.GetFieldValue<TimeOnly>(10), reader.IsDBNull(11) ? null : reader.GetFieldValue<DateTimeOffset>(11), reader.GetFieldValue<DateTimeOffset>(12), reader.GetFieldValue<DateTimeOffset>(13), reader.IsDBNull(14) ? null : reader.GetFieldValue<DateTimeOffset>(14), reader.GetInt64(15));
         }
         var subtasks = await ReadSubtasksAsync(connection, transaction, id, token);
-        return WorkTask.Rehydrate(record.Id, record.Title, record.Description, ParseStatus(record.Status), ParsePriority(record.Priority), record.AssignedToId, record.AssignedToName, record.AssignedById, record.AssignedByName, record.DueDate, record.CompletedAt, record.CreatedAt, record.UpdatedAt, record.ArchivedAt, record.Version, subtasks);
+        return WorkTask.Rehydrate(record.Id, record.Title, record.Description, ParseStatus(record.Status), ParsePriority(record.Priority), record.AssignedToId, record.AssignedToName, record.AssignedById, record.AssignedByName, record.DueDate, record.DueTime, record.CompletedAt, record.CreatedAt, record.UpdatedAt, record.ArchivedAt, record.Version, subtasks);
     }
 
     private static async Task<IReadOnlyList<Subtask>> ReadSubtasksAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid taskId, CancellationToken token)
@@ -276,6 +276,7 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
         command.Parameters.Add("assigned_by", NpgsqlDbType.Uuid).Value = (object?)task.AssignedById ?? DBNull.Value;
         command.Parameters.AddWithValue("assigned_by_name", task.AssignedByName);
         command.Parameters.Add("due_date", NpgsqlDbType.Date).Value = (object?)task.DueDate ?? DBNull.Value;
+        command.Parameters.Add("due_time", NpgsqlDbType.Time).Value = (object?)task.DueTime ?? DBNull.Value;
         command.Parameters.Add("completed_at", NpgsqlDbType.TimestampTz).Value = (object?)task.CompletedAt ?? DBNull.Value;
     }
 
@@ -317,5 +318,5 @@ internal sealed class TaskRepository(NpgsqlDataSource dataSource) : ITaskReposit
     private static WorkTaskPriority ParsePriority(string value) => value switch { "Low" => WorkTaskPriority.Low, "Medium" => WorkTaskPriority.Medium, "High" => WorkTaskPriority.High, _ => throw new InvalidOperationException("Stored task priority is invalid.") };
     private static ConcurrencyConflictException Stale() => new("This task changed after you opened it. Reload and try again.");
     private static ConcurrencyConflictException StaleSubtask() => new("This subtask changed after you opened it. Reload and try again.");
-    private sealed record TaskRecord(Guid Id, string Title, string Description, string Status, string Priority, Guid? AssignedToId, string AssignedToName, Guid? AssignedById, string AssignedByName, DateOnly? DueDate, DateTimeOffset? CompletedAt, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? ArchivedAt, long Version);
+    private sealed record TaskRecord(Guid Id, string Title, string Description, string Status, string Priority, Guid? AssignedToId, string AssignedToName, Guid? AssignedById, string AssignedByName, DateOnly? DueDate, TimeOnly? DueTime, DateTimeOffset? CompletedAt, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? ArchivedAt, long Version);
 }

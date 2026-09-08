@@ -18,6 +18,8 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
+ProductionSecurityConfiguration.Configure(builder);
+
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(options =>
 {
@@ -28,7 +30,7 @@ builder.Logging.AddDebug();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
-builder.Services.AddHealthChecks();
+builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddOwnerSecurity(builder.Configuration);
 builder.Services.AddScoped<ClientService>();
@@ -54,12 +56,15 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+ProductionSecurityConfiguration.Use(app);
 app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     context.Response.Headers["Cache-Control"] = "no-store";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
     await next(context);
 });
 if (!app.Environment.IsDevelopment())
@@ -90,6 +95,9 @@ api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolic
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapInsightEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapImageEndpoints();
 api.MapGroup(string.Empty).RequireAuthorization(SecurityConstants.OwnerOnlyPolicy).MapGoogleCalendarEndpoints();
+
+if (builder.Configuration.GetValue("OpenApi:Enabled", true))
+    app.MapOpenApi().RequireAuthorization(SecurityConstants.OwnerOnlyPolicy);
 
 app.Run();
 

@@ -19,6 +19,13 @@ public sealed class OwnerAccessOptions
     public Guid OwnerUserId { get; init; }
 }
 
+public sealed class OwnerRateLimitOptions
+{
+    public const string SectionName = "RateLimiting:Owner";
+    public int PermitLimit { get; init; } = 120;
+    public int WindowSeconds { get; init; } = 60;
+}
+
 internal sealed class HttpCurrentUserAccessor(IHttpContextAccessor httpContextAccessor) : ICurrentUserAccessor
 {
     public CurrentUser GetRequiredUser()
@@ -60,12 +67,21 @@ public static class SecurityServiceCollectionExtensions
         }));
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserAccessor, HttpCurrentUserAccessor>();
+        var rateLimit = configuration.GetSection(OwnerRateLimitOptions.SectionName).Get<OwnerRateLimitOptions>() ?? new();
+        if (rateLimit.PermitLimit is < 1 or > 10_000 || rateLimit.WindowSeconds is < 1 or > 3600)
+            throw new InvalidOperationException("RateLimiting:Owner must define a permit limit from 1 to 10000 and a window from 1 to 3600 seconds.");
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = async (context, token) =>
+            {
+                if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+                    context.HttpContext.Response.Headers.RetryAfter = Math.Ceiling(retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await context.HttpContext.Response.WriteAsJsonAsync(new { error = "Too many requests. Try again later." }, token);
+            };
             options.AddPolicy(SecurityConstants.OwnerRateLimitPolicy, context => RateLimitPartition.GetFixedWindowLimiter(
                 context.User.FindFirst("sub")?.Value ?? "anonymous",
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = rateLimit.PermitLimit, Window = TimeSpan.FromSeconds(rateLimit.WindowSeconds), QueueLimit = 0, AutoReplenishment = true }));
         });
         return services;
     }

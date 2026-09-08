@@ -4,7 +4,7 @@ The integration uses one Google account as the event organizer. Task assignee em
 
 ## Apply the database migration
 
-Apply `supabase/migrations/20260827000000_google_calendar_integration.sql` after the earlier migrations. Existing task assignees remain valid, but they must be edited in **Settings > Options > Task assignees** to add a Calendar email before they can receive invitations.
+Apply `supabase/migrations/20260827000000_google_calendar_integration.sql` and `supabase/migrations/20260829000000_task_due_time.sql` after the earlier migrations. Existing task assignees remain valid, but they must be edited in **Settings > Options > Task assignees** to add a Calendar email before they can receive invitations.
 
 ## Create Google credentials
 
@@ -33,6 +33,8 @@ dotnet user-secrets set "GoogleCalendar:ClientSecret" "YOUR-CLIENT-SECRET" --pro
 dotnet user-secrets set "GoogleCalendar:RedirectUri" "https://localhost:7001/api/v1/integrations/google-calendar/callback" --project src/api/AdielSystem.Api
 dotnet user-secrets set "GoogleCalendar:FrontendRedirectUri" "http://localhost:5173/settings?section=calendar" --project src/api/AdielSystem.Api
 dotnet user-secrets set "GoogleCalendar:FrontendBaseUri" "http://localhost:5173/" --project src/api/AdielSystem.Api
+dotnet user-secrets set "GoogleCalendar:TimeZone" "Asia/Singapore" --project src/api/AdielSystem.Api
+dotnet user-secrets set "GoogleCalendar:EventDurationMinutes" "60" --project src/api/AdielSystem.Api
 ```
 
 Production must use the deployed HTTPS API and web URLs. Persist ASP.NET Core Data Protection keys in durable protected storage; those keys protect the stored Google refresh token. Losing the keys makes the existing Calendar connection unreadable and requires reconnecting.
@@ -44,6 +46,6 @@ Production must use the deployed HTTPS API and web URLs. Persist ASP.NET Core Da
 3. Add or edit task assignees with their real Calendar invitation emails.
 4. Create a task and select one or more assignees.
 
-The task due date becomes a non-blocking all-day event. Updates reuse the same deterministic event ID, reassignment updates the attendees, completion marks the event completed, and archiving removes the event. Failed Google requests retry in the background without rolling back the task save.
+The task due date becomes a non-blocking all-day event when no due time is selected. A task with a due time becomes a timed event in the configured Calendar timezone and uses the configured event duration. Updates reuse the same deterministic event ID, reassignment updates the attendees, completion marks the event completed, and archiving removes the event. Failed Google requests retry in the background without rolling back the task save.
 
 Google may require an attendee to accept the invitation before it appears on their calendar, depending on that person's invitation settings.

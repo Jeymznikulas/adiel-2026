@@ -1,10 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Npgsql" />
     <ProjectReference Include="../AdielSystem.Application/AdielSystem.Application.csproj" />
   </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="AdielSystem.IntegrationTests" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <UserSecretsId>92443653-a457-48a0-92af-2a5272d68c4e</UserSecretsId>
+  </PropertyGroup>
+
 </Project>

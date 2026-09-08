@@ -10,6 +10,8 @@ import { SquareImageCropper } from '../../components/ui/SquareImageCropper'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { listBusinessOptions } from '../../services/api/settings'
+import { listItems } from '../../services/api/items'
+import { listPurchaseOrders } from '../../services/api/purchaseOrders'
 import { archiveSupplier, createSupplier, listSuppliers, updateSupplier, type Supplier as ApiSupplier, type SupplierContact as ApiSupplierContact, type SupplierPerformanceNote as ApiSupplierPerformanceNote, type SupplierType } from '../../services/api/suppliers'
 import { removeImage, uploadImage } from '../../services/api/images'
 import { SupplierProfile, type SupplierPurchaseOrder, type SupplierRegisteredItem } from './SupplierProfile'
@@ -28,8 +30,6 @@ type SupplierPageProps = {
   currentUsername: string
 }
 
-const purchaseOrderStorageKey = '__purchase_orders_migrated_to_api__'
-const itemStorageKey = '__items_migrated_to_api__'
 const supplierTypes: SupplierType[] = ['Contractor', 'Distributor', 'Manufacturer', 'Service provider', 'Other']
 const supplierTypeOptions = supplierTypes.map((value) => ({ value }))
 const supplierStatusOptions = [
@@ -67,66 +67,6 @@ function createEmptyDraft(): SupplierDraft {
     performanceNotes: [createPerformanceNote()],
     catalogLink: '',
   }
-}
-
-function loadSupplierPurchaseOrders(): SupplierPurchaseOrder[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(purchaseOrderStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const order = value as Partial<SupplierPurchaseOrder>
-      if (typeof order.id !== 'string' || typeof order.supplierId !== 'string' || typeof order.poNumber !== 'string' || typeof order.date !== 'string') return []
-      return [{
-        id: order.id,
-        date: order.date,
-        poNumber: order.poNumber,
-        clientName: typeof order.clientName === 'string' ? order.clientName : '',
-        supplierId: order.supplierId,
-        supplierName: typeof order.supplierName === 'string' ? order.supplierName : '',
-        contactPerson: typeof order.contactPerson === 'string' ? order.contactPerson : '',
-        totalAmount: typeof order.totalAmount === 'number' ? order.totalAmount : 0,
-        status: typeof order.status === 'string' ? order.status : 'Not yet sent',
-        addedToExpenses: order.addedToExpenses === true,
-        items: Array.isArray(order.items) ? order.items : [],
-        createdAt: typeof order.createdAt === 'string' ? order.createdAt : order.date,
-        updatedAt: typeof order.updatedAt === 'string' ? order.updatedAt : order.date,
-      }]
-    })
-  } catch { return [] }
-}
-
-function loadSupplierRegisteredItems(): (SupplierRegisteredItem & { supplierId: string })[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(itemStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((value) => {
-      if (typeof value !== 'object' || value === null) return []
-      const item = value as Record<string, unknown>
-      if (typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.supplierId !== 'string') return []
-      const variants = Array.isArray(item.variants) ? item.variants.flatMap((value) => {
-        if (typeof value !== 'object' || value === null) return []
-        const variant = value as Record<string, unknown>
-        if (typeof variant.id !== 'string') return []
-        return [{ id: variant.id, status: typeof variant.status === 'string' ? variant.status : 'Active', rawCost: typeof variant.rawCost === 'number' ? variant.rawCost : 0, sellingPrice: typeof variant.sellingPrice === 'number' ? variant.sellingPrice : 0 }]
-      }) : []
-      return [{
-        id: item.id,
-        supplierId: item.supplierId,
-        photo: typeof item.photo === 'string' ? item.photo : '',
-        name: item.name,
-        category: typeof item.category === 'string' ? item.category : '',
-        subcategory: typeof item.subcategory === 'string' ? item.subcategory : '',
-        brand: typeof item.brand === 'string' ? item.brand : '',
-        unitOfMeasure: typeof item.unitOfMeasure === 'string' ? item.unitOfMeasure : 'Piece',
-        productCode: typeof item.productCode === 'string' ? item.productCode : '',
-        rawCost: typeof item.rawCost === 'number' ? item.rawCost : 0,
-        sellingPrice: typeof item.sellingPrice === 'number' ? item.sellingPrice : 0,
-        status: typeof item.status === 'string' ? item.status : 'Active',
-        variants,
-      }]
-    })
-  } catch { return [] }
 }
 
 function supplierInitials(name: string) {
@@ -179,8 +119,8 @@ function LogoMark({ supplier, size = 'large' }: { supplier: Pick<Supplier, 'logo
 export function SupplierPage({ currentUsername: _currentUsername }: SupplierPageProps) {
   const [categorySuggestions, setCategorySuggestions] = useState(defaultCategorySuggestions)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [purchaseOrders, setPurchaseOrders] = useState<SupplierPurchaseOrder[]>(loadSupplierPurchaseOrders)
-  const [registeredItems, setRegisteredItems] = useState(loadSupplierRegisteredItems)
+  const [purchaseOrders, setPurchaseOrders] = useState<SupplierPurchaseOrder[]>([])
+  const [registeredItems, setRegisteredItems] = useState<(SupplierRegisteredItem & { supplierId: string })[]>([])
   const [search, setSearch] = usePersistentState('suppliers.search', '')
   const [typeFilter, setTypeFilter] = usePersistentState<SupplierFilter>('suppliers.type', 'All suppliers')
   const [draft, setDraft] = useState<SupplierDraft>(createEmptyDraft)
@@ -217,6 +157,16 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   }, [])
 
   useEffect(() => {
+    let isActive = true
+    void Promise.all([listPurchaseOrders({ pageSize: 100 }), listItems({ pageSize: 100, sort: 'name' })]).then(([orders, items]) => {
+      if (!isActive) return
+      setPurchaseOrders(orders.items.map((order) => ({ id: order.id, date: order.orderDate, poNumber: order.poNumber, clientName: order.clientName, supplierId: order.supplierId ?? '', supplierName: order.supplierName, contactPerson: order.contactPerson, totalAmount: order.totalAmount, status: order.status, addedToExpenses: false, items: order.lines, createdAt: order.createdAt, updatedAt: order.updatedAt })))
+      setRegisteredItems(items.items.map((item) => ({ id: item.id, supplierId: item.supplierId ?? '', photo: item.photo, name: item.name, category: item.category, subcategory: item.subcategory, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, rawCost: item.rawCost, sellingPrice: item.sellingPrice, status: item.status, variants: item.variants.map((variant) => ({ id: variant.id, status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })) })))
+    }).catch(() => { if (isActive) setStorageError('Supplier purchase orders and items could not be loaded from the API.') })
+    return () => { isActive = false }
+  }, [])
+
+  useEffect(() => {
     if (!toast) return
     const timeout = window.setTimeout(() => setToast(''), 2800)
     return () => window.clearTimeout(timeout)
@@ -226,15 +176,6 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     function syncPath() { setSelectedSupplierId(window.location.pathname.match(/^\/suppliers\/([^/]+)$/)?.[1] ?? null) }
     window.addEventListener('popstate', syncPath)
     return () => window.removeEventListener('popstate', syncPath)
-  }, [])
-
-  useEffect(() => {
-    function syncLinkedRecords(event: StorageEvent) {
-      if (event.key === purchaseOrderStorageKey) setPurchaseOrders(loadSupplierPurchaseOrders())
-      if (event.key === itemStorageKey) setRegisteredItems(loadSupplierRegisteredItems())
-    }
-    window.addEventListener('storage', syncLinkedRecords)
-    return () => window.removeEventListener('storage', syncLinkedRecords)
   }, [])
 
   const activeSuppliers = useMemo(() => suppliers.filter((supplier) => supplier.archivedAt === null), [suppliers])

@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: ${CONNECTIONSTRINGS__DEFAULTCONNECTION}
+      AccessControl__OwnerUserId: ${ACCESSCONTROL__OWNERUSERID}
+      Cors__AllowedOrigins__0: http://localhost:5173
+      Supabase__Url: ${SUPABASE__URL}
+      Supabase__Storage__ServiceRoleKey: ${SUPABASE__STORAGE__SERVICEROLEKEY}
+    ports:
+      - "5080:5080"
+    volumes:
+      - ./:/workspace
+      - dotnet_packages:/root/.nuget/packages
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5080/api/v1}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+      VITE_SUPABASE_USERNAME_DOMAIN: ${VITE_SUPABASE_USERNAME_DOMAIN:-users.adiel.local}
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./src/web:/app
+      - web_node_modules:/app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  dotnet_packages:
+  web_node_modules:

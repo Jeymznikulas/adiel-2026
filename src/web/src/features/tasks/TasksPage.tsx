@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { AnimatedTimePicker } from '../../components/ui/AnimatedTimePicker'
 import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
@@ -15,7 +16,7 @@ import { navigateToBusinessSettings } from '../settings/settingsStorage'
 
 type TaskFilter = 'All' | TaskStatus
 type DueDateFilter = 'All' | 'Overdue' | 'Due today' | 'Upcoming' | 'No due date'
-type Task = Omit<ApiTask, 'dueDate'> & { dueDate: string }
+type Task = Omit<ApiTask, 'dueDate' | 'dueTime'> & { dueDate: string; dueTime: string }
 
 type TasksPageProps = {
   currentUsername: string
@@ -47,9 +48,10 @@ const emptyDraft = {
   priority: 'Medium' as TaskPriority,
   assignedTo: '',
   dueDate: '',
+  dueTime: '',
 }
 
-function normalizeTask(task: ApiTask): Task { return { ...task, dueDate: task.dueDate ?? '' } }
+function normalizeTask(task: ApiTask): Task { return { ...task, dueDate: task.dueDate ?? '', dueTime: task.dueTime?.slice(0, 5) ?? '' } }
 
 function splitAssignees(value: string) { return value.split(',').map((name) => name.trim()).filter(Boolean) }
 function formatAssignees(names: string[]) { return Array.from(new Set(names)).join(', ') }
@@ -80,6 +82,19 @@ function formatDate(value: string) {
   if (!value) return 'No date'
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value.slice(0, 10)}T00:00:00`))
 }
+
+function formatTime(value: string) {
+  if (!value) return ''
+  const [hours, minutes] = value.split(':').map(Number)
+  return new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date(2000, 0, 1, hours, minutes))
+}
+
+function formatSchedule(task: Pick<Task, 'dueDate' | 'dueTime'>) {
+  const date = formatDate(task.dueDate)
+  return task.dueTime ? `${date} at ${formatTime(task.dueTime)}` : date
+}
+
+function toApiDueTime(value: string) { return value ? `${value.slice(0, 5)}:00` : null }
 
 function dueDateClass(task: Task) {
   if (!task.dueDate) return 'text-slate-400'
@@ -292,7 +307,7 @@ function TasksCalendar({ tasks, onTaskSelect }: { tasks: Task[]; onTaskSelect: (
                     {dayTasks.slice(0, 3).map((task) => {
                       const style = task.status === 'Completed' ? 'border-emerald-200 border-l-emerald-400 bg-emerald-50/75 text-emerald-800 hover:bg-emerald-50' : task.status === 'In progress' ? 'border-amber-200 border-l-amber-400 bg-amber-50/75 text-amber-800 hover:bg-amber-50' : 'border-sky-200 border-l-sky-400 bg-sky-50/75 text-sky-800 hover:bg-sky-50'
                       const dot = task.status === 'Completed' ? 'bg-emerald-500' : task.status === 'In progress' ? 'bg-amber-500' : 'bg-sky-500'
-                      return <button className={`block w-full rounded-lg border border-l-[3px] px-2.5 py-2 text-left shadow-[0_5px_14px_-12px_rgba(15,23,42,0.45)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_18px_-12px_rgba(15,23,42,0.45)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-blue ${style}`} type="button" key={task.id} title={`${task.title} · ${task.assignedTo}`} onClick={() => onTaskSelect(task)}><span className="flex items-center gap-1.5"><span className={`size-1.5 shrink-0 rounded-full ${dot}`} /><span className="truncate text-[11px] font-extrabold">{task.title}</span></span><span className="mt-1.5 flex items-center justify-between gap-2 text-[9px] font-semibold opacity-65"><span className="truncate">{task.assignedTo}</span><span className="shrink-0 uppercase tracking-wide">{task.priority}</span></span></button>
+                      return <button className={`block w-full rounded-lg border border-l-[3px] px-2.5 py-2 text-left shadow-[0_5px_14px_-12px_rgba(15,23,42,0.45)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_18px_-12px_rgba(15,23,42,0.45)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-blue ${style}`} type="button" key={task.id} title={`${task.title} · ${task.assignedTo} · ${formatSchedule(task)}`} onClick={() => onTaskSelect(task)}><span className="flex items-center gap-1.5"><span className={`size-1.5 shrink-0 rounded-full ${dot}`} /><span className="truncate text-[11px] font-extrabold">{task.title}</span></span><span className="mt-1.5 flex items-center justify-between gap-2 text-[9px] font-semibold opacity-65"><span className="truncate">{task.assignedTo}</span><span className="shrink-0 uppercase tracking-wide">{task.dueTime ? formatTime(task.dueTime) : task.priority}</span></span></button>
                     })}
                     {dayTasks.length > 3 ? <p className="rounded-lg bg-slate-100/80 px-2 py-1.5 text-center text-[10px] font-bold text-slate-400">+{dayTasks.length - 3} more tasks</p> : null}
                   </div>
@@ -454,6 +469,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
       priority: selectedTask.priority,
       assignedTo: selectedTask.assignedTo,
       dueDate: selectedTask.dueDate,
+      dueTime: selectedTask.dueTime,
     })
     setIsEditingTask(true)
   }
@@ -469,7 +485,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     try {
       let current: ApiTask = selectedTask
       if (editDraft.status !== selectedTask.status) current = await changeTaskStatus(selectedTask.id, editDraft.status, selectedTask.version)
-      current = await updateTaskApi(selectedTask.id, { title: editDraft.title.trim(), description: editDraft.description.trim(), priority: editDraft.priority, assignedToId: null, assignedTo: editDraft.assignedTo.trim(), dueDate: editDraft.dueDate, version: current.version })
+      current = await updateTaskApi(selectedTask.id, { title: editDraft.title.trim(), description: editDraft.description.trim(), priority: editDraft.priority, assignedToId: null, assignedTo: editDraft.assignedTo.trim(), dueDate: editDraft.dueDate, dueTime: toApiDueTime(editDraft.dueTime), version: current.version })
       replaceTask(current)
       setIsEditingTask(false)
       setClientError('')
@@ -496,7 +512,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     if (!title || !assignedTo || !draft.dueDate) return
 
     try {
-      const created = normalizeTask(await createTask({ title, description: draft.description.trim(), status: draft.status, priority: draft.priority, assignedToId: null, assignedTo, dueDate: draft.dueDate }))
+      const created = normalizeTask(await createTask({ title, description: draft.description.trim(), status: draft.status, priority: draft.priority, assignedToId: null, assignedTo, dueDate: draft.dueDate, dueTime: toApiDueTime(draft.dueTime) }))
       setTasks((current) => [created, ...current])
       setIsAddingTask(false)
       setClientError('')
@@ -510,7 +526,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     try {
       const saved = changes.status
         ? await changeTaskStatus(id, changes.status, task.version)
-        : await updateTaskApi(id, { title: task.title, description: task.description, priority: changes.priority ?? task.priority, assignedToId: task.assignedToId, assignedTo: task.assignedTo, dueDate: (changes.dueDate ?? task.dueDate) || null, version: task.version })
+        : await updateTaskApi(id, { title: task.title, description: task.description, priority: changes.priority ?? task.priority, assignedToId: task.assignedToId, assignedTo: task.assignedTo, dueDate: (changes.dueDate ?? task.dueDate) || null, dueTime: toApiDueTime(task.dueTime), version: task.version })
       replaceTask(saved)
       setClientError('')
       setToast(changes.status === 'Completed' ? 'Task marked as completed' : changes.status ? 'Task status updated' : changes.priority ? 'Task priority updated' : 'Task due date updated')
@@ -663,7 +679,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                           <td className="px-4 py-3.5"><div className="flex items-center gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[linear-gradient(145deg,#092968,#00113f)] text-[10px] font-bold text-white">{initials(task.assignedTo)}</span><span className="truncate text-xs font-semibold text-slate-700">{task.assignedTo}</span></div></td>
                           <td className="px-4 py-3.5"><StatusDropdown task={task} onChange={(status) => updateTask(task.id, { status })} /></td>
                           <td className="px-4 py-3.5"><AnimatedDropdown size="compact" value={task.priority} options={priorityOptions} onChange={(priority) => updateTask(task.id, { priority })} ariaLabel={`Priority for ${task.title}`} /></td>
-                          <td className="px-4 py-3.5"><div className="relative"><AnimatedDatePicker size="compact" value={task.dueDate} onChange={(dueDate) => updateTask(task.id, { dueDate })} ariaLabel={`Due date for ${task.title}`} toneClassName={`border-transparent bg-slate-50 hover:border-slate-200 ${dueDateClass(task)}`} />{isOverdue ? <span className="absolute -right-1 -top-1 size-2 rounded-full border-2 border-white bg-red-500" aria-label="Overdue" /> : null}</div></td>
+                          <td className="px-4 py-3.5"><div className="relative"><AnimatedDatePicker size="compact" value={task.dueDate} onChange={(dueDate) => updateTask(task.id, { dueDate })} ariaLabel={`Due date for ${task.title}`} toneClassName={`border-transparent bg-slate-50 hover:border-slate-200 ${dueDateClass(task)}`} />{isOverdue ? <span className="absolute -right-1 -top-1 size-2 rounded-full border-2 border-white bg-red-500" aria-label="Overdue" /> : null}</div>{task.dueTime ? <span className="mt-1 block px-2 text-[9px] font-bold text-slate-400">{formatTime(task.dueTime)}</span> : null}</td>
                           <td className="px-4 py-3.5"><span className="block truncate text-xs font-semibold text-slate-600">{task.assignedBy}</span><span className="mt-1 block text-[10px] text-slate-400">{formatDate(task.createdAt)}</span></td>
                           <td className="px-2 py-3.5 text-center"><button className="grid size-8 place-items-center rounded-lg text-slate-300 opacity-0 transition hover:bg-slate-100 hover:text-brand-blue group-hover:opacity-100 focus:opacity-100" type="button" onClick={() => openTaskDetails(task)} aria-label={`View details for ${task.title}`}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg></button></td>
                         </tr>
@@ -683,13 +699,13 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
       {selectedTask && !isEditingTask ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="task-details-title">
           <button className="absolute inset-0" type="button" onClick={closeTaskDetails} aria-label="Close task details" />
-          <section className="relative my-6 w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.3)]">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+          <section className="relative my-6 max-h-[calc(100svh-2rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.3)]">
+            <div className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-slate-100 bg-white/95 px-6 py-5 backdrop-blur-xl">
               <div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">Task details</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="task-details-title">{isEditingTask ? 'Edit task' : selectedTask.title}</h2></div>
               <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeTaskDetails} aria-label="Close details"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
             </div>
 
-            {!isEditingTask ? <div className="bg-slate-50/45 p-4"><WorkflowHeader eyebrow="Task" recordNumber={`TASK-${selectedTask.id}`} partyName={selectedTask.assignedTo} createdLabel={`Created ${formatDate(selectedTask.createdAt)}`} status={selectedTask.status} steps={["To do", "In progress", "Completed"]} currentStep={selectedTask.status === 'To do' ? 0 : selectedTask.status === 'In progress' ? 1 : 2} module="Tasks" recordId={String(selectedTask.id)} badges={[{ label: `${selectedTask.priority} priority`, tone: selectedTask.priority === 'High' ? 'red' : selectedTask.priority === 'Medium' ? 'amber' : 'blue' }]} primaryAction={selectedTask.status === 'To do' ? { label: 'Start task', onClick: () => updateTask(selectedTask.id, { status: 'In progress' }) } : selectedTask.status === 'In progress' ? { label: 'Complete task', onClick: () => updateTask(selectedTask.id, { status: 'Completed' }) } : undefined} secondaryActions={selectedTask.status === 'Completed' ? [{ label: 'Reopen', onClick: () => updateTask(selectedTask.id, { status: 'In progress' }) }] : []} menuActions={[{ label: 'Edit', onClick: beginEditingTask }, { label: 'Archive', onClick: () => setIsConfirmingDelete(true) }]}><p className="text-xs leading-5 text-slate-500">Due {formatDate(selectedTask.dueDate)} · Assigned by {selectedTask.assignedBy}</p></WorkflowHeader></div> : null}
+            {!isEditingTask ? <div className="bg-slate-50/45 p-4"><WorkflowHeader eyebrow="Task" recordNumber={selectedTask.title} partyName={selectedTask.assignedTo} createdLabel={`Created ${formatDate(selectedTask.createdAt)}`} status={selectedTask.status} steps={["To do", "In progress", "Completed"]} currentStep={selectedTask.status === 'To do' ? 0 : selectedTask.status === 'In progress' ? 1 : 2} module="Tasks" recordId={String(selectedTask.id)} badges={[{ label: `${selectedTask.priority} priority`, tone: selectedTask.priority === 'High' ? 'red' : selectedTask.priority === 'Medium' ? 'amber' : 'blue' }]} primaryAction={selectedTask.status === 'To do' ? { label: 'Start task', onClick: () => updateTask(selectedTask.id, { status: 'In progress' }) } : selectedTask.status === 'In progress' ? { label: 'Complete task', onClick: () => updateTask(selectedTask.id, { status: 'Completed' }) } : undefined} secondaryActions={selectedTask.status === 'Completed' ? [{ label: 'Reopen', onClick: () => updateTask(selectedTask.id, { status: 'In progress' }) }] : []} menuActions={[{ label: 'Edit', onClick: beginEditingTask }, { label: 'Archive', onClick: () => setIsConfirmingDelete(true) }]}><p className="text-xs leading-5 text-slate-500">Due {formatSchedule(selectedTask)} · Assigned by {selectedTask.assignedBy}</p></WorkflowHeader></div> : null}
 
             {isEditingTask ? (
               <form className="[&_input]:!text-sm [&_label]:!text-[11px] [&_select]:!text-sm [&_textarea]:!text-sm" onSubmit={saveTask}>
@@ -703,6 +719,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-assignee">Assigned to</label><AssigneePicker id="edit-task-assignee" value={editDraft.assignedTo} options={configuredAssignees} onChange={(assignedTo) => setEditDraft((current) => ({ ...current, assignedTo }))} onManage={openAssigneeSettings} /></div>
                     <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-due-date">Due date</label><AnimatedDatePicker id="edit-task-due-date" value={editDraft.dueDate} onChange={(dueDate) => setEditDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" required /></div>
+                <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-due-time">Due time <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><AnimatedTimePicker id="edit-task-due-time" value={editDraft.dueTime} onChange={(dueTime) => setEditDraft((current) => ({ ...current, dueTime }))} ariaLabel="Task due time" /></div>
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsEditingTask(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">Save changes</button></div>
@@ -739,16 +756,16 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><span className="grid size-10 place-items-center rounded-xl bg-brand-blue text-xs font-bold text-white">{initials(selectedTask.assignedTo)}</span><div><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Assigned to</p><p className="mt-1 text-sm font-bold text-brand-blue">{selectedTask.assignedTo}</p></div></div>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Due date</p><p className={`mt-2 text-sm font-bold ${dueDateClass(selectedTask)}`}>{formatDate(selectedTask.dueDate)}</p></div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Due date and time</p><p className={`mt-2 text-sm font-bold ${dueDateClass(selectedTask)}`}>{formatSchedule(selectedTask)}</p></div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Assigned by</p><p className="mt-2 text-sm font-bold text-slate-600">{selectedTask.assignedBy}</p></div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Created</p><p className="mt-2 text-sm font-bold text-slate-600">{formatDate(selectedTask.createdAt)}</p></div>
                   </div>
                 </div>
-                <div className="border-t border-slate-100 bg-slate-50/60 px-6 py-4">
+                <div className="sticky bottom-0 z-20 border-t border-slate-100 bg-slate-50/95 px-6 py-4 backdrop-blur-xl">
                   {isConfirmingDelete ? (
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-bold text-red-700">Archive this task?</p><p className="mt-0.5 text-xs text-red-500">You can restore it from Archive.</p></div><div className="flex gap-2"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="h-10 rounded-xl bg-red-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-red-700" type="button" onClick={removeSelectedTask}>Archive task</button></div></div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-bold text-red-700">Archive this task?</p><p className="mt-0.5 text-xs text-red-500">You can restore it from Archive.</p></div><div className="flex flex-wrap items-center justify-end gap-2"><button className="inline-flex h-10 min-w-24 items-center justify-center rounded-xl px-4 text-xs font-bold text-slate-500 hover:bg-slate-100" type="button" onClick={() => setIsConfirmingDelete(false)}>Cancel</button><button className="inline-flex h-10 min-w-28 items-center justify-center rounded-xl bg-red-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-red-700" type="button" onClick={removeSelectedTask}>Archive task</button></div></div>
                   ) : (
-                    <div className="flex items-center justify-between gap-3"><button className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-bold text-red-500 transition hover:bg-red-50 hover:text-red-700" type="button" onClick={() => setIsConfirmingDelete(true)}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" /></svg>Archive</button><button className="inline-flex h-10 items-center gap-2 rounded-xl bg-brand-blue px-5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5" type="button" onClick={beginEditingTask}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg>Edit task</button></div>
+                    <div className="flex flex-wrap items-center justify-end gap-2"><button className="inline-flex h-10 min-w-28 items-center justify-center gap-2 rounded-xl border border-red-100 bg-white px-4 text-xs font-bold text-red-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700" type="button" onClick={() => setIsConfirmingDelete(true)}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" /></svg>Archive</button><button className="inline-flex h-10 min-w-28 items-center justify-center gap-2 rounded-xl bg-brand-blue px-5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5" type="button" onClick={beginEditingTask}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" /></svg>Edit task</button></div>
                   )}
                 </div>
               </>
@@ -773,6 +790,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                 <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-priority">Priority</label><AnimatedDropdown id="edit-task-page-priority" value={editDraft.priority} options={priorityOptions} onChange={(priority) => setEditDraft((current) => ({ ...current, priority }))} ariaLabel="Task priority" /></div>
                 <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-assignee">Assigned to</label><AssigneePicker id="edit-task-page-assignee" value={editDraft.assignedTo} options={configuredAssignees} onChange={(assignedTo) => setEditDraft((current) => ({ ...current, assignedTo }))} onManage={openAssigneeSettings} /></div>
                 <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-due-date">Due date</label><AnimatedDatePicker id="edit-task-page-due-date" value={editDraft.dueDate} onChange={(dueDate) => setEditDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" required /></div>
+                <div><label className="mb-2 block font-bold uppercase tracking-wider text-slate-500" htmlFor="edit-task-page-due-time">Due time <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><AnimatedTimePicker id="edit-task-page-due-time" value={editDraft.dueTime} onChange={(dueTime) => setEditDraft((current) => ({ ...current, dueTime }))} ariaLabel="Task due time" /></div>
               </div>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4"><button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsEditingTask(false)}>Cancel</button><button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white" type="submit">Save changes</button></div>
@@ -785,10 +803,9 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="add-task-title">
           <button className="absolute inset-0" type="button" onClick={() => setIsAddingTask(false)} aria-label="Close add task dialog" />
           <form className="relative my-6 w-full max-w-xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.28)] [&_input]:!text-sm [&_label]:!text-[11px] [&_select]:!text-sm [&_textarea]:!text-sm" onSubmit={addTask}>
-            <div className="relative flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#ff9b37,#00113f_42%,#073078)]" />
-              <div className="relative"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">New work item</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="add-task-title">Add a task</h2><p className="mt-1 text-sm text-slate-500">Define the work, owners, and delivery date.</p></div>
-              <button className="relative grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsAddingTask(false)} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+              <div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-brand-orange">New work item</p><h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="add-task-title">Add a task</h2><p className="mt-1 text-sm text-slate-500">Define the work, owners, and delivery date.</p></div>
+              <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setIsAddingTask(false)} aria-label="Close dialog"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>
             </div>
             <div className="space-y-4 px-6 py-5">
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-title">Task title</label><input className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-300 focus:border-brand-blue/40 focus:ring-4 focus:ring-brand-blue/[0.05]" id="task-title" value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder="What needs to be done?" autoFocus required /></div>
@@ -800,12 +817,13 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assignee">Assigned to</label><AssigneePicker id="task-assignee" value={draft.assignedTo} options={configuredAssignees} onChange={(assignedTo) => setDraft((current) => ({ ...current, assignedTo }))} onManage={openAssigneeSettings} />{!hasActiveAssignees ? <p className="mt-1.5 text-[10px] font-semibold text-amber-700">Add an assignee in Settings first.</p> : null}</div>
                 <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-due-date">Due date</label><AnimatedDatePicker id="task-due-date" value={draft.dueDate} onChange={(dueDate) => setDraft((current) => ({ ...current, dueDate }))} ariaLabel="Task due date" min={new Date().toISOString().slice(0, 10)} required /></div>
+                <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-due-time">Due time <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></label><AnimatedTimePicker id="task-due-time" value={draft.dueTime} onChange={(dueTime) => setDraft((current) => ({ ...current, dueTime }))} ariaLabel="Task due time" /></div>
               </div>
               <div><label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-500" htmlFor="task-assigner">Assigned by</label><input className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-xs font-medium text-slate-400" id="task-assigner" value={currentUsername} readOnly /></div>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-6 py-4">
               <button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={() => setIsAddingTask(false)}>Cancel</button>
-              <button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="submit">Create task</button>
+              <button className="h-10 rounded-xl bg-brand-blue px-5 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#072768]" type="submit">Create task</button>
             </div>
           </form>
         </div>

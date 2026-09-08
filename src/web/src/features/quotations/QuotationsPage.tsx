@@ -11,6 +11,7 @@ import { usePersistentState } from '../../components/ui/usePersistentState'
 import { listClients as fetchClients } from '../../services/api/clients'
 import { listItems } from '../../services/api/items'
 import { archiveQuotation as archiveQuotationRequest, changeQuotationStatus, createQuotation, listQuotations, updateQuotation, type Quotation as ApiQuotation, type SaveQuotation } from '../../services/api/quotations'
+import { listStatements } from '../../services/api/statements'
 import { isActiveRecord } from '../../services/recordLifecycle'
 import { PurchaseOrderClientPickerDialog } from '../purchase-orders/PurchaseOrderClientPickerDialog'
 import { loadDocumentDefaults } from '../settings/settingsStorage'
@@ -142,20 +143,6 @@ function quotationRequest(draft: QuotationDraft, intent: 'draft' | 'submit', ver
   return { quotationDate: draft.dateCreated, clientId: draft.clientId || null, clientName: draft.clientName, contactId: draft.contactId || null, contactPerson: draft.contactPerson, subject: draft.subject.trim(), projectLocation: draft.projectLocation.trim(), leadTime: draft.leadTime.trim(), notes: draft.notes.trim(), terms: draft.terms.trim(), vatEnabled: draft.vatEnabled, lines: draft.items.map((line) => ({ itemId: line.itemId || null, variantId: line.variantId || null, photo: line.photo, itemName: line.itemName, variantLabel: line.variantLabel, productCode: line.productCode, unitOfMeasure: line.unitOfMeasure, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice), unitCost: line.unitCost })), charges: draft.otherCharges.map((charge) => ({ label: charge.label.trim(), amount: Number(charge.amount) })), intent, version }
 }
 
-function quotationIsInActiveStatement(quotationId: string) {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem('__statements_migrated_to_api__') ?? '[]')
-    if (!Array.isArray(parsed)) return false
-    return parsed.some((value) => {
-      if (typeof value !== 'object' || value === null) return false
-      const statement = value as { status?: string; quotations?: Array<{ id?: string }> }
-      return statement.status !== 'Cancelled' && Array.isArray(statement.quotations) && statement.quotations.some((quotation) => quotation.id === quotationId)
-    })
-  } catch {
-    return false
-  }
-}
-
 function emptyDraft(): QuotationDraft {
   return { dateCreated: new Date().toISOString().slice(0, 10), quotationNumber: '', clientId: '', clientName: '', contactId: '', contactPerson: '', subject: '', projectLocation: '', leadTime: '', notes: '', terms: '', items: [], vatEnabled: false, otherCharges: [], status: 'Draft' }
 }
@@ -171,6 +158,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
+  const [statementQuotationIds, setStatementQuotationIds] = useState<Set<string>>(() => new Set())
   const initialQuery = new URLSearchParams(window.location.search)
   const openNewFromQuery = initialQuery.get('new') === '1'
   const openNewOnLoad = openNewFromQuery || window.location.pathname === '/quotations/new'
@@ -222,6 +210,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
     void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
     void listItems({ pageSize: 100, sort: 'name' }).then((result) => setCatalogItems(result.items)).catch(() => setStorageError('Items could not be loaded from the API.'))
     void listQuotations({ pageSize: 100 }).then((result) => { setQuotations(result.items.map(toQuotation)); setStorageError('') }).catch(() => setStorageError('Quotations could not be loaded from the API.'))
+    void listStatements({ pageSize: 100 }).then((result) => setStatementQuotationIds(new Set(result.items.filter((statement) => statement.status !== 'Cancelled').flatMap((statement) => statement.quotations.map((quotation) => quotation.quotationId).filter((id): id is string => Boolean(id)))))).catch(() => setStorageError('Statements could not be loaded from the API.'))
   }, [])
 
   useEffect(() => {
@@ -255,6 +244,7 @@ export function QuotationsPage({ currentUsername }: QuotationsPageProps) {
   }, [selectedId])
 
   const selectedClient = clients.find((client) => client.id === draft.clientId)
+  const quotationIsInActiveStatement = (quotationId: string) => statementQuotationIds.has(quotationId)
   const selectedQuotation = selectedId ? quotations.find((quotation) => quotation.id === selectedId) : undefined
   const encodedRouteQuotationId = /^\/quotations\/([^/]+)$/.exec(currentPath)?.[1]
   const routeQuotationId = encodedRouteQuotationId ? decodeURIComponent(encodedRouteQuotationId) : undefined

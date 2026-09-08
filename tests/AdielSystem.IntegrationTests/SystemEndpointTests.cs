@@ -21,6 +21,43 @@ public sealed class SystemEndpointTests : IClassFixture<WebApplicationFactory<Pr
             TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
+        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal("DENY", Assert.Single(response.Headers.GetValues("X-Frame-Options")));
+    }
+
+    [Fact]
+    public async Task OpenApi_requires_the_owner_and_describes_version_one()
+    {
+        var anonymous = await _client.GetAsync("/openapi/v1.json", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        await using var factory = new OwnerApiFactory();
+        using var owner = factory.CreateClient();
+        var document = await owner.GetAsync("/openapi/v1.json", TestContext.Current.CancellationToken);
+        document.EnsureSuccessStatusCode();
+        Assert.Contains("/api/v1/clients", await document.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Oversized_requests_are_rejected_before_authentication_or_model_binding()
+    {
+        using var content = new ByteArrayContent(new byte[6 * 1024 * 1024 + 1]);
+        var response = await _client.PostAsync("/api/v1/clients", content, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Owner_rate_limit_rejects_excess_requests_without_queueing()
+    {
+        await using var factory = new OwnerApiFactory();
+        using var client = factory.CreateClient();
+
+        for (var request = 0; request < 120; request++)
+            (await client.GetAsync("/api/v1/clients?pageSize=1", TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        var rejected = await client.GetAsync("/api/v1/clients?pageSize=1", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.True(rejected.Headers.Contains("Retry-After"));
     }
 
     [Fact]

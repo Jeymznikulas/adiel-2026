@@ -15,6 +15,7 @@ import { createSupplier, listSuppliers, type Supplier as ApiSupplier } from '../
 import { listItems, type Item as ApiItem } from '../../services/api/items'
 import { archivePurchaseOrder, changePurchaseOrderStatus, createPurchaseOrder, listPurchaseOrders, recordPurchaseOrderPayment, updatePurchaseOrder, type PurchaseOrder as ApiPurchaseOrder, type SavePurchaseOrder } from '../../services/api/purchaseOrders'
 import { listQuotations } from '../../services/api/quotations'
+import { archiveExpense, generateExpenseFromPurchaseOrder, listExpenses } from '../../services/api/expenses'
 import { isActiveRecord, notifyLifecycleChanged, withArchived, withVoided } from '../../services/recordLifecycle'
 import { loadDocumentDefaults, nextDocumentNumber } from '../settings/settingsStorage'
 import { PurchaseOrderClientPickerDialog } from './PurchaseOrderClientPickerDialog'
@@ -109,7 +110,6 @@ type PurchaseOrderDraft = Omit<PurchaseOrder, 'id' | 'supplierName' | 'items' | 
 type PurchaseOrdersPageProps = { currentUsername: string }
 
 const addSupplierOptionValue = '__add_supplier__'
-const expenseStorageKey = '__expenses_migrated_to_api__'
 const purchaseOrderStatuses: PurchaseOrderStatus[] = ['Delivered', 'For Payment', 'Waiting for Delivery', 'Cancelled', 'Approved', 'For Revision', 'Sent', 'Not yet sent']
 const statusOptions: { value: PurchaseOrderStatus }[] = purchaseOrderStatuses.map((value) => ({ value }))
 const statusFilterOptions: { value: 'All statuses' | PurchaseOrderStatus }[] = [{ value: 'All statuses' }, ...statusOptions]
@@ -239,7 +239,11 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
 
   useEffect(() => {
     void fetchClients({ pageSize: 100 }).then((result) => setClients(result.items)).catch(() => setStorageError('Clients could not be loaded from the API.'))
-    void listPurchaseOrders({ pageSize: 100 }).then((result) => { setOrders(result.items.map(toPurchaseOrder)); setStorageError('') }).catch(() => setStorageError('Purchase orders could not be loaded from the API.'))
+    void Promise.all([listPurchaseOrders({ pageSize: 100 }), listExpenses({ pageSize: 100 })]).then(([result, expenses]) => {
+      const linked = new Set(expenses.items.flatMap((expense) => expense.purchaseOrderId ? [expense.purchaseOrderId] : []))
+      setOrders(result.items.map(toPurchaseOrder).map((order) => ({ ...order, addedToExpenses: linked.has(order.id) })))
+      setStorageError('')
+    }).catch(() => setStorageError('Purchase orders could not be loaded from the API.'))
   }, [])
 
   useEffect(() => {
@@ -490,8 +494,6 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     if (previous) {
       // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
       setOrders((current) => current.map((order) => order.id === previous.id ? values : order))
-      // @ts-expect-error Legacy local-state branch is retained temporarily below the API return.
-      if (previous.addedToExpenses) syncLinkedExpense(previous, values)
       appendSystemLog({ recordId: id, module: 'Purchase Orders', action: 'Updated', entity: values.poNumber, description: `Purchase order details updated for ${values.supplierName}.`, actor: currentUsername, tone: 'info', amount: values.totalAmount, status: values.status })
     } else {
       setOrders((current) => [values, ...current])
@@ -551,8 +553,7 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     return Boolean(saved)
     const status = legacyStatusFor(order.documentStatus, order.deliveryStatus, paymentStatus)
     setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, paymentStatus, status, updatedAt: new Date().toISOString() } : entry))
-    if ((paymentStatus === 'To Pay' || paymentStatus === 'Overdue') && !order.addedToExpenses) addToExpenses(order, paymentStatus === 'Overdue' ? 'Overdue' : 'To pay')
-    else if (order.addedToExpenses) updateLinkedExpenseStatus(order, paymentStatus === 'Paid' ? 'Paid' : paymentStatus === 'Overdue' ? 'Overdue' : 'To pay')
+    if ((paymentStatus === 'To Pay' || paymentStatus === 'Overdue') && !order.addedToExpenses) void addToExpenses(order, paymentStatus === 'Overdue' ? 'Overdue' : 'To pay')
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Status changed', entity: order.poNumber, description: `Payment status changed from ${order.paymentStatus} to ${paymentStatus}${paymentStatus === 'To Pay' || paymentStatus === 'Overdue' ? '; the linked expense was synchronized automatically.' : '.'}`, actor: currentUsername, tone: paymentStatus === 'Paid' ? 'success' : paymentStatus === 'Overdue' ? 'warning' : 'info', amount: order.totalAmount, status: paymentStatus })
     setToast(paymentStatus === 'To Pay' || paymentStatus === 'Overdue' ? 'Payment status updated and expense synchronized' : 'Payment status updated')
   }
@@ -591,68 +592,36 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setOrders((current) => current.map((order) => order.id === selectedOrder.id ? { ...order, notes, terms, updatedAt: new Date().toISOString() } : order))
   }
 
-  function addToExpenses(order: PurchaseOrder, expenseStatus: 'To pay' | 'Overdue' = 'To pay') {
+  function addToExpenses(order: PurchaseOrder, _expenseStatus: 'To pay' | 'Overdue' = 'To pay') {
+    void _expenseStatus
     if (order.addedToExpenses) return
-    try {
-      const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
-      const expenses = Array.isArray(parsed) ? parsed : []
-      expenses.unshift({ id: Date.now(), date: order.date, payee: order.supplierName, category: 'Materials', description: expenseDescription(order), amount: order.totalAmount, paymentMethod: order.modeOfPayment, purchaser: currentUsername, status: expenseStatus, invoiceLink: '', notes: expenseNotes(order), quotationId: order.quotationId, quotationNumber: order.quotationNumber, projectName: order.subject || order.clientName })
-      window.localStorage.setItem(expenseStorageKey, JSON.stringify(expenses))
-      setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, addedToExpenses: true, updatedAt: new Date().toISOString() } : entry))
-      appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Added to Expenses', entity: order.poNumber, description: 'Purchase order total was added to Expenses.', actor: currentUsername, tone: 'success', amount: order.totalAmount, status: order.status })
-      setToast('Purchase order added to Expenses')
-    } catch { setToast('Could not add this PO to Expenses') }
-  }
-
-  function expenseDescription(order: PurchaseOrder) {
-    return `Purchase Order ${order.poNumber}${order.subject ? ` — ${order.subject}` : ''}`
-  }
-
-  function expenseNotes(order: PurchaseOrder) {
-    const charges = order.otherCharges.length ? `; Other charges: ${order.otherCharges.map((charge) => `${charge.label} ${formatPeso(charge.amount)}`).join(', ')}` : ''
-    return `PO ID: ${order.id}; Client: ${order.clientName}; ${order.paymentTerm}; VAT: ${order.vatEnabled ? formatPeso(order.vatAmount) : 'Not applied'}${charges}`
-  }
-
-  function isLinkedExpense(value: unknown, order: PurchaseOrder) {
-    if (typeof value !== 'object' || value === null) return false
-    const expense = value as Record<string, unknown>
-    return (typeof expense.notes === 'string' && expense.notes.includes(`PO ID: ${order.id}`)) || (typeof expense.description === 'string' && expense.description.startsWith(`Purchase Order ${order.poNumber}`) && expense.payee === order.supplierName)
-  }
-
-  function syncLinkedExpense(previous: PurchaseOrder, order: PurchaseOrder) {
-    try {
-      const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
-      if (!Array.isArray(parsed)) return
-      const expenses = (parsed as unknown[]).map((value) => isLinkedExpense(value, previous) && typeof value === 'object' && value !== null ? { ...value, date: order.date, payee: order.supplierName, description: expenseDescription(order), amount: order.totalAmount, paymentMethod: order.modeOfPayment, notes: expenseNotes(order), quotationId: order.quotationId, quotationNumber: order.quotationNumber, projectName: order.subject || order.clientName } : value)
-      window.localStorage.setItem(expenseStorageKey, JSON.stringify(expenses))
-    } catch { setToast('PO updated, but its linked expense could not be synchronized') }
-  }
-
-  function updateLinkedExpenseStatus(order: PurchaseOrder, status: 'Paid' | 'Overdue' | 'To pay') {
-    try {
-      const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
-      if (!Array.isArray(parsed)) return
-      window.localStorage.setItem(expenseStorageKey, JSON.stringify((parsed as unknown[]).map((value) => isLinkedExpense(value, order) && typeof value === 'object' && value !== null ? { ...value, status } : value)))
-      window.dispatchEvent(new StorageEvent('storage', { key: expenseStorageKey }))
-    } catch { setToast('Payment status updated, but the linked expense could not be synchronized') }
+    void (async () => {
+      try {
+        await generateExpenseFromPurchaseOrder(order.id)
+        setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, addedToExpenses: true, updatedAt: new Date().toISOString() } : entry))
+        appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Added to Expenses', entity: order.poNumber, description: 'Purchase order total was added to Expenses.', actor: currentUsername, tone: 'success', amount: order.totalAmount, status: order.status })
+        setToast('Purchase order added to Expenses')
+      } catch { setToast('Could not add this PO to Expenses') }
+    })()
   }
 
   function removeFromExpenses(order: PurchaseOrder) {
-    try {
-      const parsed: unknown = JSON.parse(window.localStorage.getItem(expenseStorageKey) ?? '[]')
-      const expenses = Array.isArray(parsed) ? (parsed as unknown[]).filter((value) => !isLinkedExpense(value, order)) : []
-      window.localStorage.setItem(expenseStorageKey, JSON.stringify(expenses))
-      setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, addedToExpenses: false, updatedAt: new Date().toISOString() } : entry))
-      appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Removed from Expenses', entity: order.poNumber, description: 'Linked purchase order expense was removed from Expenses.', actor: currentUsername, tone: 'warning', amount: order.totalAmount, status: order.status })
-      setToast('Purchase order removed from Expenses')
-    } catch { setToast('Could not remove this PO from Expenses') }
+    void (async () => {
+      try {
+        const expenses = await listExpenses({ pageSize: 100 })
+        const linked = expenses.items.find((expense) => expense.purchaseOrderId === order.id && expense.archivedAt === null)
+        if (linked) await archiveExpense(linked.id, linked.version)
+        setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, addedToExpenses: false, updatedAt: new Date().toISOString() } : entry))
+        appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Removed from Expenses', entity: order.poNumber, description: 'Linked purchase order expense was removed from Expenses.', actor: currentUsername, tone: 'warning', amount: order.totalAmount, status: order.status })
+        setToast('Purchase order removed from Expenses')
+      } catch { setToast('Could not remove this PO from Expenses') }
+    })()
   }
 
   function linkOrderToQuotation(order: PurchaseOrder, quotationId: string) {
     const quotation = approvedQuotations.find((entry) => entry.id === quotationId && entry.clientId === order.clientId)
     const updated = { ...order, quotationId: quotation?.id ?? '', quotationNumber: quotation?.quotationNumber ?? '', updatedAt: new Date().toISOString() }
     setOrders((current) => current.map((entry) => entry.id === order.id ? updated : entry))
-    if (order.addedToExpenses) syncLinkedExpense(order, updated)
     appendSystemLog({ recordId: order.id, module: 'Purchase Orders', action: 'Updated', entity: order.poNumber, description: quotation ? `Linked to ${quotation.quotationNumber}.` : 'Removed quotation project link.', actor: currentUsername, tone: 'info', amount: order.totalAmount, status: order.status })
     setIsProjectLinkOpen(false)
     setToast(quotation ? `Linked to ${quotation.quotationNumber}` : 'Project link removed')

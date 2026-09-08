@@ -14,7 +14,9 @@ public sealed class AuthenticatedTaskFlowTests
         using var client = factory.CreateClient();
         var token = TestContext.Current.CancellationToken;
         var dueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7));
+        var dueTime = new TimeOnly(9, 30);
         var updatedDueDate = dueDate.AddDays(2);
+        var updatedDueTime = new TimeOnly(14, 0);
         var uniqueTitle = $"Integration Task {Guid.NewGuid():N}";
 
         var invalidPriority = await client.PostAsJsonAsync("/api/v1/tasks", new { title = uniqueTitle, description = "", status = "To do", priority = "Urgent", assignedTo = "Alex", dueDate }, token);
@@ -22,11 +24,12 @@ public sealed class AuthenticatedTaskFlowTests
         var invalidDate = await client.PostAsJsonAsync("/api/v1/tasks", new { title = uniqueTitle, description = "", status = "To do", priority = "High", assignedTo = "Alex", dueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)) }, token);
         Assert.Equal(HttpStatusCode.BadRequest, invalidDate.StatusCode);
 
-        var create = await client.PostAsJsonAsync("/api/v1/tasks", new { title = uniqueTitle, description = "Initial details", status = "To do", priority = "High", assignedTo = "Alex Morgan", dueDate }, token);
+        var create = await client.PostAsJsonAsync("/api/v1/tasks", new { title = uniqueTitle, description = "Initial details", status = "To do", priority = "High", assignedTo = "Alex Morgan", dueDate, dueTime }, token);
         Assert.True(create.StatusCode == HttpStatusCode.Created, await create.Content.ReadAsStringAsync(token));
         var created = (await create.Content.ReadFromJsonAsync<TaskDto>(token))!;
         Assert.Equal("High", created.Priority);
         Assert.Equal(dueDate, created.DueDate);
+        Assert.Equal(dueTime, created.DueTime);
         Assert.Equal("owner", created.AssignedBy);
 
         var listResponse = await client.GetAsync($"/api/v1/tasks?search={Uri.EscapeDataString(uniqueTitle)}", token);
@@ -82,11 +85,12 @@ public sealed class AuthenticatedTaskFlowTests
         reopen.EnsureSuccessStatusCode();
         var reopened = (await reopen.Content.ReadFromJsonAsync<TaskDto>(token))!;
 
-        var update = await client.PutAsJsonAsync($"/api/v1/tasks/{created.Id}", new { title = uniqueTitle + " Updated", description = "Updated details", priority = "Low", assignedTo = "Jamie Lee", dueDate = updatedDueDate, version = reopened.Version }, token);
+        var update = await client.PutAsJsonAsync($"/api/v1/tasks/{created.Id}", new { title = uniqueTitle + " Updated", description = "Updated details", priority = "Low", assignedTo = "Jamie Lee", dueDate = updatedDueDate, dueTime = updatedDueTime, version = reopened.Version }, token);
         update.EnsureSuccessStatusCode();
         var updated = (await update.Content.ReadFromJsonAsync<TaskDto>(token))!;
         Assert.Equal("Low", updated.Priority);
         Assert.Equal(updatedDueDate, updated.DueDate);
+        Assert.Equal(updatedDueTime, updated.DueTime);
 
         var stale = await client.PutAsJsonAsync($"/api/v1/tasks/{created.Id}", new { title = uniqueTitle, description = "Stale", priority = "Medium", assignedTo = "Alex", dueDate, version = reopened.Version }, token);
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);

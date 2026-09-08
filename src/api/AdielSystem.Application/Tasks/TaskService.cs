@@ -23,7 +23,7 @@ public sealed class TaskService(ITaskRepository repository, ICurrentUserAccessor
         await ValidateAssigneeAsync(request.AssignedToId, token);
         try
         {
-            var task = WorkTask.Create(Guid.NewGuid(), request.Title, request.Description, ParsePriority(request.Priority), request.AssignedToId, request.AssignedTo, actor.Id, actor.Username, request.DueDate, DateTimeOffset.UtcNow);
+            var task = WorkTask.Create(Guid.NewGuid(), request.Title, request.Description, ParsePriority(request.Priority), request.AssignedToId, request.AssignedTo, actor.Id, actor.Username, request.DueDate, request.DueTime, DateTimeOffset.UtcNow);
             var status = ParseStatus(request.Status);
             if (status != WorkTaskStatus.ToDo) task.ChangeStatus(status, DateTimeOffset.UtcNow);
             return ToDto(await repository.CreateAsync(task, actor, token));
@@ -36,7 +36,7 @@ public sealed class TaskService(ITaskRepository repository, ICurrentUserAccessor
         RequireVersion(request.Version);
         await ValidateAssigneeAsync(request.AssignedToId, token);
         var task = await GetRequiredAsync(id, token);
-        try { task.UpdateDetails(request.Title, request.Description, ParsePriority(request.Priority), request.AssignedToId, request.AssignedTo, request.DueDate); }
+        try { task.UpdateDetails(request.Title, request.Description, ParsePriority(request.Priority), request.AssignedToId, request.AssignedTo, request.DueDate, request.DueTime); }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { throw new RequestValidationException(exception.Message); }
         return ToDto(await repository.UpdateAsync(task, request.Version!.Value, currentUserAccessor.GetRequiredUser(), token));
     }
@@ -95,5 +95,5 @@ public sealed class TaskService(ITaskRepository repository, ICurrentUserAccessor
     private static void RequireVersion(long? version) { if (version is null or <= 0) throw new RequestValidationException("The current task version is required."); }
     private static WorkTaskStatus ParseStatus(string? value) => value?.Trim() switch { "To do" => WorkTaskStatus.ToDo, "In progress" => WorkTaskStatus.InProgress, "Completed" => WorkTaskStatus.Completed, _ => throw new RequestValidationException("Task status must be To do, In progress, or Completed.") };
     private static WorkTaskPriority ParsePriority(string? value) => value?.Trim() switch { "Low" => WorkTaskPriority.Low, "Medium" => WorkTaskPriority.Medium, "High" => WorkTaskPriority.High, _ => throw new RequestValidationException("Task priority must be Low, Medium, or High.") };
-    private static TaskDto ToDto(WorkTask task) => new(task.Id, task.Title, task.Description, WorkTask.Display(task.Status), WorkTask.Display(task.Priority), task.AssignedToId, task.AssignedToName, task.AssignedByName, task.DueDate, task.CompletedAt, task.CreatedAt, task.UpdatedAt, task.ArchivedAt, task.Version, task.Subtasks.Select(subtask => new SubtaskDto(subtask.Id, subtask.Title, subtask.IsCompleted, subtask.CompletedAt, subtask.Position, subtask.CreatedAt, subtask.UpdatedAt, subtask.Version)).ToArray());
+    private static TaskDto ToDto(WorkTask task) => new(task.Id, task.Title, task.Description, WorkTask.Display(task.Status), WorkTask.Display(task.Priority), task.AssignedToId, task.AssignedToName, task.AssignedByName, task.DueDate, task.DueTime, task.CompletedAt, task.CreatedAt, task.UpdatedAt, task.ArchivedAt, task.Version, task.Subtasks.Select(subtask => new SubtaskDto(subtask.Id, subtask.Title, subtask.IsCompleted, subtask.CompletedAt, subtask.Position, subtask.CreatedAt, subtask.UpdatedAt, subtask.Version)).ToArray());
 }

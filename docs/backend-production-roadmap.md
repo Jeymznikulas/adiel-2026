@@ -2,7 +2,7 @@
 
 This file is the persistent implementation tracker for the ADIEL backend. Update it after every phase, but mark a phase complete only after its exit criteria and verification checks pass.
 
-Last reviewed: 2026-08-26
+Last reviewed: 2026-08-30
 
 ## Completion rules
 
@@ -26,7 +26,7 @@ Last reviewed: 2026-08-26
 - [x] Core Client list, get, create, update, archive and restore APIs exist.
 - [x] Client contacts, transactions, concurrency checks and mutation audit writes exist.
 - [x] The Clients page reads and writes Client records through the backend API.
-- [x] Fifty-one automated backend tests pass, including authenticated Client, Settings, Supplier, Item, Quotation, Purchase Order, Expense, Statement, payment, Task, cross-module query and image flows.
+- [x] Sixty-two backend tests exist, including authenticated Client, Settings, Supplier, Item, Quotation, Purchase Order, Expense, Statement, payment, Task, cross-module, image and complete Client-to-Payment flows; the production runtime-role verification remains blocked on its unapplied migration.
 - [ ] The full backend is production-ready.
 
 ## Phase summary
@@ -47,7 +47,7 @@ Last reviewed: 2026-08-26
 | 11 | Tasks and subtasks | Complete |
 | 12 | Dashboard and cross-module pages | Complete |
 | 13 | Images and Supabase Storage | Complete |
-| 14 | Production hardening | Not started |
+| 14 | Production hardening | In progress (externally blocked) |
 
 ## Phase 0 — Stable baseline
 
@@ -308,26 +308,26 @@ Exit criteria: business images are private, validated, replaceable and accessibl
 
 ## Phase 14 — Production hardening
 
-- [ ] Replace the broad `postgres` connection with a least-privilege API role.
-- [ ] Configure production CORS origins.
-- [ ] Restrict `AllowedHosts`.
-- [ ] Configure HTTPS, HSTS and proxy behavior for the target host.
-- [ ] Configure production secret storage.
-- [ ] Add OpenAPI documentation.
-- [ ] Review rate limits, request limits and timeouts.
-- [ ] Review database and Storage health behavior.
+- [ ] Replace the broad `postgres` connection with a least-privilege API role. (Reviewed migration and fail-closed connection validation are ready; remote migration history and login creation are blocked.)
+- [ ] Configure production CORS origins. (Explicit HTTPS validation and an example are ready; the deployed frontend origin was not supplied.)
+- [ ] Restrict `AllowedHosts`. (Wildcard fallback is removed; the deployed API host was not supplied.)
+- [ ] Configure HTTPS, HSTS and proxy behavior for the target host. (Fail-closed behavior is implemented; target proxy IP/topology and deployment verification are missing.)
+- [ ] Configure production secret storage. (Required keys and validation are documented; no deployment secret manager was supplied.)
+- [x] Add OpenAPI documentation.
+- [x] Review rate limits, request limits and timeouts.
+- [x] Review database and Storage health behavior.
 - [ ] Run Supabase Security Advisor.
 - [ ] Run Supabase Performance Advisor.
-- [ ] Confirm RLS on every exposed table.
-- [ ] Add full authenticated API integration coverage for critical flows.
-- [ ] Add browser end-to-end tests.
-- [ ] Test the complete Client-to-Payment business workflow.
-- [ ] Configure regular database exports/backups.
-- [ ] Configure separate Storage-object backups.
+- [x] Confirm RLS on every exposed table.
+- [x] Add full authenticated API integration coverage for critical flows.
+- [ ] Add browser end-to-end tests. (Anonymous browser coverage passes; the authenticated owner case is implemented but skipped because no E2E credentials were supplied.)
+- [x] Test the complete Client-to-Payment business workflow.
+- [ ] Configure regular database exports/backups. (Fail-safe export tooling and schedule/retention documentation are ready; no production scheduler or encrypted target was supplied.)
+- [ ] Configure separate Storage-object backups. (Independent object tooling and manifest documentation are ready; no production scheduler or encrypted target was supplied.)
 - [ ] Perform and document a restore drill.
-- [ ] Confirm no secrets are committed or logged.
-- [ ] Confirm no business data remains in `localStorage`.
-- [ ] Complete the final production readiness review.
+- [x] Confirm no secrets are committed or logged.
+- [x] Confirm no business data remains in `localStorage`.
+- [x] Complete the final production readiness review. (Result: not ready; blockers are recorded below.)
 - [ ] Mark Phase 14 complete in the summary table.
 
 Exit criteria: the deployed target configuration passes security, workflow, backup, recovery, monitoring and operational checks.
@@ -406,6 +406,15 @@ Exit criteria: the deployed target configuration passes security, workflow, back
 | 2026-08-26 | Phase 13 | Release/backend and frontend verification | Passed | Release build completed with zero warnings/errors; all 26 unit and 25 integration tests passed; frontend typecheck and production build passed; image Base64 and secret scans plus `git diff --check` passed. |
 | 2026-08-26 | Phase 13 | Live Storage round trip | Passed | A real private-object upload, backend reference update, signed download and cleanup completed against Supabase; signed paths are normalized under `/storage/v1`, and legacy external URLs are excluded from object cleanup. |
 | 2026-08-26 | Phase 13 | Secret rotation and final verification | Passed | The exposed legacy credential was replaced by a different externally stored modern Supabase secret; private-bucket verification and a real upload/signed-download/cleanup round trip passed with the replacement. Release build, 26 unit tests, 25 integration tests, frontend typecheck/build, secret/Base64/browser-storage scans and final diff checks passed. |
+| 2026-08-30 | Phase 14 | Release builds and production controls | Passed | Backend Release build completed with zero warnings/errors; frontend typecheck/build passed. Authenticated OpenAPI, security headers, 6 MiB request rejection, 120/minute owner rate limiting and fail-closed production configuration tests passed. |
+| 2026-08-30 | Phase 14 | Database and Storage readiness | Passed | A running local API returned HTTP 200 `Healthy` from both `/health/live` and `/health/ready`; readiness performed a read-only private-bucket check and a PostgreSQL query. |
+| 2026-08-30 | Phase 14 | Complete Client-to-Payment integration | Passed | One owner-authenticated rollback transaction created a Client, Supplier and Item, approved a Quotation, linked a Purchase Order, generated its Expense, issued an SOA and recorded a full Payment that settled the balance. |
+| 2026-08-30 | Phase 14 | Backend suite | Blocked | 28/28 unit tests and 33 integration tests passed. The only remaining integration failure is runtime-role/RLS verification because migration `20260830000000` is not applied. |
+| 2026-08-30 | Phase 14 | RLS and least-privilege role | Partially passed | The RLS query confirmed no exposed `public` table lacks RLS. Role/policy verification is blocked: remote history skipped `20260827000000` and `20260828000000`, so Supabase requires `--include-all` before it will apply reviewed Phase 14 migration `20260830000000`; applying unrelated migrations was not authorized. |
+| 2026-08-30 | Phase 14 | Browser E2E | Blocked | Microsoft Edge executed the anonymous authentication-boundary test successfully. The implemented authenticated critical-register/localStorage test was skipped because `ADIEL_E2E_USERNAME` and `ADIEL_E2E_PASSWORD` are absent from external secrets. |
+| 2026-08-30 | Phase 14 | Secret and browser-storage scans | Passed | The tracked-and-untracked repository-file secret scan printed no values and passed; business `localStorage` use was removed, leaving only allow-listed UI preferences. |
+| 2026-08-30 | Phase 14 | Advisors, backups and restore drill | Blocked | CLI database lint found no schema errors and index statistics were collected, but no Supabase Advisor UI access, production scheduler, encrypted backup destination, isolated restore project or destructive-restore approval was supplied. The workstation also lacks Docker and PostgreSQL restore clients; no success was fabricated. |
+| 2026-08-30 | Phase 14 | Production dependency audit | Blocked | `npm audit --omit=dev` reports a pre-existing critical `jspdf` advisory fixed only by an unrelated major upgrade to 4.2.1; Phase 14 did not perform that prohibited upgrade. |
 
 ## Phase completion log
 

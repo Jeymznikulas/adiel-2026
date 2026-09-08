@@ -119,6 +119,8 @@ AccessControl__OwnerUserId
 Supabase__Storage__ServiceRoleKey
 ```
 
+Production must use the `adiel_api_login` credential described in [Production deployment and recovery](docs/production-deployment.md), not the broad `postgres` account used for local administration. The API validates this at startup outside Development.
+
 Do not commit `appsettings.Development.json`, `.env.local`, database passwords, access tokens, or backend secret keys. Avoid running `dotnet user-secrets list` in shared terminals or logs because it prints secret values.
 
 ## 4. Configure non-secret settings
@@ -180,6 +182,18 @@ npm run dev --prefix src/web
 ```
 
 The frontend defaults to `http://localhost:5173`, and the API launch profile uses `http://localhost:5080`. API liveness is available at `/health/live`, database readiness at `/health/ready`, and versioned endpoints start at `/api/v1`.
+
+### Run with Docker (development)
+
+Docker Desktop can run the frontend and API with live reload. It does not start Supabase; configure the same hosted Supabase project used by the application.
+
+```powershell
+Copy-Item .env.docker.example .env.docker
+# Edit .env.docker and replace every placeholder.
+docker compose --env-file .env.docker up --build
+```
+
+Open `http://localhost:5173`; the API is available at `http://localhost:5080`. The frontend container receives only `VITE_*` values, while the API-only credentials are passed only to the API container. Stop the stack with `docker compose down`; add `--volumes` only when you intentionally want to remove cached npm and NuGet packages.
 
 ## Moving to a different Supabase project
 

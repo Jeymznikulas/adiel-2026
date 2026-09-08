@@ -4,7 +4,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.OpenApi" />
     <ProjectReference Include="../AdielSystem.Application/AdielSystem.Application.csproj" />
     <ProjectReference Include="../AdielSystem.Infrastructure/AdielSystem.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AdielSystem.IntegrationTests" />
   </ItemGroup>
 </Project>

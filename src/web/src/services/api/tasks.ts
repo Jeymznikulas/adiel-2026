@@ -22,6 +22,7 @@ export type Task = {
   assignedTo: string
   assignedBy: string
   dueDate: string | null
+  dueTime: string | null
   completedAt: string | null
   createdAt: string
   updatedAt: string
@@ -30,8 +31,8 @@ export type Task = {
   subtasks: Subtask[]
 }
 export type TaskPage = { items: Task[]; total: number }
-export type CreateTask = Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedToId' | 'assignedTo' | 'dueDate'>
-export type SaveTask = Pick<Task, 'title' | 'description' | 'priority' | 'assignedToId' | 'assignedTo' | 'dueDate' | 'version'>
+export type CreateTask = Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'assignedToId' | 'assignedTo' | 'dueDate' | 'dueTime'>
+export type SaveTask = Pick<Task, 'title' | 'description' | 'priority' | 'assignedToId' | 'assignedTo' | 'dueDate' | 'dueTime' | 'version'>
 
 export const listTasks = (query: { search?: string; status?: TaskStatus; priority?: TaskPriority; includeArchived?: boolean; archivedOnly?: boolean } = {}) => {
   const parameters = new URLSearchParams()

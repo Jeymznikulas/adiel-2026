@@ -1,4 +1,6 @@
 -- Purchase-order review states and append-only supplier payment ledger.
+do $purchase_order_review_and_payments$
+begin
 alter table public.purchase_orders
   drop constraint if exists purchase_orders_document_status_check;
 
@@ -37,3 +39,5 @@ alter table public.purchase_order_payments enable row level security;
 
 comment on table public.purchase_order_payments is
   'Append-only supplier payment ledger. Status and remaining balance are calculated by the backend.';
+end
+$purchase_order_review_and_payments$;
