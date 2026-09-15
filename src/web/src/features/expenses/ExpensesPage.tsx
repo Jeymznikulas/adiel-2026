@@ -8,6 +8,7 @@ import { SuccessToast } from '../../components/ui/SuccessToast'
 import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { RecordListSkeleton } from '../../components/ui/RecordListSkeleton'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
 import type { ExpenseOption, ExpenseOptionKind } from './ExpenseSettingsDialog'
@@ -258,6 +259,9 @@ function ExpenseTrendChart({ points, range, selectedMonthLabel, previousMonthLab
 
 export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
   const [expenses, setExpenses] = useState<Expense[]>([])
+  const [isLoadingExpenses, setIsLoadingExpenses] = useState(true)
+  const [hasLoadedExpenses, setHasLoadedExpenses] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [approvedQuotations, setApprovedQuotations] = useState<ApprovedQuotationOption[]>([])
   const [categoryOptions, setCategoryOptions] = useState<ExpenseOption[]>(defaultCategoryOptions)
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<ExpenseOption[]>(defaultPaymentMethodOptions)
@@ -296,7 +300,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
     })),
   ], [approvedQuotations])
 
-  useEffect(() => { void listExpenses({ pageSize: 100 }).then((result) => setExpenses(result.items.map(toExpense))).catch(() => undefined) }, [])
+  useEffect(() => { void listExpenses({ pageSize: 100 }).then((result) => { setExpenses(result.items.map(toExpense)); setHasLoadedExpenses(true) }).catch(() => setLoadError('Expenses could not be loaded from the API.')).finally(() => setIsLoadingExpenses(false)) }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -598,6 +602,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
           </div>
         </div>
 
+        {isLoadingExpenses ? <RecordListSkeleton variant="table" rows={5} columns={10} /> : !hasLoadedExpenses ? <p className="border-t border-slate-100 p-5 text-xs font-semibold text-red-600" role="alert">{loadError}</p> : <>
         <TableControls tableId="expenses-table" storageKey="expenses.table" columns={[{ index: 1, label: 'Date' }, { index: 2, label: 'Payee', required: true }, { index: 3, label: 'Category' }, { index: 4, label: 'Description' }, { index: 5, label: 'Amount' }, { index: 6, label: 'Payment method' }, { index: 7, label: 'Purchaser' }, { index: 8, label: 'Status' }, { index: 9, label: 'Invoice' }, { index: 10, label: 'Notes' }]} sortKey={expenseTable.sortKey} sortOptions={expenseSortOptions} onSortChange={expenseTable.setSortKey} page={expenseTable.page} pageCount={expenseTable.pageCount} pageSize={expenseTable.pageSize} onPageChange={expenseTable.setPage} onPageSizeChange={expenseTable.setPageSize} total={expenseTable.total} />
 
         <div className="overflow-hidden">
@@ -635,6 +640,7 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
         ) : (
           <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs font-semibold text-slate-400">Non-cancelled total for the current view</p><p className="text-lg font-extrabold tracking-[-0.025em] text-brand-blue">{formatPeso(visibleTotal)}</p></div>
         )}
+        </>}
       </section>
 
       {selectedExpense ? <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="expense-detail-title"><button className="fixed inset-0" type="button" onClick={() => setSelectedExpenseId(null)} aria-label="Close expense details" /><div className="relative mx-auto my-6 w-full max-w-4xl space-y-4"><div className="flex justify-end"><button className="grid size-9 place-items-center rounded-xl bg-white text-slate-400 shadow-sm hover:text-brand-blue" type="button" onClick={() => setSelectedExpenseId(null)} aria-label="Close expense details"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></div><WorkflowHeader eyebrow="Expense" recordNumber={`EXP-${selectedExpense.id}`} partyName={selectedExpense.payee} amount={formatPeso(selectedExpense.amount)} createdLabel={`Recorded ${formatDate(selectedExpense.date)}`} status={selectedExpense.status} steps={["Recorded", "Verifying", "To Pay", "Paid"]} currentStep={selectedExpense.status === 'Verifying' ? 1 : selectedExpense.status === 'To pay' || selectedExpense.status === 'Overdue' ? 2 : selectedExpense.status === 'Paid' ? 3 : 0} module="Expenses" recordId={String(selectedExpense.id)} primaryAction={selectedExpense.status === 'Verifying' ? { label: 'Mark To Pay', onClick: () => updateExpenseStatus(selectedExpense.id, 'To pay') } : selectedExpense.status === 'To pay' || selectedExpense.status === 'Overdue' ? { label: 'Mark Paid', onClick: () => updateExpenseStatus(selectedExpense.id, 'Paid') } : undefined} secondaryActions={selectedExpense.status === 'To pay' ? [{ label: 'Mark Overdue', tone: 'danger', onClick: () => updateExpenseStatus(selectedExpense.id, 'Overdue') }] : []} menuActions={[{ label: 'Edit', onClick: () => openEditExpense(selectedExpense), disabled: selectedExpense.status === 'Cancelled' }, ...(getInvoiceUrl(selectedExpense.invoiceLink) ? [{ label: 'Open invoice', onClick: () => window.open(getInvoiceUrl(selectedExpense.invoiceLink), '_blank', 'noopener,noreferrer') }] : []), { label: 'Archive', onClick: () => archiveExpense(selectedExpense.id) }, ...(selectedExpense.status !== 'Cancelled' ? [{ label: 'Void', tone: 'danger' as const, onClick: () => setPendingVoidExpenseId(selectedExpense.id) }] : [])]}><p className="text-sm leading-6 text-slate-500">{selectedExpense.description}</p></WorkflowHeader><section className="grid gap-3 rounded-[1.5rem] border border-slate-200 bg-white p-5 sm:grid-cols-2"><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Category</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.category}</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Payment method</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.paymentMethod}</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Allocation</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.quotationNumber ? `${selectedExpense.quotationNumber} · ${selectedExpense.projectName}` : 'General operations'}</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Purchased by</p><p className="mt-2 text-sm font-extrabold text-brand-blue">{selectedExpense.purchaser}</p></div>{selectedExpense.notes ? <div className="rounded-xl bg-blue-50/55 p-4 sm:col-span-2"><p className="text-[9px] font-bold uppercase tracking-wider text-brand-blue">Notes</p><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{selectedExpense.notes}</p></div> : null}</section></div></div> : null}

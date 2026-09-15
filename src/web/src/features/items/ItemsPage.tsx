@@ -6,6 +6,7 @@ import { DocumentFormScaffold, type DocumentFormAction } from '../../components/
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
+import { RecordListSkeleton } from '../../components/ui/RecordListSkeleton'
 import { SquareImageCropper } from '../../components/ui/SquareImageCropper'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
@@ -361,6 +362,8 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
   const [photoError, setPhotoError] = useState('')
   const [formError, setFormError] = useState('')
   const [storageError, setStorageError] = useState('')
+  const [isLoadingItems, setIsLoadingItems] = useState(true)
+  const [hasLoadedItems, setHasLoadedItems] = useState(false)
   const isProcessingPhoto = imageToCrop?.kind === 'item'
   const processingVariantPhotoId = imageToCrop?.kind === 'variant' ? imageToCrop.variantId ?? null : null
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
@@ -372,7 +375,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
 
   useEffect(() => {
     let isActive = true
-    void listItems().then((result) => { if (isActive) { setItems(result.items.map(toItem)); setStorageError('') } }).catch(() => { if (isActive) setStorageError('Items could not be loaded from the API.') })
+    void listItems().then((result) => { if (isActive) { setItems(result.items.map(toItem)); setHasLoadedItems(true); setStorageError('') } }).catch(() => { if (isActive) setStorageError('Items could not be loaded from the API.') }).finally(() => { if (isActive) setIsLoadingItems(false) })
     return () => { isActive = false }
   }, [])
 
@@ -846,7 +849,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
 
   return (
     <div className="space-y-5 animate-[content-enter_360ms_cubic-bezier(0.22,1,0.36,1)]">
-      {detailItemId ? detailItem ? <ItemDetailsView item={detailItem} supplier={detailSupplier} onBack={returnToItems} onEdit={() => openEditDialog(detailItem)} onAddVariant={() => addVariant(detailItem)} onEditVariant={(variant) => editVariant(detailItem, variant)} onAdjustPrice={(variant) => openPriceAdjustment(detailItem, variant)} /> : <section className="grid min-h-[28rem] place-items-center rounded-[1.5rem] border border-slate-200/80 bg-white p-8 text-center shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="max-w-sm"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-slate-50 text-brand-blue"><Icon className="size-6" path="m21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5" /></span><h2 className="mt-5 text-xl font-bold text-brand-blue">Product not found</h2><p className="mt-2 text-sm leading-6 text-slate-500">This product may have been removed or the link is no longer available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={returnToItems}>Back to items</button></div></section> : <>
+      {detailItemId ? isLoadingItems ? <RecordListSkeleton variant="cards" rows={3} /> : !hasLoadedItems ? <p className="rounded-xl border border-red-100 bg-red-50 p-4 text-xs font-semibold text-red-600" role="alert">{storageError}</p> : detailItem ? <ItemDetailsView item={detailItem} supplier={detailSupplier} onBack={returnToItems} onEdit={() => openEditDialog(detailItem)} onAddVariant={() => addVariant(detailItem)} onEditVariant={(variant) => editVariant(detailItem, variant)} onAdjustPrice={(variant) => openPriceAdjustment(detailItem, variant)} /> : <section className="grid min-h-[28rem] place-items-center rounded-[1.5rem] border border-slate-200/80 bg-white p-8 text-center shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]"><div className="max-w-sm"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-slate-50 text-brand-blue"><Icon className="size-6" path="m21 8-9-5-9 5 9 5 9-5ZM3 12l9 5 9-5" /></span><h2 className="mt-5 text-xl font-bold text-brand-blue">Product not found</h2><p className="mt-2 text-sm leading-6 text-slate-500">This product may have been removed or the link is no longer available.</p><button className="mt-5 h-10 rounded-xl bg-brand-blue px-4 text-xs font-bold text-white" type="button" onClick={returnToItems}>Back to items</button></div></section> : <>
       <SummarySurface className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center" aria-label="Item summary">
         <div>
           <div className="flex items-center gap-2"><span className="h-px w-6 bg-brand-orange" /><p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-orange">Product list</p></div>
@@ -877,7 +880,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
           <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4"><div><p className="text-sm font-bold text-brand-blue" id="items-list-heading">All items</p><p className="mt-0.5 text-[11px] text-slate-400">Prices and suppliers</p></div><span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">{visibleItems.length} {visibleItems.length === 1 ? 'item' : 'items'}</span></div>
         </div>
 
-        {visibleItems.length ? <div className="grid gap-4 bg-slate-50/45 p-4 sm:p-5 md:grid-cols-2 2xl:grid-cols-3">
+        {isLoadingItems ? <RecordListSkeleton variant="cards" rows={6} /> : !hasLoadedItems ? null : visibleItems.length ? <div className="grid gap-4 bg-slate-50/45 p-4 sm:p-5 md:grid-cols-2 2xl:grid-cols-3">
           {visibleItems.map((item) => {
             const statusTone = statusOptions.find((option) => option.value === item.status)
             return <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_12px_30px_-24px_rgba(0,20,76,0.5)] transition duration-200 hover:-translate-y-0.5 hover:border-brand-blue/20 hover:shadow-[0_18px_38px_-24px_rgba(0,20,76,0.42)]" key={item.id}>

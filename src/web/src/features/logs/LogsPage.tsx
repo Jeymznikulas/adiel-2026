@@ -3,6 +3,7 @@ import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls } from '../../components/ui/TableControls'
+import { RecordListSkeleton } from '../../components/ui/RecordListSkeleton'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { listActivity, type ActivityEntry } from '../../services/api/insights'
 
@@ -53,6 +54,9 @@ function escapeCsv(value: string | number | undefined) {
 
 export function LogsPage() {
   const [logs, setLogs] = useState<SystemLogEntry[]>([])
+  const [isLoadingLogs, setIsLoadingLogs] = useState(true)
+  const [hasLoadedLogs, setHasLoadedLogs] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState({ today: 0, expenseValue: 0, actors: 0 })
   const [page, setPage] = useState(1)
@@ -64,8 +68,10 @@ export function LogsPage() {
   const [dateFilter, setDateFilter] = usePersistentState('logs.date', '')
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void listActivity({ search, module: moduleFilter === 'All modules' ? undefined : moduleFilter, action: actionFilter === 'All actions' ? undefined : actionFilter, date: dateFilter || undefined, sort, page, pageSize }).then((result) => { setLogs(result.items); setTotal(result.total); setSummary(result.summary) }) }, 160)
-    return () => window.clearTimeout(timer)
+    let active = true
+    setIsLoadingLogs(true)
+    const timer = window.setTimeout(() => { void listActivity({ search, module: moduleFilter === 'All modules' ? undefined : moduleFilter, action: actionFilter === 'All actions' ? undefined : actionFilter, date: dateFilter || undefined, sort, page, pageSize }).then((result) => { if (!active) return; setLogs(result.items); setTotal(result.total); setSummary(result.summary); setHasLoadedLogs(true); setLoadError('') }).catch(() => { if (active) setLoadError('Activity logs could not be loaded from the API.') }).finally(() => { if (active) setIsLoadingLogs(false) }) }, 160)
+    return () => { active = false; window.clearTimeout(timer) }
   }, [actionFilter, dateFilter, moduleFilter, page, pageSize, search, sort])
 
   const filteredLogs = logs
@@ -138,7 +144,7 @@ export function LogsPage() {
 
         <TableControls tableId="logs-table" storageKey="logs.table" columns={[{ index: 1, label: 'Transaction', required: true }, { index: 2, label: 'Module' }, { index: 3, label: 'Action' }, { index: 4, label: 'User' }, { index: 5, label: 'Date and time' }, { index: 6, label: 'Value' }]} sortKey={logTable.sortKey} sortOptions={logSortOptions} onSortChange={logTable.setSortKey} page={logTable.page} pageCount={logTable.pageCount} pageSize={logTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={logTable.setPage} onPageSizeChange={logTable.setPageSize} total={logTable.total} />
 
-        {filteredLogs.length ? (
+        {isLoadingLogs ? <RecordListSkeleton variant="table" rows={5} columns={7} /> : !hasLoadedLogs ? <p className="p-5 text-xs font-semibold text-red-600" role="alert">{loadError}</p> : filteredLogs.length ? (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] table-fixed text-left">

@@ -6,6 +6,7 @@ import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { PrivateImage } from '../../components/ui/PrivateImage'
+import { RecordListSkeleton } from '../../components/ui/RecordListSkeleton'
 import { SquareImageCropper } from '../../components/ui/SquareImageCropper'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
 import { usePersistentState } from '../../components/ui/usePersistentState'
@@ -136,6 +137,8 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   const [logoToCrop, setLogoToCrop] = useState<File | null>(null)
   const isProcessingLogo = logoToCrop !== null
   const [storageError, setStorageError] = useState('')
+  const [isLoadingSuppliers, setIsLoadingSuppliers] = useState(true)
+  const [hasLoadedSuppliers, setHasLoadedSuppliers] = useState(false)
   const [toast, setToast] = useState('')
   const logoInputRef = useRef<HTMLInputElement>(null)
 
@@ -150,10 +153,11 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     void listSuppliers().then((result) => {
       if (!isActive) return
       setSuppliers(result.items.map(toSupplier))
+      setHasLoadedSuppliers(true)
       setStorageError('')
     }).catch((failure: unknown) => {
       if (isActive) setStorageError(failure instanceof Error ? failure.message : 'Suppliers could not be loaded.')
-    })
+    }).finally(() => { if (isActive) setIsLoadingSuppliers(false) })
     return () => { isActive = false }
   }, [])
 
@@ -472,7 +476,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
           {storageError ? <p className="mt-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600" role="alert">{storageError}</p> : null}
         </div>
 
-        {visibleSuppliers.length ? (
+        {isLoadingSuppliers ? <RecordListSkeleton variant="cards" rows={6} /> : !hasLoadedSuppliers ? null : visibleSuppliers.length ? (
           <div className="supplier-readable-cards grid gap-4 p-4 lg:grid-cols-2 sm:p-5">
             {visibleSuppliers.map((supplier, index) => {
               const catalogUrl = getSafeUrl(supplier.catalogLink)

@@ -8,6 +8,7 @@ import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { RecordListSkeleton } from '../../components/ui/RecordListSkeleton'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import { WorkflowHeader } from '../../components/ui/WorkflowHeader'
 import { listBusinessOptions, type BusinessOption } from '../../services/api/settings'
@@ -348,6 +349,8 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [toast, setToast] = useState('')
   const [clientError, setClientError] = useState('')
+  const [isLoadingTasks, setIsLoadingTasks] = useState(true)
+  const [hasLoadedTasks, setHasLoadedTasks] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<TaskStatus>>(() => new Set())
   const [draft, setDraft] = useState(emptyDraft)
   const [editDraft, setEditDraft] = useState(emptyDraft)
@@ -361,10 +364,11 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
       if (!active) return
       const loaded = result.items.map(normalizeTask)
       setTasks(loaded)
+      setHasLoadedTasks(true)
       if (taskIdOnLoad && loaded.some((task) => task.id === taskIdOnLoad)) setSelectedTaskId(taskIdOnLoad)
       setClientError('')
       if (openNewOnLoad || taskIdOnLoad) window.history.replaceState(null, '', window.location.pathname)
-    }).catch((failure) => { if (active) setClientError(failure instanceof Error ? failure.message : 'Tasks could not be loaded.') })
+    }).catch((failure) => { if (active) setClientError(failure instanceof Error ? failure.message : 'Tasks could not be loaded.') }).finally(() => { if (active) setIsLoadingTasks(false) })
     return () => { active = false }
   }, [openNewOnLoad, taskIdOnLoad])
 
@@ -640,7 +644,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
           ) : null}
         </div>
 
-        {activeView === 'Calendar' ? <TasksCalendar tasks={matchingTasks} onTaskSelect={openTaskDetails} /> : matchingTasks.length ? (<>
+        {isLoadingTasks ? <RecordListSkeleton variant={activeView === 'Calendar' ? 'cards' : 'table'} rows={5} columns={7} /> : !hasLoadedTasks ? null : activeView === 'Calendar' ? <TasksCalendar tasks={matchingTasks} onTaskSelect={openTaskDetails} /> : matchingTasks.length ? (<>
           <TableControls tableId="tasks-table" storageKey="tasks.table" columns={[{ index: 1, label: 'Task', required: true }, { index: 2, label: 'Assignee' }, { index: 3, label: 'Status' }, { index: 4, label: 'Priority' }, { index: 5, label: 'Due date' }, { index: 6, label: 'Assigned by' }, { index: 7, label: 'Details', required: true }]} sortKey={taskTable.sortKey} sortOptions={taskSortOptions} onSortChange={taskTable.setSortKey} page={taskTable.page} pageCount={taskTable.pageCount} pageSize={taskTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={taskTable.setPage} onPageSizeChange={taskTable.setPageSize} total={taskTable.total} />
           <div className="overflow-x-auto animate-[view-swap_340ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]">
             <table className="w-full min-w-[1120px] table-fixed border-collapse text-left">

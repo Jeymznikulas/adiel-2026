@@ -4,6 +4,7 @@ import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
 import { SummarySurface } from '../../components/ui/SummarySurface'
 import { TableControls, useTableView } from '../../components/ui/TableControls'
+import { RecordListSkeleton } from '../../components/ui/RecordListSkeleton'
 import { usePersistentState } from '../../components/ui/usePersistentState'
 import type { StatementOfAccount, StatementStatus } from '../statement-of-account/statementOfAccountTypes'
 import { getSalesTracker, type SalesTracker } from '../../services/api/insights'
@@ -218,6 +219,9 @@ export function SalesTrackerPage() {
   const [statements, setStatements] = useState<StatementOfAccount[]>(loadStatements)
   const [expenses, setExpenses] = useState<LinkedExpense[]>(loadLinkedExpenses)
   const [salesData, setSalesData] = useState<SalesTracker | null>(null)
+  const [isLoadingSales, setIsLoadingSales] = useState(true)
+  const [hasLoadedSales, setHasLoadedSales] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [apiPage, setApiPage] = useState(1)
   const [apiPageSize, setApiPageSize] = useState(30)
   const [apiSort, setApiSort] = useState('newest')
@@ -239,8 +243,10 @@ export function SalesTrackerPage() {
   const activeRange = useMemo(() => (periodMode === 'Custom' ? { start: customFrom, end: customTo } : periodRange(periodMode, anchorDate)), [anchorDate, customFrom, customTo, periodMode])
   const activePeriodLabel = useMemo(() => periodLabel(periodMode, anchorDate), [anchorDate, periodMode])
   useEffect(() => {
-    const timer = window.setTimeout(() => { void getSalesTracker({ from: activeRange.start, to: activeRange.end, search, billing: billingFilter, collection: collectionFilter, sort: apiSort, page: apiPage, pageSize: apiPageSize }).then(setSalesData) }, 160)
-    return () => window.clearTimeout(timer)
+    let active = true
+    setIsLoadingSales(true)
+    const timer = window.setTimeout(() => { void getSalesTracker({ from: activeRange.start, to: activeRange.end, search, billing: billingFilter, collection: collectionFilter, sort: apiSort, page: apiPage, pageSize: apiPageSize }).then((result) => { if (!active) return; setSalesData(result); setHasLoadedSales(true); setLoadError('') }).catch(() => { if (active) setLoadError('Sales could not be loaded from the API.') }).finally(() => { if (active) setIsLoadingSales(false) }) }, 160)
+    return () => { active = false; window.clearTimeout(timer) }
   }, [activeRange.end, activeRange.start, apiPage, apiPageSize, apiSort, billingFilter, collectionFilter, search])
   const rows = useMemo(() => salesData ? salesData.items.map((row): SalesRow => ({ quotation: { id: row.id, dateCreated: row.quotationDate, quotationNumber: row.quotationNumber, clientId: '', clientName: row.clientName, contactPerson: '', subject: row.subject, projectLocation: row.projectLocation, leadTime: row.leadTime, subtotalAmount: row.subtotalAmount, totalAmount: row.totalAmount, estimatedCost: row.estimatedCost, estimatedProfit: row.estimatedProfit, status: 'Approved', items: Array.from({ length: row.itemCount }, (_, index) => ({ id: String(index), quantity: 0, unitCost: 0 })) }, statement: row.statement ? ({ id: row.statement.id, soaNumber: row.statement.number, balance: row.statement.balance, totalPayments: row.statement.totalPayments } as StatementOfAccount) : undefined, billingStatus: row.billingStatus, collectionStatus: row.collectionStatus })) : legacyRows, [legacyRows, salesData])
   const periodRows = useMemo(() => rows.filter((row) => row.quotation.dateCreated >= activeRange.start && row.quotation.dateCreated <= activeRange.end), [activeRange.end, activeRange.start, rows])
@@ -646,7 +652,7 @@ export function SalesTrackerPage() {
               </div>
             </div>
           </header>
-          {visibleRows.length ? (
+          {isLoadingSales ? <RecordListSkeleton variant="table" rows={5} columns={10} /> : !hasLoadedSales ? <p className="p-5 text-xs font-semibold text-red-600" role="alert">{loadError}</p> : visibleRows.length ? (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1220px] text-left">
                 <thead>
