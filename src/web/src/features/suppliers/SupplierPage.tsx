@@ -105,9 +105,10 @@ function Icon({ path, className = 'size-4' }: { path: string; className?: string
 
 function LogoMark({ supplier, size = 'large' }: { supplier: Pick<Supplier, 'logo' | 'name'> & { id?: string }; size?: 'large' | 'small' }) {
   const sizeClassName = size === 'large' ? 'size-14 rounded-2xl text-sm' : 'size-10 rounded-xl text-xs'
+  const entityId = supplier.id ?? supplier.logo.split('/')[2]
   return supplier.logo ? (
     <span className={`${sizeClassName} grid shrink-0 place-items-center overflow-hidden border border-slate-200 bg-white p-1.5 shadow-sm`}>
-      <PrivateImage className="size-full object-contain" target="suppliers" entityId={supplier.id} objectPath={supplier.logo} alt="" />
+      <PrivateImage className="size-full object-contain" target="suppliers" entityId={entityId} objectPath={supplier.logo} alt="" />
     </span>
   ) : (
     <span className={`${sizeClassName} grid shrink-0 place-items-center bg-[linear-gradient(145deg,#0a347b,#00113f)] font-extrabold tracking-wide text-white shadow-[0_9px_22px_-12px_rgba(0,20,76,0.8)]`} aria-hidden="true">
@@ -607,7 +608,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
                 <aside>
                   <p className={labelClassName}>Supplier logo <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></p>
                   <button className="group relative flex aspect-square w-full max-w-56 flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-center transition-all hover:border-brand-blue/30 hover:bg-blue-50/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" type="button" onClick={() => logoInputRef.current?.click()}>
-                    {draft.logo ? <><img className="max-h-28 max-w-[80%] object-contain transition-transform duration-300 group-hover:scale-105" src={draft.logo} alt="Supplier logo preview" /><span className="mt-4 text-[10px] font-bold text-brand-blue">Replace logo</span></> : <><span className="grid size-12 place-items-center rounded-2xl bg-white text-brand-blue shadow-[0_8px_22px_-16px_rgba(0,20,76,0.55)]"><Icon className="size-5" path="M4 16v4h16v-4M12 3v13M7 8l5-5 5 5" /></span><span className="mt-4 text-xs font-bold text-brand-blue">Upload company logo</span><span className="mt-1 text-[9px] leading-4 text-slate-400">PNG, JPG, or WebP<br />up to 5 MB</span></>}
+                    {draft.logo ? <><PrivateImage className="max-h-28 max-w-[80%] object-contain transition-transform duration-300 group-hover:scale-105" target="suppliers" objectPath={draft.logo} alt="Supplier logo preview" /><span className="mt-4 text-[10px] font-bold text-brand-blue">Replace logo</span></> : <><span className="grid size-12 place-items-center rounded-2xl bg-white text-brand-blue shadow-[0_8px_22px_-16px_rgba(0,20,76,0.55)]"><Icon className="size-5" path="M4 16v4h16v-4M12 3v13M7 8l5-5 5 5" /></span><span className="mt-4 text-xs font-bold text-brand-blue">Upload company logo</span><span className="mt-1 text-[9px] leading-4 text-slate-400">PNG, JPG, or WebP<br />up to 5 MB</span></>}
                     {isProcessingLogo ? <span className="absolute inset-0 grid place-items-center bg-white/85 backdrop-blur-sm"><span className="size-6 animate-spin rounded-full border-2 border-brand-blue/15 border-t-brand-blue" /></span> : null}
                   </button>
                   <input className="hidden" ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleLogoChange(event)} />

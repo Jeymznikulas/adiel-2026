@@ -7,6 +7,7 @@ public sealed class StorageSignedUrlTests
     [Theory]
     [InlineData("/object/sign/business-images/owner/clients/id/image.png?token=test")]
     [InlineData("/storage/v1/object/sign/business-images/owner/clients/id/image.png?token=test")]
+    [InlineData("object/sign/business-images/owner/clients/id/image.png?token=test")]
     public void Signed_storage_paths_include_the_storage_api_prefix(string returnedPath)
     {
         var result = SupabaseBusinessImageStorage.ResolveSignedUrl(
@@ -16,6 +17,7 @@ public sealed class StorageSignedUrlTests
         Assert.Equal(
             "/storage/v1/object/sign/business-images/owner/clients/id/image.png",
             result.AbsolutePath);
+        Assert.Equal(Uri.UriSchemeHttps, result.Scheme);
         Assert.Equal("?token=test", result.Query);
     }
 }

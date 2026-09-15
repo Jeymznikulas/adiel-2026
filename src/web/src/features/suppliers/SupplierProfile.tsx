@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { ChartLoadingState } from '../../components/charts/ChartSupport'
+import { PrivateImage } from '../../components/ui/PrivateImage'
 
 const ActivityValueChart = lazy(() => import('../../components/charts/ActivityValueChart'))
 
@@ -89,7 +90,7 @@ function initials(value: string) {
 function Logo({ supplier }: { supplier: SupplierProfileData }) {
   return supplier.logo ? (
     <span className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:size-28">
-      <img className="size-full object-contain" src={supplier.logo} alt={supplier.name} />
+      <PrivateImage className="size-full object-contain" target="suppliers" entityId={supplier.id} objectPath={supplier.logo} alt={supplier.name} />
     </span>
   ) : (
     <span className="grid size-24 shrink-0 place-items-center rounded-2xl bg-[linear-gradient(145deg,#0a347b,#00113f)] text-xl font-extrabold tracking-wide text-white shadow-[0_12px_28px_-16px_rgba(0,20,76,0.8)] sm:size-28">{initials(supplier.name)}</span>
@@ -136,7 +137,7 @@ function safeUrl(value: string) {
 function ItemPhoto({ item }: { item: SupplierRegisteredItem }) {
   return item.photo ? (
     <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
-      <img className="size-full object-contain" src={item.photo} alt={item.name} />
+      <PrivateImage className="size-full object-contain" target="items" entityId={item.id} objectPath={item.photo} alt={item.name} />
     </span>
   ) : (
     <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-[linear-gradient(145deg,#eff6ff,#e8eef9)] text-sm font-extrabold text-brand-blue ring-1 ring-inset ring-brand-blue/5">{initials(item.name)}</span>

@@ -52,7 +52,8 @@ internal sealed class SupabaseBusinessImageStorage(HttpClient client, IOptions<S
 
     internal static Uri ResolveSignedUrl(Uri projectUrl, string signedPath)
     {
-        if (Uri.TryCreate(signedPath, UriKind.Absolute, out var absolute)) return absolute;
+        if (Uri.TryCreate(signedPath, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps)) return absolute;
         var storagePath = signedPath.StartsWith("/storage/v1/", StringComparison.Ordinal)
             ? signedPath
             : "/storage/v1/" + signedPath.TrimStart('/');

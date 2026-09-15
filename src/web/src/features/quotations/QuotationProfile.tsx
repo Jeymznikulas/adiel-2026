@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DocumentExportDialog } from "../../components/ui/DocumentExportDialog";
 import { WorkflowHeader } from "../../components/ui/WorkflowHeader";
+import { PrivateImage } from "../../components/ui/PrivateImage";
 import { createQuotationPdfBlob } from "../../services/pdf/documentPdf";
 import { loadCompanyProfile } from "../settings/settingsStorage";
 import type { Quotation, QuotationStatus } from "./QuotationsPage";
@@ -37,11 +38,14 @@ function Icon({
   );
 }
 
-function ProductPhoto({ photo, name }: { photo: string; name: string }) {
+function ProductPhoto({ photo, name, itemId, variantId }: { photo: string; name: string; itemId: string; variantId: string }) {
   return photo ? (
-    <img
+    <PrivateImage
       className="size-11 shrink-0 rounded-xl object-cover"
-      src={photo}
+      target="items"
+      entityId={itemId || (variantId ? undefined : photo.split('/')[2])}
+      variantId={variantId || undefined}
+      objectPath={photo}
       alt=""
     />
   ) : (
@@ -313,7 +317,7 @@ export function QuotationProfile({
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex min-w-0 items-center gap-3">
-                      <ProductPhoto photo={line.photo} name={line.itemName} />
+                      <ProductPhoto photo={line.photo} name={line.itemName} itemId={line.itemId} variantId={line.variantId} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-extrabold text-slate-700">
                           {line.itemName}
