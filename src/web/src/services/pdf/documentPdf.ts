@@ -47,6 +47,7 @@ type PdfContext = {
   doc: JsPdfDocument;
   kind: PdfKind;
   reference: string;
+  logo: string;
   y: number;
 };
 
@@ -140,6 +141,27 @@ async function loadLogo() {
   }
 }
 
+function drawLogoWatermark(doc: JsPdfDocument, logo: string) {
+  if (!logo) return;
+  const properties = doc.getImageProperties(logo);
+  const scale = Math.min(125 / properties.width, 125 / properties.height);
+  const width = properties.width * scale;
+  const height = properties.height * scale;
+  doc.saveGraphicsState();
+  doc.setGState(doc.GState({ opacity: 0.08 }));
+  doc.addImage(
+    logo,
+    "PNG",
+    (doc.internal.pageSize.getWidth() - width) / 2,
+    (doc.internal.pageSize.getHeight() - height) / 2,
+    width,
+    height,
+    undefined,
+    "FAST",
+  );
+  doc.restoreGraphicsState();
+}
+
 function companyContactLine(profile: CompanyProfile) {
   return [
     profile.mainOfficeNumber && `Main: ${profile.mainOfficeNumber}`,
@@ -170,10 +192,11 @@ async function createDocument(
     creator: "ADIEL Operations System",
   });
 
+  const logo = await loadLogo();
+  drawLogoWatermark(doc, logo);
+
   doc.setFillColor(...orange);
   doc.rect(margin, 10, 18, 1.2, "F");
-
-  const logo = await loadLogo();
   const logoBoxWidth = 22;
   const logoBoxHeight = 20;
   const logoX = margin;
@@ -260,11 +283,12 @@ async function createDocument(
   doc.setDrawColor(...border);
   doc.setLineWidth(0.3);
   doc.line(margin, 43, pageWidth - margin, 43);
-  return { doc, kind, reference, y: 49 };
+  return { doc, kind, reference, logo, y: 49 };
 }
 
 function drawContinuationHeader(context: PdfContext) {
-  const { doc, kind, reference } = context;
+  const { doc, kind, reference, logo } = context;
+  drawLogoWatermark(doc, logo);
   doc.setTextColor(...navy);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
@@ -647,7 +671,7 @@ export async function createQuotationPdfBlob(
     ],
     quotation.items.map((line, index) => [
       String(index + 1),
-      [line.itemName, line.productCode, line.variantLabel]
+      [line.itemName, line.variantLabel]
         .filter(Boolean)
         .join(" - "),
       line.unitOfMeasure,
@@ -732,7 +756,7 @@ export async function createPurchaseOrderPdfBlob(
     ],
     order.items.map((line, index) => [
       String(index + 1),
-      [line.itemName, line.productCode, line.variantLabel]
+      [line.itemName, line.variantLabel]
         .filter(Boolean)
         .join(" - "),
       line.unitOfMeasure,
