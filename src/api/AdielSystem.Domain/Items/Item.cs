@@ -75,7 +75,7 @@ public sealed class Item : Entity
     private static string? OptionalPath(string? value, string error) { if (string.IsNullOrWhiteSpace(value)) return null; var normalized = value.Trim(); if (normalized.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException(error); if (normalized.Length > 500) throw new ArgumentException("The photo path is too long."); return normalized; }
 }
 
-public sealed record ItemVariant(Guid Id, string Name, string Value, string? PhotoPath, string ProductCode, string Barcode, string UnitOfMeasure, decimal UnitWeight, ItemStatus Status, decimal RawCost, decimal SellingPrice, int SortOrder, IReadOnlyList<ItemVariantSpecification> Specifications, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, long Version);
+public sealed record ItemVariant(Guid Id, Guid? SupplierId, string Name, string Value, string? PhotoPath, string ProductCode, string Barcode, string UnitOfMeasure, decimal UnitWeight, ItemStatus Status, decimal RawCost, decimal SellingPrice, int SortOrder, IReadOnlyList<ItemVariantSpecification> Specifications, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, long Version);
 public sealed record ItemVariantSpecification(Guid Id, string Name, string Value, int SortOrder);
 public sealed record ItemPriceAdjustment(Guid Id, Guid? VariantId, DateOnly EffectiveDate, decimal PreviousRawCost, decimal PreviousSellingPrice, decimal RawCost, decimal SellingPrice, string Reason, string Notes, DateTimeOffset CreatedAt, string CreatedBy);
 public enum ItemStatus { Active, Inactive, Discontinued }

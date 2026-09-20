@@ -34,8 +34,10 @@ export type SupplierRegisteredItem = {
   rawCost: number
   sellingPrice: number
   status: string
+  includesBase: boolean
   variants: {
     id: string
+    supplierId: string
     status: string
     rawCost: number
     sellingPrice: number
@@ -152,8 +154,8 @@ function RegisteredItemsSection({ items }: { items: SupplierRegisteredItem[] }) 
     return [...items].filter((item) => !query || [item.name, item.category, item.subcategory, item.brand, item.productCode, item.unitOfMeasure, item.status].some((value) => value.toLowerCase().includes(query))).sort((left, right) => (left.status === right.status ? left.name.localeCompare(right.name) : left.status === 'Active' ? -1 : 1))
   }, [items, search])
   const displayedItems = showAll || search ? visibleItems : visibleItems.slice(0, 6)
-  const totalSkus = items.reduce((total, item) => total + 1 + item.variants.length, 0)
-  const activeSkus = items.reduce((total, item) => total + (item.status === 'Active' ? 1 : 0) + item.variants.filter((variant) => variant.status === 'Active').length, 0)
+  const totalSkus = items.reduce((total, item) => total + (item.includesBase ? 1 : 0) + item.variants.length, 0)
+  const activeSkus = items.reduce((total, item) => total + (item.includesBase && item.status === 'Active' ? 1 : 0) + item.variants.filter((variant) => variant.status === 'Active').length, 0)
   const categoryCount = new Set(items.map((item) => item.category).filter(Boolean)).size
 
   return (

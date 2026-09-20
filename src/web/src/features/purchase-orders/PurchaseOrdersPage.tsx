@@ -35,7 +35,7 @@ type SupplierContact = { id: string; name: string; email: string; phone: string 
 type Supplier = { id: string; name: string; status: string; address: string; companyEmail: string; companyPhone: string; contacts: SupplierContact[] }
 type Client = { id: string; name: string; status: string; address: string; industry: string; contactPerson: string; email: string; phone: string }
 type ApprovedQuotationOption = { id: string; quotationNumber: string; clientId: string; clientName: string; subject: string; projectLocation: string; status: string }
-type CatalogVariant = { id: string; name: string; value: string; photo: string; productCode: string; unitOfMeasure: string; status: string; rawCost: number; sellingPrice: number }
+type CatalogVariant = { id: string; supplierId: string; name: string; value: string; photo: string; productCode: string; unitOfMeasure: string; status: string; rawCost: number; sellingPrice: number }
 type CatalogItem = { id: string; photo: string; name: string; category: string; brand: string; unitOfMeasure: string; productCode: string; supplierId: string; rawCost: number; variants: CatalogVariant[]; status: string }
 
 export type PurchaseOrderLine = {
@@ -146,7 +146,7 @@ function loadClients(): Client[] {
   return []
 }
 
-function toCatalogItem(item: ApiItem): CatalogItem { return { id: item.id, photo: item.photo, name: item.name, category: item.category, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, supplierId: item.supplierId ?? '', rawCost: item.rawCost, variants: item.variants.filter((variant) => variant.status === 'Active').map((variant) => ({ id: variant.id, name: variant.name, value: variant.value, photo: variant.photo, productCode: variant.productCode || item.productCode, unitOfMeasure: variant.unitOfMeasure, status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })), status: item.status } }
+function toCatalogItem(item: ApiItem): CatalogItem { return { id: item.id, photo: item.photo, name: item.name, category: item.category, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, supplierId: item.supplierId ?? '', rawCost: item.rawCost, variants: item.variants.filter((variant) => variant.status === 'Active').map((variant) => ({ id: variant.id, supplierId: variant.supplierId ?? item.supplierId ?? '', name: variant.name, value: variant.value, photo: variant.photo, productCode: variant.productCode || item.productCode, unitOfMeasure: variant.unitOfMeasure, status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })), status: item.status } }
 
 function emptyDraft(): PurchaseOrderDraft {
   return { date: new Date().toISOString().slice(0, 10), poNumber: '', clientId: '', clientName: '', supplierId: '', contactPerson: '', subject: '', quotationId: '', quotationNumber: '', modeOfPayment: 'Bank transfer', paymentTerm: '30 days', deliveryLocation: '', modeOfDelivery: 'Supplier delivery', notes: '', terms: '', items: [], vatEnabled: false, otherCharges: [] }
@@ -298,7 +298,7 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
 
   const supplierMap = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers])
   const selectedSupplier = supplierMap.get(draft.supplierId)
-  const supplierItems = useMemo(() => catalogItems.filter((item) => item.supplierId === draft.supplierId && item.status !== 'Discontinued'), [catalogItems, draft.supplierId])
+  const supplierItems = useMemo(() => catalogItems.filter((item) => (item.supplierId === draft.supplierId || item.variants.some((variant) => variant.supplierId === draft.supplierId)) && item.status !== 'Discontinued').map((item) => ({ ...item, variants: item.variants.filter((variant) => variant.supplierId === draft.supplierId) })), [catalogItems, draft.supplierId])
   const visibleSupplierItems = useMemo(() => {
     const query = itemSearch.trim().toLowerCase()
     return supplierItems.filter((item) => !query || [item.name, item.productCode, item.brand, item.category].some((value) => value.toLowerCase().includes(query)))
@@ -444,7 +444,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
 
   function addItemLine(item: CatalogItem) {
     if (draft.items.some((line) => line.itemId === item.id)) return
-    const variant = item.variants.find((entry) => entry.status === 'Active')
+    const variant = item.variants.find((entry) => entry.status === 'Active' && entry.supplierId === draft.supplierId)
+    if (!variant && item.supplierId !== draft.supplierId) return
     setDraft((current) => ({ ...current, items: [...current.items, { id: crypto.randomUUID(), itemId: item.id, variantId: variant?.id ?? '', photo: variant?.photo || item.photo, itemName: item.name, variantLabel: variant ? `${variant.name}: ${variant.value}` : '', productCode: variant?.productCode || item.productCode, unitOfMeasure: variant?.unitOfMeasure || item.unitOfMeasure, quantity: '1', unitCost: String(variant?.rawCost ?? item.rawCost) }] }))
     setFormError('')
   }
@@ -453,7 +454,8 @@ export function PurchaseOrdersPage({ currentUsername }: PurchaseOrdersPageProps)
     setDraft((current) => ({ ...current, items: current.items.map((line) => {
       if (line.id !== lineId) return line
       const item = supplierItems.find((entry) => entry.id === line.itemId)
-      const variant = item?.variants.find((entry) => entry.id === variantId)
+      const variant = item?.variants.find((entry) => entry.id === variantId && entry.supplierId === current.supplierId)
+      if (!variant && item?.supplierId !== current.supplierId) return line
       return variant ? { ...line, variantId, photo: variant.photo || item?.photo || '', variantLabel: `${variant.name}: ${variant.value}`, productCode: variant.productCode || item?.productCode || '', unitOfMeasure: variant.unitOfMeasure || item?.unitOfMeasure || 'Piece', unitCost: String(variant.rawCost) } : { ...line, variantId: '', photo: item?.photo || '', variantLabel: '', productCode: item?.productCode || '', unitOfMeasure: item?.unitOfMeasure || 'Piece', unitCost: String(item?.rawCost ?? 0) }
     }) }))
   }

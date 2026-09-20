@@ -94,13 +94,14 @@ public sealed class AuthenticatedImageEndpointTests
 
         var addVariant = await client.PostAsJsonAsync($"/api/v1/items/{item.Id}/variants", new
         {
-            name = "Size", value = "Large", photo = (string?)null, productCode = $"{code}-L", barcode = "",
+            supplierId = supplier.Id, name = "Size", value = "Large", photo = (string?)null, productCode = $"{code}-L", barcode = "",
             unitOfMeasure = "Piece", unitWeight = 0, status = "Active", rawCost = 11m, sellingPrice = 17m,
             specifications = Array.Empty<object>()
         }, token);
         addVariant.EnsureSuccessStatusCode();
         var withVariant = (await addVariant.Content.ReadFromJsonAsync<ItemDto>(token))!;
         var variant = Assert.Single(withVariant.Variants);
+        Assert.Equal(supplier.Id, variant.SupplierId);
         var variantUpload = await UploadPath(client, $"/api/v1/items/{item.Id}/variants/{variant.Id}/image", variant.Version, Webp(), token);
         variantUpload.EnsureSuccessStatusCode();
 

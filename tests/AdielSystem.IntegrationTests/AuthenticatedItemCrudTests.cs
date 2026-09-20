@@ -35,7 +35,7 @@ public sealed class AuthenticatedItemCrudTests
         }
         for (var index = 0; index < 2; index++)
         {
-            var response = await client.PostAsJsonAsync($"/api/v1/items/{items[index].Id}/variants", new SaveItemVariantRequest("Size", index == 0 ? "Large" : "Small", null, $"{prefix}-V{index}", "", "Box", 2m, "Active", 110m, 170m, index == 0 ? [new(null, "Length", "3 m"), new(null, "Color", "Orange")] : []), token);
+            var response = await client.PostAsJsonAsync($"/api/v1/items/{items[index].Id}/variants", new SaveItemVariantRequest(null, "Size", index == 0 ? "Large" : "Small", null, $"{prefix}-V{index}", "", "Box", 2m, "Active", 110m, 170m, index == 0 ? [new(null, "Length", "3 m"), new(null, "Color", "Orange")] : []), token);
             response.EnsureSuccessStatusCode();
             items[index] = (await response.Content.ReadFromJsonAsync<ItemDto>(token))!;
         }
@@ -105,7 +105,7 @@ public sealed class AuthenticatedItemCrudTests
         Assert.NotNull(created);
         Assert.Single(created.PriceAdjustments);
 
-        var addVariant = await client.PostAsJsonAsync($"/api/v1/items/{created.Id}/variants", new { name = "Size", value = "Large", photo = (string?)null, productCode = $"{code}-L", barcode = "", unitOfMeasure = "Piece", unitWeight = 0, status = "Active", rawCost = 110m, sellingPrice = 170m, specifications = new[] { new { id = (Guid?)null, name = "Length", value = "3 m" } } }, token);
+        var addVariant = await client.PostAsJsonAsync($"/api/v1/items/{created.Id}/variants", new { supplierId = (Guid?)null, name = "Size", value = "Large", photo = (string?)null, productCode = $"{code}-L", barcode = "", unitOfMeasure = "Piece", unitWeight = 0, status = "Active", rawCost = 110m, sellingPrice = 170m, specifications = new[] { new { id = (Guid?)null, name = "Length", value = "3 m" } } }, token);
         addVariant.EnsureSuccessStatusCode();
         var withVariant = await addVariant.Content.ReadFromJsonAsync<ItemDto>(token);
         var variant = Assert.Single(withVariant!.Variants);

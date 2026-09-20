@@ -166,7 +166,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     void Promise.all([listPurchaseOrders({ pageSize: 100 }), listItems({ pageSize: 100, sort: 'name' })]).then(([orders, items]) => {
       if (!isActive) return
       setPurchaseOrders(orders.items.map((order) => ({ id: order.id, date: order.orderDate, poNumber: order.poNumber, clientName: order.clientName, supplierId: order.supplierId ?? '', supplierName: order.supplierName, contactPerson: order.contactPerson, totalAmount: order.totalAmount, status: order.status, addedToExpenses: false, items: order.lines, createdAt: order.createdAt, updatedAt: order.updatedAt })))
-      setRegisteredItems(items.items.map((item) => ({ id: item.id, supplierId: item.supplierId ?? '', photo: item.photo, name: item.name, category: item.category, subcategory: item.subcategory, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, rawCost: item.rawCost, sellingPrice: item.sellingPrice, status: item.status, variants: item.variants.map((variant) => ({ id: variant.id, status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })) })))
+      setRegisteredItems(items.items.map((item) => ({ id: item.id, supplierId: item.supplierId ?? '', photo: item.photo, name: item.name, category: item.category, subcategory: item.subcategory, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, rawCost: item.rawCost, sellingPrice: item.sellingPrice, status: item.status, includesBase: true, variants: item.variants.map((variant) => ({ id: variant.id, supplierId: variant.supplierId ?? item.supplierId ?? '', status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })) })))
     }).catch(() => { if (isActive) setStorageError('Supplier purchase orders and items could not be loaded from the API.') })
     return () => { isActive = false }
   }, [])
@@ -219,7 +219,13 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   const isEditing = editingId !== null
   const selectedSupplier = selectedSupplierId === null ? null : suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null
   const selectedSupplierOrders = useMemo(() => selectedSupplier ? purchaseOrders.filter((order) => order.supplierId === selectedSupplier.id) : [], [purchaseOrders, selectedSupplier])
-  const selectedSupplierItems = useMemo(() => selectedSupplier ? registeredItems.filter((item) => item.supplierId === selectedSupplier.id) : [], [registeredItems, selectedSupplier])
+  const selectedSupplierItems = useMemo(() => selectedSupplier ? registeredItems.flatMap((item) => {
+    const variants = item.variants.filter((variant) => variant.supplierId === selectedSupplier.id)
+    const includesBase = item.supplierId === selectedSupplier.id
+    if (!includesBase && !variants.length) return []
+    const representative = includesBase ? item : variants[0]!
+    return [{ ...item, includesBase, variants, rawCost: representative.rawCost, sellingPrice: representative.sellingPrice }]
+  }) : [], [registeredItems, selectedSupplier])
 
   function openAddDialog() {
     setDraft(createEmptyDraft())
