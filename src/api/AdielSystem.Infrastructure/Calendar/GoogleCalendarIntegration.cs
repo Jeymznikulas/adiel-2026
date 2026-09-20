@@ -107,7 +107,11 @@ internal sealed class GoogleCalendarIntegration(
         if (encryptedToken is not null)
         {
             try { await google.RevokeAsync(encryptedToken, cancellationToken); }
-            catch (GoogleApiException) { /* Local disconnect still succeeds if Google is unavailable. */ }
+            catch (Exception exception) when (exception is GoogleApiException or CryptographicException)
+            {
+                // Local disconnect must still succeed when Google is unavailable or a previous
+                // container encrypted the token with a Data Protection key that no longer exists.
+            }
         }
         await using var command = dataSource.CreateCommand("update public.google_calendar_connections set revoked_at=now(),updated_at=now(),version=version+1 where owner_user_id=@owner and revoked_at is null");
         command.Parameters.AddWithValue("owner", ownerUserId);

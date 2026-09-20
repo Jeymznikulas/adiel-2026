@@ -25,6 +25,7 @@ services:
     volumes:
       - ./:/workspace
       - dotnet_packages:/root/.nuget/packages
+      - data_protection_keys:/root/.aspnet/DataProtection-Keys
 
   web:
     build:
@@ -46,4 +47,5 @@ services:
 
 volumes:
   dotnet_packages:
+  data_protection_keys:
   web_node_modules:
