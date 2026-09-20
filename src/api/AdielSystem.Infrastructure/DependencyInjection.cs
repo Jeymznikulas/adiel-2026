@@ -23,6 +23,8 @@ using AdielSystem.Application.Storage;
 using AdielSystem.Infrastructure.Storage;
 using AdielSystem.Application.Calendar;
 using AdielSystem.Infrastructure.Calendar;
+using AdielSystem.Application.Backups;
+using AdielSystem.Infrastructure.Backups;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -74,6 +76,7 @@ public static class DependencyInjection
         services.AddDataProtection();
         services.AddHttpClient<GoogleCalendarHttpClient>();
         services.AddScoped<IGoogleCalendarIntegration, GoogleCalendarIntegration>();
+        services.AddSingleton<IDatabaseBackupManager, DatabaseBackupManager>();
         services.AddScoped<CalendarSyncProcessor>();
         services.AddHostedService<CalendarSyncWorker>();
         services.AddSingleton<ImageCleanupQueue>();

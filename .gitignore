@@ -19,8 +19,8 @@ obj/
 TestResults/
 test-results/
 playwright-report/
-backups/
-restore-drills/
+/backups/
+/restore-drills/
 *.user
 *.suo
 

@@ -8,6 +8,7 @@ public sealed class RequestProtectionOptions
 {
     public const string SectionName = "RequestProtection";
     public long MaxRequestBodyBytes { get; init; } = 6 * 1024 * 1024;
+    public long DatabaseBackupMaxRequestBodyBytes { get; init; } = 64 * 1024 * 1024;
     public int RequestTimeoutSeconds { get; init; } = 30;
     public int KeepAliveTimeoutSeconds { get; init; } = 120;
     public int RequestHeadersTimeoutSeconds { get; init; } = 15;
@@ -28,13 +29,15 @@ internal static class ProductionSecurityConfiguration
         var requests = builder.Configuration.GetSection(RequestProtectionOptions.SectionName).Get<RequestProtectionOptions>() ?? new();
         if (requests.MaxRequestBodyBytes is < 1024 or > 64 * 1024 * 1024)
             throw new InvalidOperationException("RequestProtection:MaxRequestBodyBytes must be between 1 KB and 64 MB.");
+        if (requests.DatabaseBackupMaxRequestBodyBytes < requests.MaxRequestBodyBytes || requests.DatabaseBackupMaxRequestBodyBytes > 64 * 1024 * 1024)
+            throw new InvalidOperationException("RequestProtection:DatabaseBackupMaxRequestBodyBytes must be at least the normal request limit and no more than 64 MB.");
         if (requests.RequestTimeoutSeconds is < 1 or > 600 || requests.KeepAliveTimeoutSeconds is < 1 or > 600 || requests.RequestHeadersTimeoutSeconds is < 1 or > 120)
             throw new InvalidOperationException("RequestProtection timeout values are outside the supported production range.");
 
         builder.Services.AddSingleton(requests);
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Limits.MaxRequestBodySize = requests.MaxRequestBodyBytes;
+            options.Limits.MaxRequestBodySize = requests.DatabaseBackupMaxRequestBodyBytes;
             options.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(requests.KeepAliveTimeoutSeconds);
             options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(requests.RequestHeadersTimeoutSeconds);
             options.Limits.MaxRequestHeadersTotalSize = 32 * 1024;
@@ -84,13 +87,15 @@ internal static class ProductionSecurityConfiguration
         var requests = app.Services.GetRequiredService<RequestProtectionOptions>();
         app.Use(async (context, next) =>
         {
-            if (context.Request.ContentLength > requests.MaxRequestBodyBytes)
+            var isDatabaseBackupRequest = context.Request.Path.StartsWithSegments("/api/v1/settings/backups", StringComparison.OrdinalIgnoreCase);
+            var requestLimit = isDatabaseBackupRequest ? requests.DatabaseBackupMaxRequestBodyBytes : requests.MaxRequestBodyBytes;
+            if (context.Request.ContentLength > requestLimit)
             {
                 context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
                 return;
             }
             var feature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-            if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = requests.MaxRequestBodyBytes;
+            if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = requestLimit;
             await next(context);
         });
         app.UseRequestTimeouts();
