@@ -315,7 +315,7 @@ function ItemDetailsView({ item, supplierMap, onBack, onEdit, onAddVariant, onEd
     <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_18px_55px_-35px_rgba(0,20,76,0.38)]" aria-label={`${item.name} summary`}>
       <div className="grid xl:grid-cols-[15rem_minmax(24rem,1fr)_21rem]">
         <div className="grid place-items-center border-b border-slate-100 bg-[radial-gradient(circle_at_50%_42%,rgba(219,234,254,0.55),transparent_65%)] p-6 xl:border-b-0 xl:border-r">
-          <div className="flex w-full flex-col items-center justify-center text-center"><ProductPhoto item={{ photo: displayedPhoto, name: selectedVariant ? `${item.name} ${selectedVariant.value}` : item.name, id: item.id, variantId: selectedVariant?.photo ? selectedVariant.id : undefined }} size="hero" /><p className="mt-2 max-w-full truncate text-xs font-extrabold text-brand-blue">{selectedVariant?.value ?? item.name}</p><p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400">{selectedVariant ? selectedVariant.name : 'Main product'}</p>{selectedVariant ? <button className="mt-2 text-[9px] font-bold text-slate-400 transition hover:text-brand-orange" type="button" onClick={() => setSelectedVariantId(null)}>View main product</button> : null}</div>
+          <div className="flex min-w-0 w-full flex-col items-center justify-center text-center"><ProductPhoto item={{ photo: displayedPhoto, name: selectedVariant ? `${item.name} ${selectedVariant.value}` : item.name, id: item.id, variantId: selectedVariant?.photo ? selectedVariant.id : undefined }} size="hero" /><p className="mt-2 w-full break-words text-center text-xs font-extrabold leading-4 text-brand-blue">{selectedVariant?.value ?? item.name}</p><p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400">{selectedVariant ? selectedVariant.name : 'Main product'}</p>{selectedVariant ? <button className="mt-2 text-[9px] font-bold text-slate-400 transition hover:text-brand-orange" type="button" onClick={() => setSelectedVariantId(null)}>View main product</button> : null}</div>
         </div>
         <div className="min-w-0 border-b border-slate-100 p-6 xl:border-b-0 xl:border-r xl:p-7">
           <div className="flex flex-wrap items-center gap-2"><h3 className="mr-1 text-2xl font-bold tracking-[-0.035em] text-brand-blue">{item.name}</h3><span className={`rounded-lg px-2.5 py-1 text-[10px] font-bold ${statusClass}`}>{item.status}</span></div>
@@ -890,7 +890,7 @@ export function ItemsPage({ currentUsername }: ItemsPageProps) {
           {visibleItems.map((item) => {
             const statusTone = statusOptions.find((option) => option.value === item.status)
             return <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_12px_30px_-24px_rgba(0,20,76,0.5)] transition duration-200 hover:-translate-y-0.5 hover:border-brand-blue/20 hover:shadow-[0_18px_38px_-24px_rgba(0,20,76,0.42)]" key={item.id}>
-              <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#f97316,#ffb15c)] opacity-90" />
+              <div className="absolute inset-x-0 top-0 h-0.5 origin-left scale-x-0 bg-[linear-gradient(90deg,#fd4d00,#ff9567)] transition-transform duration-300 group-hover:scale-x-100" aria-hidden="true" />
               <div className="flex min-w-0 items-start gap-3.5">
                 <ProductPhoto item={item} size="large" />
                 <div className="min-w-0 flex-1 pt-0.5">
