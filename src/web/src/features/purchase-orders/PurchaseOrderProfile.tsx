@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '../../components/ui/Button'
+import { DetailPageBackButton } from '../../components/ui/DetailPageBackButton'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { WorkflowHeader, type WorkflowHeaderAction } from '../../components/ui/WorkflowHeader'
 import type { PurchaseOrder, PurchaseOrderDeliveryStatus, PurchaseOrderDocumentStatus, PurchaseOrderPaymentStatus } from './PurchaseOrdersPage'
@@ -74,7 +75,7 @@ export function PurchaseOrderProfile({ order, onBack, onEdit, onExport, onArchiv
   else if (order.documentStatus === 'For Revision') primaryAction = { label: 'Edit & Resend', onClick: onEdit }
 
   return <><div className="space-y-5 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
-    <Button variant="ghost" size="small" leadingIcon={<Icon path="m15 18-6-6 6-6" />} onClick={onBack}>Back to purchase orders</Button>
+    <DetailPageBackButton label="Back to purchase orders" onClick={onBack} />
     <FormErrorSummary message={error} />
     <WorkflowHeader
       eyebrow="Purchase order"

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { ChartLoadingState } from '../../components/charts/ChartSupport'
 import { PrivateImage } from '../../components/ui/PrivateImage'
+import { DetailPageBackButton } from '../../components/ui/DetailPageBackButton'
 
 const ActivityValueChart = lazy(() => import('../../components/charts/ActivityValueChart'))
 
@@ -326,6 +327,7 @@ export function SupplierProfile({ supplier, orders, items, isLoadingRelatedData 
     <div className="space-y-4 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
       {isLoadingRelatedData ? <p className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-semibold text-brand-blue" role="status">Loading supplier items and purchase orders...</p> : null}
       {relatedDataError ? <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600" role="alert">{relatedDataError}</p> : null}
+      <DetailPageBackButton label="Back to suppliers" onClick={onBack} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -335,10 +337,6 @@ export function SupplierProfile({ supplier, orders, items, isLoadingRelatedData 
           <h2 className="mt-2 text-2xl font-bold tracking-[-0.04em] text-brand-blue sm:text-3xl">Supplier profile</h2>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-brand-blue shadow-sm transition hover:-translate-y-0.5 hover:border-brand-blue/20" type="button" onClick={onBack}>
-            <Icon path="m15 18-6-6 6-6" />
-            Back to suppliers
-          </button>
           <button className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_9px_22px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5" type="button" onClick={onEdit}>
             <Icon className="size-3.5" path="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4" />
             Edit supplier

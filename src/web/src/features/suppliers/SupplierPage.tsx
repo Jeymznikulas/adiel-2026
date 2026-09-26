@@ -1,6 +1,7 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { CreateRecordButton, DirectoryHeader } from '../../components/ui/DirectoryHeader'
 import { DocumentFormScaffold, type DocumentFormAction } from '../../components/ui/DocumentFormScaffold'
 import { FormErrorSummary } from '../../components/ui/FormErrorSummary'
 import { SuccessToast } from '../../components/ui/SuccessToast'
@@ -437,7 +438,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
           { label: 'Archive supplier', tone: 'danger', onClick: () => setIsConfirmingDelete(true), disabled: isProcessingLogo },
           { label: 'Save changes', tone: 'primary', disabled: isProcessingLogo },
         ]
-    : [{ label: 'Add supplier', tone: 'primary', disabled: isProcessingLogo }]
+    : [{ label: 'Create supplier', tone: 'primary', disabled: isProcessingLogo }]
 
   const stats = [
     { label: 'Total suppliers', value: activeSuppliers.length, dot: 'bg-brand-blue', valueColor: 'text-brand-blue' },
@@ -469,32 +470,17 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
       <TableControls tableId="supplier-directory" storageKey="suppliers.directory" columns={[]} sortKey={supplierTable.sortKey} sortOptions={supplierSortOptions} onSortChange={supplierTable.setSortKey} page={supplierTable.page} pageCount={supplierTable.pageCount} pageSize={supplierTable.pageSize} pageSizeOptions={[12, 24, 48]} onPageChange={supplierTable.setPage} onPageSizeChange={supplierTable.setPageSize} total={supplierTable.total} />
 
       <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]" aria-labelledby="supplier-list-heading">
-        <div className="border-b border-slate-100 p-4 sm:p-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
-            <div className="min-w-52">
-              <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-brand-orange">Vendor network</p>
-              <h3 className="mt-1 text-base font-bold tracking-[-0.02em] text-brand-blue" id="supplier-list-heading">All suppliers</h3>
-            </div>
-            <div className="ml-auto flex w-full flex-col gap-2 sm:flex-row xl:max-w-3xl">
-              <label className="relative flex-1">
-                <span className="sr-only">Search suppliers</span>
-                <Icon className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" />
-                <input className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-9 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-400 focus:border-brand-blue/30 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.04]" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, contact, location, or category" />
-                {search ? <button className="absolute right-2.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-lg text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setSearch('')} aria-label="Clear search"><Icon className="size-3" path="M18 6 6 18M6 6l12 12" /></button> : null}
-              </label>
-              <div className="sm:w-44"><AnimatedDropdown size="filter" value={typeFilter} options={supplierFilterOptions} onChange={setTypeFilter} ariaLabel="Filter suppliers by type" /></div>
-              <button className="group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5" type="button" onClick={openAddDialog}>
-                <Icon className="size-4 transition-transform group-hover:rotate-90" path="M12 5v14M5 12h14" />
-                Add supplier
-              </button>
-            </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between text-[10px] font-semibold text-slate-400">
-            <span>Showing <strong className="text-brand-blue">{visibleSuppliers.length}</strong> of {suppliers.length} suppliers</span>
-            {(search || typeFilter !== 'All suppliers') ? <button className="font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => { setSearch(''); setTypeFilter('All suppliers') }}>Clear filters</button> : null}
-          </div>
-          {storageError ? <p className="mt-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600" role="alert">{storageError}</p> : null}
-        </div>
+        <DirectoryHeader id="supplier-list-heading" eyebrow="Vendor network" title="All suppliers" description="Contacts, categories, and catalog access" footer={<><span>Showing <strong className="text-brand-blue">{visibleSuppliers.length}</strong> of {suppliers.length} suppliers</span>{(search || typeFilter !== 'All suppliers') ? <button className="font-bold text-brand-blue transition hover:text-brand-orange" type="button" onClick={() => { setSearch(''); setTypeFilter('All suppliers') }}>Clear filters</button> : null}</>}>
+          <label className="relative w-full sm:min-w-72 xl:w-80">
+            <span className="sr-only">Search suppliers</span>
+            <Icon className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" />
+            <input className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-9 text-xs font-medium text-brand-blue outline-none transition placeholder:text-slate-400 focus:border-brand-blue/30 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.04]" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, contact, location, or category" />
+            {search ? <button className="absolute right-2.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-lg text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={() => setSearch('')} aria-label="Clear search"><Icon className="size-3" path="M18 6 6 18M6 6l12 12" /></button> : null}
+          </label>
+          <div className="sm:w-44"><AnimatedDropdown size="filter" value={typeFilter} options={supplierFilterOptions} onChange={setTypeFilter} ariaLabel="Filter suppliers by type" /></div>
+          <CreateRecordButton onClick={openAddDialog}>Add supplier</CreateRecordButton>
+        </DirectoryHeader>
+        {storageError ? <p className="m-4 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600 sm:m-5" role="alert">{storageError}</p> : null}
 
         {isLoadingSuppliers ? <RecordListSkeleton variant="cards" rows={6} /> : !hasLoadedSuppliers ? null : visibleSuppliers.length ? (
           <div className="supplier-readable-cards grid gap-4 p-4 lg:grid-cols-2 sm:p-5">
@@ -613,32 +599,33 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
       ) : null}
 
       {isDialogOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-3 backdrop-blur-sm animate-[supplier-backdrop-enter_180ms_ease-out] sm:p-5" role="dialog" aria-modal="true" aria-labelledby="supplier-form-heading">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm animate-[content-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="supplier-form-heading">
           <button className="absolute inset-0" type="button" onClick={closeDialog} aria-label="Close supplier form" />
-          <form className="relative my-auto flex max-h-[calc(100svh-1.5rem)] min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-[1.6rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)] sm:max-h-[calc(100svh-2.5rem)]" onSubmit={saveSupplier}>
-            <div className="relative flex shrink-0 items-start justify-between gap-4 overflow-hidden border-b border-slate-100 px-5 py-4 sm:px-6 sm:py-5">
-              <div className="pointer-events-none absolute right-0 top-0 h-full w-64 bg-[radial-gradient(circle_at_100%_0%,rgba(0,20,76,0.06),transparent_65%)]" aria-hidden="true" />
-              <div className="relative">
-                <p className="text-[9px] font-bold uppercase tracking-[0.17em] text-brand-orange">{isEditing ? 'Supplier details' : 'New supplier'}</p>
-                <h2 className="mt-1.5 text-xl font-extrabold tracking-[-0.03em] text-brand-blue" id="supplier-form-heading">{isEditing ? 'Edit supplier' : 'Add a supplier'}</h2>
-                <p className="mt-1 text-xs leading-5 text-slate-400">Add the contact, product, and delivery details your team needs.</p>
+          <form className="relative my-6 w-full max-w-5xl overflow-hidden rounded-[1.5rem] border border-white/20 bg-white shadow-[0_30px_90px_rgba(0,20,76,0.3)]" onSubmit={saveSupplier}>
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-brand-orange">Supplier directory</p>
+                <h2 className="mt-1.5 text-xl font-bold tracking-[-0.03em] text-brand-blue" id="supplier-form-heading">{isEditing ? 'Edit supplier' : 'Add a new supplier'}</h2>
+                <p className="mt-1 text-xs text-slate-400">Business details, contacts, categories, and catalog</p>
               </div>
-              <button className="relative grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeDialog} aria-label="Close dialog"><Icon path="M18 6 6 18M6 6l12 12" /></button>
+              <button className="grid size-9 shrink-0 place-items-center rounded-xl text-slate-300 transition hover:bg-slate-100 hover:text-brand-blue" type="button" onClick={closeDialog} aria-label="Close"><Icon path="M18 6 6 18M6 6l12 12" /></button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+            <div className="max-h-[calc(100svh-12rem)] overflow-y-auto px-6 py-5">
               <FormErrorSummary message={formError} className="mb-5" />
-              <div className="grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)]">
+              <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
                 <aside>
                   <p className={labelClassName}>Supplier logo <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span></p>
-                  <button className="group relative flex aspect-square w-full max-w-56 flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-center transition-all hover:border-brand-blue/30 hover:bg-blue-50/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" type="button" onClick={() => logoInputRef.current?.click()}>
-                    {draft.logo ? <><PrivateImage className="max-h-28 max-w-[80%] object-contain transition-transform duration-300 group-hover:scale-105" target="suppliers" objectPath={draft.logo} alt="Supplier logo preview" /><span className="mt-4 text-[10px] font-bold text-brand-blue">Replace logo</span></> : <><span className="grid size-12 place-items-center rounded-2xl bg-white text-brand-blue shadow-[0_8px_22px_-16px_rgba(0,20,76,0.55)]"><Icon className="size-5" path="M4 16v4h16v-4M12 3v13M7 8l5-5 5 5" /></span><span className="mt-4 text-xs font-bold text-brand-blue">Upload company logo</span><span className="mt-1 text-[9px] leading-4 text-slate-400">PNG, JPG, or WebP<br />up to 5 MB</span></>}
-                    {isProcessingLogo ? <span className="absolute inset-0 grid place-items-center bg-white/85 backdrop-blur-sm"><span className="size-6 animate-spin rounded-full border-2 border-brand-blue/15 border-t-brand-blue" /></span> : null}
-                  </button>
-                  <input className="hidden" ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleLogoChange(event)} />
-                  <button className="mt-4 h-9 w-full max-w-56 rounded-xl border border-slate-200 bg-white text-[10px] font-bold text-brand-blue transition hover:border-brand-blue/20" type="button" onClick={() => logoInputRef.current?.click()} disabled={isProcessingLogo}>{isProcessingLogo ? 'Preparing...' : draft.logo ? 'Replace logo' : 'Upload logo'}</button>
-                  {draft.logo ? <button className="mt-2 w-full max-w-56 rounded-lg py-2 text-[10px] font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => setDraft((current) => ({ ...current, logo: '' }))}>Remove logo</button> : null}
-                  {logoError ? <p className="mt-2 max-w-56 text-[10px] font-semibold leading-4 text-red-600" role="alert">{logoError}</p> : null}
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 text-center">
+                    <button className="group relative mx-auto flex aspect-square w-full flex-col items-center justify-center overflow-hidden rounded-xl bg-white p-4 text-center ring-1 ring-slate-200 transition hover:ring-brand-blue/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" type="button" onClick={() => logoInputRef.current?.click()}>
+                      {draft.logo ? <PrivateImage className="max-h-28 max-w-[82%] object-contain transition-transform duration-300 group-hover:scale-105" target="suppliers" objectPath={draft.logo} alt="Supplier logo preview" /> : <><span className="grid size-12 place-items-center rounded-2xl bg-blue-50 text-brand-blue"><Icon className="size-5" path="M4 16v4h16v-4M12 3v13M7 8l5-5 5 5" /></span><span className="mt-4 text-xs font-bold text-brand-blue">Company logo</span><span className="mt-1 text-[9px] leading-4 text-slate-400">PNG, JPG, or WebP</span></>}
+                      {isProcessingLogo ? <span className="absolute inset-0 grid place-items-center bg-white/85 backdrop-blur-sm"><span className="size-6 animate-spin rounded-full border-2 border-brand-blue/15 border-t-brand-blue" /></span> : null}
+                    </button>
+                    <input className="sr-only" ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleLogoChange(event)} />
+                    <button className="mt-4 h-9 w-full rounded-xl border border-slate-200 bg-white text-[10px] font-bold text-brand-blue transition hover:border-brand-blue/20" type="button" onClick={() => logoInputRef.current?.click()} disabled={isProcessingLogo}>{isProcessingLogo ? 'Processing...' : draft.logo ? 'Replace logo' : 'Upload logo'}</button>
+                    {draft.logo ? <button className="mt-2 text-[10px] font-bold text-red-500" type="button" onClick={() => setDraft((current) => ({ ...current, logo: '' }))}>Remove logo</button> : null}
+                    {logoError ? <p className="mt-2 text-[10px] font-semibold leading-4 text-red-600" role="alert">{logoError}</p> : <p className="mt-3 text-[9px] leading-4 text-slate-400">Square images work best · up to 5 MB</p>}
+                  </div>
                 </aside>
 
                 <div className="min-w-0 space-y-6">
@@ -710,7 +697,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-slate-100 bg-slate-50/80 px-5 py-3.5 sm:px-6">
+            <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-6 py-4">
               {isConfirmingDelete ? (
                 <div className="flex flex-col gap-3 animate-[supplier-chip-enter_160ms_ease-out] sm:flex-row sm:items-center">
                   <p className="mr-auto text-xs font-semibold text-red-700">Remove this supplier permanently?</p>
@@ -721,7 +708,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
                 <div className="flex items-center gap-2">
                   {isEditing ? <button className="mr-auto h-9 rounded-xl px-3 text-[10px] font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-600" type="button" onClick={() => setIsConfirmingDelete(true)}>Archive supplier</button> : <span className="mr-auto hidden text-[9px] font-semibold text-slate-300 sm:block">Fields marked by the browser are required</span>}
                   <button className="h-10 rounded-xl px-4 text-xs font-bold text-slate-500 transition hover:bg-slate-100" type="button" onClick={closeDialog}>Cancel</button>
-                  <button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.75)] transition hover:-translate-y-0.5 disabled:opacity-50" type="submit" disabled={isProcessingLogo}>{isEditing ? 'Save changes' : 'Add supplier'}</button>
+                  <button className="h-10 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-5 text-xs font-bold text-white shadow-[0_8px_20px_-10px_rgba(0,20,76,0.7)] transition hover:-translate-y-0.5 disabled:opacity-50" type="submit" disabled={isProcessingLogo}>{isEditing ? 'Save changes' : 'Create supplier'}</button>
                 </div>
               )}
             </div>
@@ -729,7 +716,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
         </div>
       ) : null}
 
-      {isDialogOpen ? <DocumentFormScaffold dialogTitleId="supplier-form-heading" breakdown={[{ label: 'Contacts', value: String(draft.contacts.length) }, { label: 'Categories', value: String(draft.categories.length) }]} totalLabel={isEditing ? 'Editing' : 'Creating'} totalValue={draft.name.trim() || 'New supplier'} helperText={isConfirmingDelete ? 'Archiving removes this supplier from the active directory.' : 'Supplier details, contacts, categories, and notes are saved together.'} backLabel={selectedSupplierId ? 'Back to supplier' : 'Back to suppliers'} onCancel={closeDialog} actions={supplierFormActions} containedScroll /> : null}
+      {isDialogOpen ? <DocumentFormScaffold dialogTitleId="supplier-form-heading" breakdown={[{ label: 'Contacts', value: String(draft.contacts.length) }, { label: 'Categories', value: String(draft.categories.length) }]} totalLabel="Supplier" totalValue={draft.name.trim() || 'New supplier'} helperText={isConfirmingDelete ? 'Archiving removes this supplier from the active directory.' : 'Supplier details, contacts, categories, and notes are saved together.'} backLabel={selectedSupplierId ? 'Back to supplier' : 'Back to suppliers'} onCancel={closeDialog} actions={supplierFormActions} /> : null}
 
       {logoToCrop ? <SquareImageCropper file={logoToCrop} label="Supplier logo" onCancel={() => setLogoToCrop(null)} onConfirm={applyCroppedLogo} /> : null}
       <SuccessToast message={toast} />

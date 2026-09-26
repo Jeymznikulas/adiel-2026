@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { ChartLoadingState } from '../../components/charts/ChartSupport'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { CreateRecordButton, DirectoryHeader } from '../../components/ui/DirectoryHeader'
 import { DocumentFormScaffold, type DocumentFormAction } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
 import { VoidRecordDialog } from '../../components/ui/VoidRecordDialog'
@@ -566,20 +567,18 @@ export function ExpensesPage({ currentUsername }: ExpensesPageProps) {
         {openInsight === 'trend' ? <ExpenseTrendChart points={monthlyTrend} range={trendRange} selectedMonthLabel={selectedMonthLabel} previousMonthLabel={previousMonthLabel} selectedMonthTotal={selectedMonthTotal} previousMonthTotal={previousMonthTotal} onRangeChange={setTrendRange} onClose={() => setOpenInsight(null)} /> : null}
       </SummarySurface>
 
-      <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]">
-        <div className="border-b border-slate-100 p-4 sm:p-5">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="relative w-full xl:max-w-sm">
-              <svg className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-              <input className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-4 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.05]" type="search" placeholder="Search payee, description, purchaser..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} aria-label="Search expenses" />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <AnimatedDropdown className="min-w-36" size="filter" fullWidth={false} value={categoryFilter} options={[{ value: 'All' }, ...categoryFilterOptions.map((value) => ({ value }))]} onChange={setCategoryFilter} ariaLabel="Filter by category" />
-              {activeFilterCount ? <button className="h-10 rounded-xl px-3 text-xs font-bold text-slate-400 transition hover:bg-slate-100 hover:text-brand-orange" type="button" onClick={clearFilters}>Clear filters</button> : null}
-              <button className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => openSettings('categories')} aria-label="Open expense settings" title="Expense settings"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></svg></button>
-              <button className="group inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5 sm:flex-none" type="button" onClick={openExpenseDialog}><svg className="size-4 transition-transform group-hover:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add expense</button>
-            </div>
+      <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_45px_-30px_rgba(0,20,76,0.28)]" aria-labelledby="expense-list-heading">
+        <DirectoryHeader id="expense-list-heading" eyebrow="Expense register" title="All expenses" description="Purchases, payees, and supporting records">
+          <div className="relative w-full sm:min-w-72 xl:w-80">
+            <svg className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+            <input className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-4 text-sm font-medium text-brand-blue outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-brand-blue/40 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.05]" type="search" placeholder="Search payee, description, purchaser..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} aria-label="Search expenses" />
           </div>
+          <AnimatedDropdown className="min-w-36" size="filter" fullWidth={false} value={categoryFilter} options={[{ value: 'All' }, ...categoryFilterOptions.map((value) => ({ value }))]} onChange={setCategoryFilter} ariaLabel="Filter by category" />
+          {activeFilterCount ? <button className="h-10 rounded-xl px-3 text-xs font-bold text-slate-400 transition hover:bg-slate-100 hover:text-brand-orange" type="button" onClick={clearFilters}>Clear filters</button> : null}
+          <button className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-brand-blue" type="button" onClick={() => openSettings('categories')} aria-label="Open expense settings" title="Expense settings"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></svg></button>
+          <CreateRecordButton onClick={openExpenseDialog}>Add expense</CreateRecordButton>
+        </DirectoryHeader>
+        <div className="border-b border-slate-100 px-4 pb-4 sm:px-5 sm:pb-5">
 
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end">

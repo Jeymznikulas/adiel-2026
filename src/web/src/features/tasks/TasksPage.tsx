@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatedDatePicker } from '../../components/ui/AnimatedDatePicker'
 import { AnimatedDropdown } from '../../components/ui/AnimatedDropdown'
+import { CreateRecordButton } from '../../components/ui/DirectoryHeader'
 import { AnimatedTimePicker } from '../../components/ui/AnimatedTimePicker'
 import { DocumentFormScaffold } from '../../components/ui/DocumentFormScaffold'
 import { SuccessToast } from '../../components/ui/SuccessToast'
@@ -627,7 +628,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
                 <button className={`relative z-10 inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-colors duration-300 ${activeView === 'Table' ? 'text-white' : 'text-slate-500 hover:text-brand-blue'}`} type="button" onClick={() => setActiveView('Table')} aria-pressed={activeView === 'Table'}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" /></svg>Table</button>
                 <button className={`relative z-10 inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-colors duration-300 ${activeView === 'Calendar' ? 'text-white' : 'text-slate-500 hover:text-brand-blue'}`} type="button" onClick={() => setActiveView('Calendar')} aria-pressed={activeView === 'Calendar'}><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 2v3M17 2v3M3 9h18M5 4h14a2 2 0 0 1 2 2v15H3V6a2 2 0 0 1 2-2Z" /></svg>Calendar</button>
               </div>
-              <button className="group inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-10px_rgba(0,20,76,0.65)] transition-all hover:-translate-y-0.5 sm:flex-none" type="button" onClick={() => openTaskDialog()}><svg className="size-4 transition-transform group-hover:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add task</button>
+              <CreateRecordButton onClick={() => openTaskDialog()}>Add task</CreateRecordButton>
             </div>
           </div>
 

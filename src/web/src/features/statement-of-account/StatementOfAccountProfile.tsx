@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AnimatedDropdown } from "../../components/ui/AnimatedDropdown";
 import { DocumentExportDialog } from "../../components/ui/DocumentExportDialog";
+import { DetailPageBackButton } from "../../components/ui/DetailPageBackButton";
 import { SummarySurface } from "../../components/ui/SummarySurface";
 import { WorkflowHeader } from "../../components/ui/WorkflowHeader";
 import { PrivateImage } from "../../components/ui/PrivateImage";
@@ -119,17 +120,7 @@ export function StatementOfAccountProfile({
 
   return (
     <div className="space-y-5 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
-      <button
-        className="group inline-flex items-center gap-2 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-400 transition hover:bg-white hover:text-brand-blue"
-        type="button"
-        onClick={onBack}
-      >
-        <Icon
-          className="size-3.5 transition-transform group-hover:-translate-x-0.5"
-          path="m15 18-6-6 6-6"
-        />
-        Back to statements
-      </button>
+      <DetailPageBackButton label="Back to statements" onClick={onBack} />
       <WorkflowHeader
         eyebrow="Statement of account"
         recordNumber={statement.soaNumber}
