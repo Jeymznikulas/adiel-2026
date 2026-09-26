@@ -592,7 +592,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
         )}
       </section>
 
-      {selectedSupplier ? (
+      {selectedSupplier && !isDialogOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm animate-[supplier-backdrop-enter_180ms_ease-out]" role="dialog" aria-modal="true" aria-labelledby="supplier-details-heading">
           <button className="absolute inset-0" type="button" onClick={() => setSelectedSupplierId(null)} aria-label="Close supplier details" />
           <section className="supplier-readable-details relative my-6 w-full max-w-4xl overflow-hidden rounded-[1.6rem] border border-white/20 bg-white shadow-[0_35px_100px_rgba(0,20,76,0.34)] animate-[supplier-dialog-enter_260ms_cubic-bezier(0.22,1,0.36,1)]">
@@ -729,7 +729,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
         </div>
       ) : null}
 
-      {isDialogOpen ? <DocumentFormScaffold dialogTitleId="supplier-form-heading" breakdown={[{ label: 'Contacts', value: String(draft.contacts.length) }, { label: 'Categories', value: String(draft.categories.length) }]} totalLabel={isEditing ? 'Editing' : 'Creating'} totalValue={draft.name.trim() || 'New supplier'} helperText={isConfirmingDelete ? 'Archiving removes this supplier from the active directory.' : 'Supplier details, contacts, categories, and notes are saved together.'} backLabel={selectedSupplierId ? 'Back to supplier' : 'Back to suppliers'} onCancel={closeDialog} actions={supplierFormActions} /> : null}
+      {isDialogOpen ? <DocumentFormScaffold dialogTitleId="supplier-form-heading" breakdown={[{ label: 'Contacts', value: String(draft.contacts.length) }, { label: 'Categories', value: String(draft.categories.length) }]} totalLabel={isEditing ? 'Editing' : 'Creating'} totalValue={draft.name.trim() || 'New supplier'} helperText={isConfirmingDelete ? 'Archiving removes this supplier from the active directory.' : 'Supplier details, contacts, categories, and notes are saved together.'} backLabel={selectedSupplierId ? 'Back to supplier' : 'Back to suppliers'} onCancel={closeDialog} actions={supplierFormActions} containedScroll /> : null}
 
       {logoToCrop ? <SquareImageCropper file={logoToCrop} label="Supplier logo" onCancel={() => setLogoToCrop(null)} onConfirm={applyCroppedLogo} /> : null}
       <SuccessToast message={toast} />

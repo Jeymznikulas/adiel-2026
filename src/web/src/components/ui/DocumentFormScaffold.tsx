@@ -20,6 +20,7 @@ type DocumentFormScaffoldProps = {
   helperText?: string
   backLabel?: string
   hideFieldIds?: string[]
+  containedScroll?: boolean
 }
 
 const emptyFieldIds: string[] = []
@@ -37,7 +38,7 @@ function submitWithIntent(form: HTMLFormElement, intent?: string) {
   button.remove()
 }
 
-export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, totalValue, onCancel, actions, helperText, backLabel = 'Back to register', hideFieldIds = emptyFieldIds }: DocumentFormScaffoldProps) {
+export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, totalValue, onCancel, actions, helperText, backLabel = 'Back to register', hideFieldIds = emptyFieldIds, containedScroll = false }: DocumentFormScaffoldProps) {
   const [form, setForm] = useState<HTMLFormElement | null>(null)
   const [backHost, setBackHost] = useState<HTMLDivElement | null>(null)
   const [footerHost, setFooterHost] = useState<HTMLDivElement | null>(null)
@@ -72,6 +73,7 @@ export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, tot
 
     backContainer.dataset.documentFormBack = dialogTitleId
     footerContainer.dataset.documentFormFooter = dialogTitleId
+    if (containedScroll) footerContainer.className = 'shrink-0'
     header.insertBefore(backContainer, header.firstChild)
     nextForm.append(footerContainer)
 
@@ -87,9 +89,13 @@ export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, tot
     page.dataset.documentFormPage = dialogTitleId
     page.setAttribute('role', 'region')
     page.removeAttribute('aria-modal')
-    nextForm.className = 'app-form-page mx-auto flex min-h-[calc(100svh-9rem)] w-full max-w-7xl flex-col overflow-visible rounded-[1.5rem] border border-slate-200 bg-white'
+    nextForm.className = containedScroll
+      ? 'app-form-page mx-auto flex h-[calc(100svh-7rem)] min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white lg:h-[calc(100svh-10rem)]'
+      : 'app-form-page mx-auto flex min-h-[calc(100svh-9rem)] w-full max-w-7xl flex-col overflow-visible rounded-[1.5rem] border border-slate-200 bg-white'
     header.className = `${original.headerClass} sticky top-16 z-10 rounded-t-[1.5rem] bg-white/95 backdrop-blur lg:top-[4.75rem]`
-    scrollArea.className = `${original.scrollClass} !max-h-none flex-1 !overflow-visible !px-4 sm:!px-6 lg:!px-8`
+    scrollArea.className = containedScroll
+      ? `${original.scrollClass} !max-h-none min-h-0 flex-1 !overflow-x-hidden !overflow-y-auto !px-4 sm:!px-6 lg:!px-8`
+      : `${original.scrollClass} !max-h-none flex-1 !overflow-visible !px-4 sm:!px-6 lg:!px-8`
     if (originalFooter && originalFooter !== scrollArea) originalFooter.style.display = 'none'
     if (backdrop) backdrop.style.display = 'none'
     if (closeButton) closeButton.style.display = 'none'
@@ -125,7 +131,7 @@ export function DocumentFormScaffold({ dialogTitleId, breakdown, totalLabel, tot
       backContainer.remove()
       footerContainer.remove()
     }
-  }, [dialogTitleId, hideFieldIds])
+  }, [containedScroll, dialogTitleId, hideFieldIds])
 
   const back = backHost ? createPortal(<Button className="mr-3" size="small" variant="secondary" onClick={onCancel} aria-label={backLabel} leadingIcon={<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>}><span className="hidden sm:inline">{backLabel}</span></Button>, backHost) : null
 
