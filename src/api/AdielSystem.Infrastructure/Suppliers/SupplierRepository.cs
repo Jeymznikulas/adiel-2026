@@ -13,11 +13,11 @@ internal sealed class SupplierRepository(NpgsqlDataSource dataSource) : ISupplie
     public async Task<SupplierSearchResult> SearchAsync(SupplierSearchCriteria criteria, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        var ids = new List<Guid>();
+        var records = new List<SupplierRecord>();
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = $"""
-                select id
+                select id, name, logo_url, supplier_type, status, tin, company_email, company_phone, address, catalog_url, created_at, updated_at, archived_at, version
                 from public.suppliers
                 where {(criteria.ArchivedOnly ? "archived_at is not null" : criteria.IncludeArchived ? "true" : "archived_at is null")}
                   and deleted_at is null
@@ -26,22 +26,65 @@ internal sealed class SupplierRepository(NpgsqlDataSource dataSource) : ISupplie
                 order by {SortExpression(criteria.Sort)}
                 limit @limit offset @offset
                 """;
-            AddSearchParameters(command, criteria);
+            AddSearchParameters(command.Parameters, criteria);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken)) ids.Add(reader.GetGuid(0));
+            while (await reader.ReadAsync(cancellationToken)) records.Add(ReadSupplierRecord(reader));
         }
-        var items = new List<Supplier>();
-        foreach (var id in ids) { var supplier = await GetAsync(connection, null, id, cancellationToken); if (supplier is not null) items.Add(supplier); }
-        var total = await ScalarLongAsync(connection, null, $"""
+
+        var supplierIds = records.Select(record => record.Id).ToArray();
+        await using var batch = new NpgsqlBatch(connection);
+        foreach (var sql in new[]
+        {
+            "select supplier_id,id,name,email,phone,is_primary,sort_order from public.supplier_contacts where supplier_id=any(@supplier_ids) order by supplier_id,sort_order,id",
+            "select supplier_id,category from public.supplier_categories where supplier_id=any(@supplier_ids) order by supplier_id,sort_order,lower(category)",
+            "select supplier_id,id,note from public.supplier_performance_notes where supplier_id=any(@supplier_ids) order by supplier_id,created_at,id"
+        })
+        {
+            var childCommand = new NpgsqlBatchCommand(sql);
+            childCommand.Parameters.Add("supplier_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid).Value = supplierIds;
+            batch.BatchCommands.Add(childCommand);
+        }
+        var countCommand = new NpgsqlBatchCommand($"""
             select count(*) from public.suppliers
             where {(criteria.ArchivedOnly ? "archived_at is not null" : criteria.IncludeArchived ? "true" : "archived_at is null")}
               and deleted_at is null and (@type = '' or supplier_type=@type)
               and (@search_pattern = '' or name ilike @search_pattern escape '\' or company_email ilike @search_pattern escape '\' or company_phone ilike @search_pattern escape '\')
-            """, criteria, cancellationToken);
-        var summary = new SupplierDirectorySummary(
-            await ScalarLongAsync(connection, null, "select count(*) from public.suppliers where archived_at is null and deleted_at is null", cancellationToken),
-            await ScalarLongAsync(connection, null, "select count(*) from public.suppliers where archived_at is null and deleted_at is null and status='Active'", cancellationToken),
-            await ScalarLongAsync(connection, null, "select count(distinct lower(category)) from public.supplier_categories category join public.suppliers supplier on supplier.id=category.supplier_id where supplier.archived_at is null and supplier.deleted_at is null", cancellationToken));
+            """);
+        AddSearchParameters(countCommand.Parameters, criteria);
+        batch.BatchCommands.Add(countCommand);
+        batch.BatchCommands.Add(new NpgsqlBatchCommand("select count(*),count(*) filter (where status='Active'),(select count(distinct lower(category.category)) from public.supplier_categories category join public.suppliers category_supplier on category_supplier.id=category.supplier_id where category_supplier.archived_at is null and category_supplier.deleted_at is null) from public.suppliers where archived_at is null and deleted_at is null"));
+
+        var contacts = new Dictionary<Guid, List<SupplierContact>>();
+        var categories = new Dictionary<Guid, List<string>>();
+        var notes = new Dictionary<Guid, List<SupplierPerformanceNote>>();
+        await using var batchReader = await batch.ExecuteReaderAsync(cancellationToken);
+        while (await batchReader.ReadAsync(cancellationToken))
+        {
+            var supplierId = batchReader.GetGuid(0);
+            if (!contacts.TryGetValue(supplierId, out var entries)) contacts[supplierId] = entries = [];
+            entries.Add(SupplierContact.Create(batchReader.GetGuid(1), batchReader.GetString(2), batchReader.GetString(3), batchReader.GetString(4), batchReader.GetBoolean(5), batchReader.GetInt32(6)));
+        }
+        await batchReader.NextResultAsync(cancellationToken);
+        while (await batchReader.ReadAsync(cancellationToken))
+        {
+            var supplierId = batchReader.GetGuid(0);
+            if (!categories.TryGetValue(supplierId, out var entries)) categories[supplierId] = entries = [];
+            entries.Add(batchReader.GetString(1));
+        }
+        await batchReader.NextResultAsync(cancellationToken);
+        while (await batchReader.ReadAsync(cancellationToken))
+        {
+            var supplierId = batchReader.GetGuid(0);
+            if (!notes.TryGetValue(supplierId, out var entries)) notes[supplierId] = entries = [];
+            entries.Add(SupplierPerformanceNote.Create(batchReader.GetGuid(1), batchReader.GetString(2)));
+        }
+        await batchReader.NextResultAsync(cancellationToken);
+        await batchReader.ReadAsync(cancellationToken);
+        var total = batchReader.GetInt64(0);
+        await batchReader.NextResultAsync(cancellationToken);
+        await batchReader.ReadAsync(cancellationToken);
+        var summary = new SupplierDirectorySummary(batchReader.GetInt64(0), batchReader.GetInt64(1), batchReader.GetInt64(2));
+        var items = records.Select(record => Supplier.Rehydrate(record.Id, record.Name, record.LogoUrl, ParseType(record.Type), ParseStatus(record.Status), record.Tin, record.CompanyEmail, record.CompanyPhone, record.Address, record.CatalogUrl, contacts.GetValueOrDefault(record.Id, []), categories.GetValueOrDefault(record.Id, []), notes.GetValueOrDefault(record.Id, []), record.CreatedAt, record.UpdatedAt, record.ArchivedAt, record.Version)).ToArray();
         return new SupplierSearchResult(items, total, summary);
     }
 
@@ -134,7 +177,7 @@ internal sealed class SupplierRepository(NpgsqlDataSource dataSource) : ISupplie
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken)) return null;
-            supplier = new SupplierRecord(reader.GetGuid(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9), reader.GetFieldValue<DateTimeOffset>(10), reader.GetFieldValue<DateTimeOffset>(11), reader.IsDBNull(12) ? null : reader.GetFieldValue<DateTimeOffset>(12), reader.GetInt64(13));
+            supplier = ReadSupplierRecord(reader);
         }
         var contacts = await ReadContactsAsync(connection, transaction, id, cancellationToken);
         var categories = await ReadCategoriesAsync(connection, transaction, id, cancellationToken);
@@ -143,6 +186,7 @@ internal sealed class SupplierRepository(NpgsqlDataSource dataSource) : ISupplie
     }
 
     private static async Task<Supplier> GetRequiredAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid id, CancellationToken cancellationToken) => await GetAsync(connection, transaction, id, cancellationToken) ?? throw new ResourceNotFoundException($"Supplier '{id}' was not found.");
+    private static SupplierRecord ReadSupplierRecord(NpgsqlDataReader reader) => new(reader.GetGuid(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9), reader.GetFieldValue<DateTimeOffset>(10), reader.GetFieldValue<DateTimeOffset>(11), reader.IsDBNull(12) ? null : reader.GetFieldValue<DateTimeOffset>(12), reader.GetInt64(13));
     private static async Task<IReadOnlyList<SupplierContact>> ReadContactsAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid supplierId, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "select id, name, email, phone, is_primary, sort_order from public.supplier_contacts where supplier_id=@supplier_id order by sort_order, id"; command.Parameters.AddWithValue("supplier_id", supplierId); var results = new List<SupplierContact>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) results.Add(SupplierContact.Create(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetBoolean(4), reader.GetInt32(5))); return results; }
     private static async Task<IReadOnlyList<string>> ReadCategoriesAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid supplierId, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "select category from public.supplier_categories where supplier_id=@supplier_id order by sort_order, lower(category)"; command.Parameters.AddWithValue("supplier_id", supplierId); var results = new List<string>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) results.Add(reader.GetString(0)); return results; }
     private static async Task<IReadOnlyList<SupplierPerformanceNote>> ReadNotesAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid supplierId, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "select id, note from public.supplier_performance_notes where supplier_id=@supplier_id order by created_at, id"; command.Parameters.AddWithValue("supplier_id", supplierId); var results = new List<SupplierPerformanceNote>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken); while (await reader.ReadAsync(cancellationToken)) results.Add(SupplierPerformanceNote.Create(reader.GetGuid(0), reader.GetString(1))); return results; }
@@ -156,9 +200,7 @@ internal sealed class SupplierRepository(NpgsqlDataSource dataSource) : ISupplie
     private static async Task DeleteChildrenAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid supplierId, CancellationToken cancellationToken) { foreach (var table in new[] { "supplier_contacts", "supplier_categories", "supplier_performance_notes" }) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = string.Concat("delete from public.", table, " where supplier_id=@supplier_id"); command.Parameters.AddWithValue("supplier_id", supplierId); await command.ExecuteNonQueryAsync(cancellationToken); } }
     private static void AddSupplierParameters(NpgsqlCommand command, Supplier supplier, Guid actorId) { command.Parameters.AddWithValue("id", supplier.Id); command.Parameters.AddWithValue("name", supplier.Name); command.Parameters.AddWithValue("logo_url", (object?)supplier.LogoPath ?? DBNull.Value); command.Parameters.AddWithValue("supplier_type", DisplayType(supplier.Type)); command.Parameters.AddWithValue("status", supplier.Status.ToString()); command.Parameters.AddWithValue("tin", supplier.Tin); command.Parameters.AddWithValue("company_email", supplier.CompanyEmail); command.Parameters.AddWithValue("company_phone", supplier.CompanyPhone); command.Parameters.AddWithValue("address", supplier.Address); command.Parameters.AddWithValue("catalog_url", (object?)supplier.CatalogUrl ?? DBNull.Value); command.Parameters.AddWithValue("actor_id", actorId); }
     private static async Task InsertAuditAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid id, string action, string entity, string description, CurrentUser actor, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "insert into public.audit_records (record_id, module, action, entity, description, actor_id, actor_name, tone, status) values (@record_id, 'Suppliers', @action, @entity, @description, @actor_id, @actor_name, @tone, @status)"; command.Parameters.AddWithValue("record_id", id); command.Parameters.AddWithValue("action", action); command.Parameters.AddWithValue("entity", entity); command.Parameters.AddWithValue("description", description); command.Parameters.AddWithValue("actor_id", actor.Id); command.Parameters.AddWithValue("actor_name", actor.Username); command.Parameters.AddWithValue("tone", action == "Created" ? "success" : "info"); command.Parameters.AddWithValue("status", "Active"); await command.ExecuteNonQueryAsync(cancellationToken); }
-    private static void AddSearchParameters(NpgsqlCommand command, SupplierSearchCriteria criteria) { command.Parameters.AddWithValue("type", criteria.Type ?? string.Empty); command.Parameters.AddWithValue("search_pattern", string.IsNullOrWhiteSpace(criteria.Search) ? string.Empty : "%" + EscapeLike(criteria.Search) + "%"); command.Parameters.AddWithValue("limit", criteria.PageSize); command.Parameters.AddWithValue("offset", (criteria.Page - 1) * criteria.PageSize); }
-    private static async Task<long> ScalarLongAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql, SupplierSearchCriteria criteria, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = sql; AddSearchParameters(command, criteria); return (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L); }
-    private static async Task<long> ScalarLongAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql, CancellationToken cancellationToken) { await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = sql; return (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L); }
+    private static void AddSearchParameters(NpgsqlParameterCollection parameters, SupplierSearchCriteria criteria) { parameters.AddWithValue("type", criteria.Type ?? string.Empty); parameters.AddWithValue("search_pattern", string.IsNullOrWhiteSpace(criteria.Search) ? string.Empty : "%" + EscapeLike(criteria.Search) + "%"); parameters.AddWithValue("limit", criteria.PageSize); parameters.AddWithValue("offset", (criteria.Page - 1) * criteria.PageSize); }
     private static string SortExpression(string sort) => sort switch { "newest" => "created_at desc, name", "type" => "supplier_type, name", _ => "name" };
     private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
     private static SupplierType ParseType(string value) => value switch { "Contractor" => SupplierType.Contractor, "Distributor" => SupplierType.Distributor, "Manufacturer" => SupplierType.Manufacturer, "Service provider" => SupplierType.ServiceProvider, _ => SupplierType.Other };

@@ -120,7 +120,7 @@ export function QuotationProfile({
         recordNumber={quotation.quotationNumber}
         partyName={quotation.clientName}
         amount={formatPeso(quotation.totalAmount)}
-        createdLabel={`Created ${formatDate(quotation.dateCreated)}`}
+        createdLabel={`Quotation date ${formatDate(quotation.dateCreated)}`}
         status={quotation.status}
         steps={["Draft", "For Approval", "Approved", "SOA Created"]}
         currentStep={quotation.status === "Draft" ? 0 : quotation.status === "Approved" ? 2 : 1}

@@ -64,6 +64,8 @@ type SupplierProfileProps = {
   supplier: SupplierProfileData
   orders: SupplierPurchaseOrder[]
   items: SupplierRegisteredItem[]
+  isLoadingRelatedData?: boolean
+  relatedDataError?: string
   onBack: () => void
   onEdit: () => void
   onOpenPurchaseOrders: () => void
@@ -146,7 +148,7 @@ function ItemPhoto({ item }: { item: SupplierRegisteredItem }) {
   )
 }
 
-function RegisteredItemsSection({ items }: { items: SupplierRegisteredItem[] }) {
+function RegisteredItemsSection({ items, supplierName, isLoading }: { items: SupplierRegisteredItem[]; supplierName: string; isLoading: boolean }) {
   const [search, setSearch] = useState('')
   const [showAll, setShowAll] = useState(false)
   const visibleItems = useMemo(() => {
@@ -173,7 +175,9 @@ function RegisteredItemsSection({ items }: { items: SupplierRegisteredItem[] }) 
               </div>
             </div>
           </div>
-          {items.length > 4 ? (
+          {isLoading ? (
+            <span className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-brand-blue"><span className="size-1.5 animate-pulse rounded-full bg-brand-blue" />Loading catalog</span>
+          ) : items.length > 4 ? (
             <div className="relative w-full lg:w-72">
               <Icon className="pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-slate-300" path="m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" />
               <input className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-3 text-xs font-semibold text-brand-blue outline-none transition placeholder:text-slate-400 focus:border-brand-blue/30 focus:bg-white focus:ring-4 focus:ring-brand-blue/[0.04]" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search supplier items..." aria-label="Search registered supplier items" />
@@ -202,7 +206,11 @@ function RegisteredItemsSection({ items }: { items: SupplierRegisteredItem[] }) 
           </div>
         ) : null}
       </div>
-      {displayedItems.length ? (
+      {isLoading ? (
+        <div className="grid gap-3 bg-slate-50/35 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-3" aria-live="polite" aria-label="Loading supplier items">
+          {Array.from({ length: 3 }, (_, index) => <div className="h-48 animate-pulse rounded-2xl border border-slate-100 bg-[linear-gradient(110deg,#f8fafc_8%,#ffffff_18%,#f8fafc_33%)] bg-[length:200%_100%]" style={{ animationDelay: `${index * 90}ms` }} key={index} />)}
+        </div>
+      ) : displayedItems.length ? (
         <div className="grid gap-3 bg-slate-50/35 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">
           {displayedItems.map((item, index) => {
             const profit = item.sellingPrice - item.rawCost
@@ -266,13 +274,19 @@ function RegisteredItemsSection({ items }: { items: SupplierRegisteredItem[] }) 
           </div>
         </div>
       ) : (
-        <div className="grid min-h-52 place-items-center p-8 text-center">
-          <div>
-            <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-100 text-slate-300">
-              <Icon className="size-5" path="m21 8-9-5-9 5 9 5 9-5M3 12l9 5 9-5" />
+        <div className="relative grid min-h-72 place-items-center overflow-hidden bg-[radial-gradient(circle_at_top,#f5f3ff,transparent_48%),linear-gradient(180deg,#ffffff,#f8fafc)] p-8 text-center sm:p-10">
+          <span className="absolute -right-12 -top-12 size-40 rounded-full border-[24px] border-violet-100/45" aria-hidden="true" />
+          <span className="absolute -bottom-16 -left-16 size-44 rounded-full border-[28px] border-blue-100/40" aria-hidden="true" />
+          <div className="relative max-w-md">
+            <span className="mx-auto grid size-16 place-items-center rounded-2xl border border-violet-100 bg-white text-violet-600 shadow-[0_16px_35px_-22px_rgba(109,40,217,0.55)]">
+              <Icon className="size-7" path="m21 8-9-5-9 5 9 5 9-5M3 12l9 5 9-5M12 13v8M8 17h8" />
             </span>
-            <h4 className="mt-4 text-sm font-bold text-brand-blue">No registered items</h4>
-            <p className="mt-1 max-w-sm text-xs leading-5 text-slate-400">Items assigned to this supplier in the product catalog will appear here automatically.</p>
+            <p className="mt-5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-brand-orange">Supplier catalog</p>
+            <h4 className="mt-2 text-lg font-extrabold tracking-[-0.025em] text-brand-blue">No items currently linked</h4>
+            <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-slate-500">There are currently no items assigned to <strong className="font-bold text-slate-700">{supplierName}</strong>. Assign this supplier to an item or variant and it will appear here automatically.</p>
+            <a className="mt-5 inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(115deg,#00113f,#073078)] px-4 text-xs font-bold text-white shadow-[0_10px_24px_-12px_rgba(0,20,76,0.7)] transition-all hover:-translate-y-0.5 hover:shadow-[0_14px_28px_-12px_rgba(0,20,76,0.6)]" href="/items">
+              Open item catalog <Icon className="size-3.5" path="m9 18 6-6-6-6" />
+            </a>
           </div>
         </div>
       )}
@@ -288,7 +302,7 @@ function RegisteredItemsSection({ items }: { items: SupplierRegisteredItem[] }) 
   )
 }
 
-export function SupplierProfile({ supplier, orders, items, onBack, onEdit, onOpenPurchaseOrders }: SupplierProfileProps) {
+export function SupplierProfile({ supplier, orders, items, isLoadingRelatedData = false, relatedDataError = '', onBack, onEdit, onOpenPurchaseOrders }: SupplierProfileProps) {
   const sortedOrders = [...orders].sort((left, right) => right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt))
   const validOrders = orders.filter((order) => order.status !== 'Cancelled')
   const totalValue = validOrders.reduce((total, order) => total + order.totalAmount, 0)
@@ -310,6 +324,8 @@ export function SupplierProfile({ supplier, orders, items, onBack, onEdit, onOpe
 
   return (
     <div className="space-y-4 animate-[content-enter_320ms_cubic-bezier(0.22,1,0.36,1)]">
+      {isLoadingRelatedData ? <p className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-semibold text-brand-blue" role="status">Loading supplier items and purchase orders...</p> : null}
+      {relatedDataError ? <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-semibold text-red-600" role="alert">{relatedDataError}</p> : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -505,7 +521,7 @@ export function SupplierProfile({ supplier, orders, items, onBack, onEdit, onOpe
         </article>
       </section>
 
-      <RegisteredItemsSection items={items} />
+      <RegisteredItemsSection items={items} supplierName={supplier.name} isLoading={isLoadingRelatedData} />
 
       <section className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white shadow-[0_14px_42px_-32px_rgba(0,20,76,0.38)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">

@@ -139,6 +139,8 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   const [storageError, setStorageError] = useState('')
   const [isLoadingSuppliers, setIsLoadingSuppliers] = useState(true)
   const [hasLoadedSuppliers, setHasLoadedSuppliers] = useState(false)
+  const [isLoadingProfileData, setIsLoadingProfileData] = useState(false)
+  const [profileDataError, setProfileDataError] = useState('')
   const [toast, setToast] = useState('')
   const logoInputRef = useRef<HTMLInputElement>(null)
 
@@ -162,14 +164,26 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
   }, [])
 
   useEffect(() => {
+    if (!selectedSupplierId) {
+      setPurchaseOrders([])
+      setRegisteredItems([])
+      setIsLoadingProfileData(false)
+      setProfileDataError('')
+      return
+    }
     let isActive = true
-    void Promise.all([listPurchaseOrders({ pageSize: 100 }), listItems({ pageSize: 100, sort: 'name' })]).then(([orders, items]) => {
+    setPurchaseOrders([])
+    setRegisteredItems([])
+    setIsLoadingProfileData(true)
+    setProfileDataError('')
+    void Promise.all([listPurchaseOrders({ supplierId: selectedSupplierId, pageSize: 100 }), listItems({ supplierId: selectedSupplierId, pageSize: 100, sort: 'name' })]).then(([orders, items]) => {
       if (!isActive) return
       setPurchaseOrders(orders.items.map((order) => ({ id: order.id, date: order.orderDate, poNumber: order.poNumber, clientName: order.clientName, supplierId: order.supplierId ?? '', supplierName: order.supplierName, contactPerson: order.contactPerson, totalAmount: order.totalAmount, status: order.status, addedToExpenses: false, items: order.lines, createdAt: order.createdAt, updatedAt: order.updatedAt })))
       setRegisteredItems(items.items.map((item) => ({ id: item.id, supplierId: item.supplierId ?? '', photo: item.photo, name: item.name, category: item.category, subcategory: item.subcategory, brand: item.brand, unitOfMeasure: item.unitOfMeasure, productCode: item.productCode, rawCost: item.rawCost, sellingPrice: item.sellingPrice, status: item.status, includesBase: true, variants: item.variants.map((variant) => ({ id: variant.id, supplierId: variant.supplierId ?? item.supplierId ?? '', status: variant.status, rawCost: variant.rawCost, sellingPrice: variant.sellingPrice })) })))
-    }).catch(() => { if (isActive) setStorageError('Supplier purchase orders and items could not be loaded from the API.') })
+    }).catch(() => { if (isActive) setProfileDataError('Supplier purchase orders and items could not be loaded.') })
+      .finally(() => { if (isActive) setIsLoadingProfileData(false) })
     return () => { isActive = false }
-  }, [])
+  }, [selectedSupplierId])
 
   useEffect(() => {
     if (!toast) return
@@ -431,7 +445,7 @@ export function SupplierPage({ currentUsername: _currentUsername }: SupplierPage
     { label: 'Categories', value: categoryCount, dot: 'bg-violet-500', valueColor: 'text-violet-600' },
   ]
 
-  const supplierProfile = selectedSupplier ? <><SupplierProfile supplier={selectedSupplier} orders={selectedSupplierOrders} items={selectedSupplierItems} onBack={closeSupplierProfile} onEdit={() => openEditDialog(selectedSupplier)} onOpenPurchaseOrders={openPurchaseOrders} /><SuccessToast message={toast} /></> : null
+  const supplierProfile = selectedSupplier ? <><SupplierProfile supplier={selectedSupplier} orders={selectedSupplierOrders} items={selectedSupplierItems} isLoadingRelatedData={isLoadingProfileData} relatedDataError={profileDataError} onBack={closeSupplierProfile} onEdit={() => openEditDialog(selectedSupplier)} onOpenPurchaseOrders={openPurchaseOrders} /><SuccessToast message={toast} /></> : null
   if (supplierProfile && !isDialogOpen) return supplierProfile
 
   return (

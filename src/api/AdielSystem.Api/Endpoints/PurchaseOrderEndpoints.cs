@@ -8,7 +8,7 @@ public static class PurchaseOrderEndpoints
     public static RouteGroupBuilder MapPurchaseOrderEndpoints(this RouteGroupBuilder group)
     {
         var orders = group.MapGroup("/purchase-orders").WithTags("Purchase Orders").RequireRateLimiting(SecurityConstants.OwnerRateLimitPolicy);
-        orders.MapGet("/", async (string? search, string? status, bool? archivedOnly, int? page, int? pageSize, PurchaseOrderService service, CancellationToken token) => Results.Ok(await service.ListAsync(search, status, archivedOnly ?? false, page ?? 1, pageSize ?? 100, token))).WithName("ListPurchaseOrders");
+        orders.MapGet("/", async (string? search, Guid? supplierId, string? status, bool? archivedOnly, int? page, int? pageSize, PurchaseOrderService service, CancellationToken token) => Results.Ok(await service.ListAsync(search, supplierId, status, archivedOnly ?? false, page ?? 1, pageSize ?? 100, token))).WithName("ListPurchaseOrders");
         orders.MapGet("/{id:guid}", async (Guid id, PurchaseOrderService service, CancellationToken token) => Results.Ok(await service.GetAsync(id, token))).WithName("GetPurchaseOrder");
         orders.MapPost("/", async (SavePurchaseOrderRequest request, PurchaseOrderService service, CancellationToken token) => { var value = await service.CreateAsync(request, token); return Results.CreatedAtRoute("GetPurchaseOrder", new { id = value.Id }, value); }).WithName("CreatePurchaseOrder");
         orders.MapPut("/{id:guid}", async (Guid id, SavePurchaseOrderRequest request, PurchaseOrderService service, CancellationToken token) => Results.Ok(await service.UpdateAsync(id, request, token))).WithName("UpdatePurchaseOrder");
