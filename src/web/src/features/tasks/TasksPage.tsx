@@ -432,7 +432,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
     { value: 'assignee', label: 'Assignee A-Z', getValue: (task: Task) => task.assignedTo, direction: 'asc' as const },
   ]
   const taskTable = useTableView({ rows: matchingTasks, storageKey: 'tasks.table', sortOptions: taskSortOptions, pageSizeOptions: [15, 30, 60] })
-  const visibleTasks = taskTable.pageRows
+  const visibleTasks = activeFilter === 'All' ? taskTable.sortedRows : taskTable.pageRows
 
   function clearAdvancedFilters() {
     setAssigneeFilter('All')
@@ -613,7 +613,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
               <div className="flex gap-1 overflow-x-auto" role="group" aria-label="Filter tasks by status">
                 {statusFilters.map((filter) => {
                   const count = filter === 'All' ? tasks.length : tasks.filter((task) => task.status === filter).length
-                  return <button className={`shrink-0 rounded-lg px-3 py-2.5 text-xs font-bold transition ${activeFilter === filter ? 'bg-brand-blue text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'}`} type="button" key={filter} onClick={() => setActiveFilter(filter)} aria-pressed={activeFilter === filter}>{filter}<span className={`ml-1.5 ${activeFilter === filter ? 'text-white/60' : 'text-slate-400'}`}>{count}</span></button>
+                  return <button className={`shrink-0 rounded-lg px-3 py-2.5 text-xs font-bold transition ${activeFilter === filter ? 'bg-brand-blue text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'}`} type="button" key={filter} onClick={() => { setActiveFilter(filter); setCollapsedGroups(new Set()) }} aria-pressed={activeFilter === filter}>{filter}<span className={`ml-1.5 ${activeFilter === filter ? 'text-white/60' : 'text-slate-400'}`}>{count}</span></button>
                 })}
               </div>
             </div>
@@ -646,7 +646,7 @@ export function TasksPage({ currentUsername }: TasksPageProps) {
         </div>
 
         {isLoadingTasks ? <RecordListSkeleton variant={activeView === 'Calendar' ? 'cards' : 'table'} rows={5} columns={7} /> : !hasLoadedTasks ? null : activeView === 'Calendar' ? <TasksCalendar tasks={matchingTasks} onTaskSelect={openTaskDetails} /> : matchingTasks.length ? (<>
-          <TableControls tableId="tasks-table" storageKey="tasks.table" columns={[{ index: 1, label: 'Task', required: true }, { index: 2, label: 'Assignee' }, { index: 3, label: 'Status' }, { index: 4, label: 'Priority' }, { index: 5, label: 'Due date' }, { index: 6, label: 'Assigned by' }, { index: 7, label: 'Details', required: true }]} sortKey={taskTable.sortKey} sortOptions={taskSortOptions} onSortChange={taskTable.setSortKey} page={taskTable.page} pageCount={taskTable.pageCount} pageSize={taskTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={taskTable.setPage} onPageSizeChange={taskTable.setPageSize} total={taskTable.total} />
+          <TableControls tableId="tasks-table" storageKey="tasks.table" columns={[{ index: 1, label: 'Task', required: true }, { index: 2, label: 'Assignee' }, { index: 3, label: 'Status' }, { index: 4, label: 'Priority' }, { index: 5, label: 'Due date' }, { index: 6, label: 'Assigned by' }, { index: 7, label: 'Details', required: true }]} sortKey={taskTable.sortKey} sortOptions={taskSortOptions} onSortChange={taskTable.setSortKey} page={taskTable.page} pageCount={taskTable.pageCount} pageSize={taskTable.pageSize} pageSizeOptions={[15, 30, 60]} onPageChange={taskTable.setPage} onPageSizeChange={taskTable.setPageSize} total={taskTable.total} paginate={activeFilter !== 'All'} />
           <div className="overflow-x-auto animate-[view-swap_340ms_cubic-bezier(0.22,1,0.36,1)] [will-change:transform,opacity]">
             <table className="w-full min-w-[1120px] table-fixed border-collapse text-left">
               <caption className="sr-only">Tasks grouped by status</caption>
