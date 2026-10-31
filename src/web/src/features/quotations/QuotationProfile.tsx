@@ -5,6 +5,7 @@ import { WorkflowHeader } from "../../components/ui/WorkflowHeader";
 import { PrivateImage } from "../../components/ui/PrivateImage";
 import { createQuotationPdfBlob } from "../../services/pdf/documentPdf";
 import { loadCompanyProfile } from "../settings/settingsStorage";
+import { formatQuotationDiscountLabel } from "./QuotationPricingDialog";
 import type { Quotation, QuotationStatus } from "./QuotationsPage";
 
 type QuotationProfileProps = {
@@ -95,8 +96,12 @@ export function QuotationProfile({
     (total, line) => total + line.quantity * line.unitCost,
     0,
   );
-  const margin = quotation.subtotalAmount
-    ? (quotation.estimatedProfit / quotation.subtotalAmount) * 100
+  const netSubtotal = Math.max(
+    0,
+    quotation.subtotalAmount - quotation.discountAmount,
+  );
+  const margin = netSubtotal
+    ? (quotation.estimatedProfit / netSubtotal) * 100
     : 0;
   const totalFees = quotation.otherCharges.reduce(
     (total, charge) => total + charge.amount,
@@ -233,6 +238,35 @@ export function QuotationProfile({
                 {formatPeso(quotation.subtotalAmount)}
               </strong>
             </div>
+            {quotation.discountAmount > 0 ? (
+              <>
+                <div className="flex justify-between gap-4 text-emerald-300">
+                  <span className="truncate">
+                    {formatQuotationDiscountLabel(
+                      quotation.discountType,
+                      quotation.discountValue,
+                      quotation.discountLabel,
+                    )}
+                  </span>
+                  <strong className="shrink-0 tabular-nums text-emerald-300">
+                    −{formatPeso(quotation.discountAmount)}
+                  </strong>
+                </div>
+                <div className="flex justify-between gap-4 border-t border-white/10 pt-2.5 text-white/80">
+                  <span>Net subtotal (before VAT)</span>
+                  <strong className="tabular-nums text-white">
+                    {formatPeso(netSubtotal)}
+                  </strong>
+                </div>
+              </>
+            ) : (
+              <div className="flex justify-between gap-4 text-white/30">
+                <span>Discount</span>
+                <strong className="tabular-nums text-white">
+                  {formatPeso(0)}
+                </strong>
+              </div>
+            )}
             <div
               className={`flex justify-between gap-4 ${quotation.vatEnabled ? "text-white/65" : "text-white/30"}`}
             >
@@ -388,6 +422,20 @@ export function QuotationProfile({
                 {formatPeso(totalFees)}
               </dd>
             </div>
+            {quotation.discountAmount > 0 ? (
+              <div className="col-span-2 flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/45 px-3.5 py-3">
+                <dt className="text-[9px] font-bold uppercase tracking-[0.08em] text-emerald-700">
+                  {formatQuotationDiscountLabel(
+                    quotation.discountType,
+                    quotation.discountValue,
+                    quotation.discountLabel,
+                  )}
+                </dt>
+                <dd className="text-sm font-extrabold tabular-nums text-emerald-700">
+                  −{formatPeso(quotation.discountAmount)}
+                </dd>
+              </div>
+            ) : null}
           </dl>
         </section>
         <section className="rounded-[1.5rem] border border-slate-200/80 bg-white p-5 shadow-[0_14px_40px_-32px_rgba(0,20,76,0.35)]">

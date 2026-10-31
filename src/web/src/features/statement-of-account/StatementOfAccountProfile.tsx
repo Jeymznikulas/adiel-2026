@@ -422,7 +422,7 @@ export function StatementOfAccountProfile({
               </p>
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
                 <span className="text-[9px] font-bold text-slate-400">
-                  {quotation.items.length} items
+                  {quotation.items.length} items{quotation.discountAmount && quotation.discountAmount > 0 ? ` · −${formatPeso(quotation.discountAmount)} discount` : ""}
                 </span>
                 <span className="text-[9px] font-bold text-slate-400">
                   {quotation.vatEnabled ? "VAT included" : "No VAT"}

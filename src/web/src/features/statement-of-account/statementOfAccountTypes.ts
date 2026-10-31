@@ -41,6 +41,10 @@ export type StatementQuotation = {
   subject: string
   projectLocation: string
   subtotalAmount: number
+  discountType?: 'Percentage' | 'Fixed amount'
+  discountValue?: number
+  discountLabel?: string
+  discountAmount?: number
   vatEnabled: boolean
   vatAmount: number
   otherCharges: Array<{ id: string; label: string; amount: number }>

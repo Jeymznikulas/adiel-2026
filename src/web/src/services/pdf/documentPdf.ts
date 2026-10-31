@@ -1,4 +1,5 @@
 import type { jsPDF as JsPdfDocument } from "jspdf";
+import { formatQuotationDiscountLabel } from "../../features/quotations/QuotationPricingDialog";
 import type { Quotation } from "../../features/quotations/QuotationsPage";
 import type {
   StatementOfAccount,
@@ -682,6 +683,23 @@ export async function createQuotationPdfBlob(
   );
   totals(context, [
     { label: "Subtotal", value: quotation.subtotalAmount },
+    ...(quotation.discountAmount > 0
+      ? [
+          {
+            label: formatQuotationDiscountLabel(
+              quotation.discountType,
+              quotation.discountValue,
+              quotation.discountLabel,
+            ),
+            value: quotation.discountAmount,
+            negative: true,
+          },
+          {
+            label: "Net subtotal",
+            value: Math.max(0, quotation.subtotalAmount - quotation.discountAmount),
+          },
+        ]
+      : []),
     ...(quotation.vatEnabled
       ? [{ label: "VAT (12%)", value: quotation.vatAmount }]
       : []),
